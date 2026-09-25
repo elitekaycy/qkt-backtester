@@ -1,5 +1,5 @@
 #!/bin/sh
-# Checks the two mounts, seeds a sample project and (only into an EMPTY data store) synthetic demo data, then runs the studio.
+# Checks the two mounts, creates synthetic demo data in an EMPTY data store, then runs the studio (the server seeds an empty workspace).
 set -e
 mkdir -p "${HOME:-/tmp/home}"
 
@@ -26,11 +26,6 @@ if [ ! -d /data ]; then mkdir -p /data 2>/dev/null || true; fi
 DATA_WRITABLE=1
 [ -w /data ] || DATA_WRITABLE=0
 [ "$DATA_WRITABLE" = 1 ] || say "note: /data is read-only or not writable; 'Build bars' and 'Fetch' will fail. Use it read-only only with a pre-built store."
-
-if [ -z "$(ls -A /workspace 2>/dev/null)" ]; then
-  cp -R /opt/sample-workspace/. /workspace/
-  say "seeded /workspace with the sample project (qkt.config.yaml + two demo strategies)"
-fi
 
 if [ "${QKT_DEMO:-1}" = 1 ] && [ "$DATA_WRITABLE" = 1 ] && [ -z "$(ls -A /data 2>/dev/null)" ]; then
   say "empty data store: creating SYNTHETIC demo data (DEMOUSD, a seeded random walk, not market data)"

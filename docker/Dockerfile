@@ -28,7 +28,6 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=build /out/server /app/server
 COPY --from=build /src/packages/web/dist /app/web
 COPY tools /app/tools
-COPY sample-workspace /opt/sample-workspace
 COPY docker/entrypoint.sh /usr/local/bin/studio-entrypoint
 RUN chmod +x /usr/local/bin/studio-entrypoint && mkdir -p /workspace /data /tmp/home && chmod 1777 /tmp/home
 
