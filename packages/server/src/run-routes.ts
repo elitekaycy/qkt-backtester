@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  analyze, filterTrips, isTerminal, MC_MAX_SIMS, overlayTrips, queryTrips, runMonteCarlo, type McMethod, type RoundTrip, type TripQuery, type TripSort,
+  analyze, filterTrips, parseStrategyInfo, isTerminal, MC_MAX_SIMS, overlayTrips, queryTrips, runMonteCarlo, type McMethod, type RoundTrip, type TripQuery, type TripSort,
 } from "@qkt-studio/core";
 import { resolveInJail } from "./jail.js";
 import { Runner, RunRequestError, type RunRequest } from "./runner.js";
@@ -13,7 +13,7 @@ const MIME: Record<string, string> = {
   ".json": "application/json", ".html": "text/html; charset=utf-8", ".csv": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
   ".txt": "text/plain; charset=utf-8", ".qkt": "text/plain; charset=utf-8", ".yaml": "text/plain; charset=utf-8", ".jsonl": "text/plain; charset=utf-8", ".ndjson": "text/plain; charset=utf-8",
 };
-const DERIVED = new Set(["summary", "monthly", "integrity", "equity", "meta"]);
+const DERIVED = new Set(["summary", "monthly", "integrity", "equity", "meta", "strategies", "book", "equity-by-strategy"]);
 
 const num = (v: unknown): number | undefined => (v === undefined || v === "" ? undefined : Number.isFinite(Number(v)) ? Number(v) : undefined);
 const time = (v: unknown): number | undefined => {
@@ -29,7 +29,7 @@ export function parseTripQuery(q: Record<string, string | undefined>): TripQuery
   return {
     side: q.side === "long" || q.side === "short" ? q.side : undefined,
     outcome: (["win", "loss", "breakeven", "open", "closed"] as const).find((o) => o === q.outcome),
-    symbol: q.symbol || undefined, strategy: q.strategy || undefined,
+    symbol: q.symbol || undefined, strategy: q.strategy || undefined, strategies: q.strategies !== undefined ? q.strategies.split(",").filter(Boolean) : undefined,
     fromTs: time(q.from), toTs: time(q.to), minHoldMs: num(q.minHold), maxHoldMs: num(q.maxHold), minPnl: num(q.minPnl), maxPnl: num(q.maxPnl),
     exit: (["stop", "target", "signal", "open"] as const).find((x) => x === q.exit),
     exitFromTs: time(q.exitFrom), exitToTs: time(q.exitTo), minQty: num(q.minQty), maxQty: num(q.maxQty), id: num(q.id), minR: num(q.minR), maxR: num(q.maxR), weekday: num(q.weekday), hour: num(q.hour), day: /^\d{4}-\d{2}-\d{2}$/.test(q.day ?? "") ? q.day : undefined,
@@ -51,9 +51,29 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
   };
   const notFound = (reply: FastifyReply, what = "not found") => reply.code(404).send({ error: what });
 
-  app.get<{ Querystring: { strategy?: string; limit?: string } }>("/api/runs", async (req) => ({
-    runs: runner.list(req.query.strategy, num(req.query.limit)),
-  }));
+  // Portfolio badge for the Runs list, derived from the run's own files (no index migration): the strategies its meta lists, else the
+  // header of the strategy source it ran. A finished run never changes, so the answer is cached per id.
+  const kindCache = new Map<string, { kind: "strategy" | "portfolio"; members: number }>();
+  const kindOf = async (id: string, strategy: string, done: boolean) => {
+    const hit = kindCache.get(id);
+    if (hit) return hit;
+    let out: { kind: "strategy" | "portfolio"; members: number } = { kind: "strategy", members: 1 };
+    try {
+      const meta = JSON.parse(await fs.readFile(path.join(runner.runDir(id), "derived", "meta.json"), "utf8")) as { strategies?: string[] };
+      if ((meta.strategies?.length ?? 0) > 1) out = { kind: "portfolio", members: meta.strategies!.length };
+    } catch {
+      const src = await fs.readFile(path.join(runner.runDir(id), "source", strategy), "utf8").catch(() => "");
+      const info = parseStrategyInfo(src);
+      if (info.kind === "portfolio") out = { kind: "portfolio", members: info.imports.length };
+    }
+    if (done) kindCache.set(id, out);
+    return out;
+  };
+
+  app.get<{ Querystring: { strategy?: string; limit?: string } }>("/api/runs", async (req) => {
+    const rows = runner.list(req.query.strategy, num(req.query.limit));
+    return { runs: await Promise.all(rows.map(async (r) => ({ ...r, ...(await kindOf(r.id, r.strategy, r.status === "done" || r.status === "failed")) }))) };
+  });
 
   app.post<{ Body: RunRequest }>("/api/runs", async (req, reply) => {
     const r = await runner.submit(req.body);

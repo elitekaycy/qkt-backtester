@@ -6,6 +6,7 @@ import {
 } from "@qkt-studio/core";
 import type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfReport, TickReport } from "@qkt-studio/core";
 import { barCountOf } from "./barfile.js";
+import type { ResolvedStrategy } from "./portfolio.js";
 export type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfReport, TickReport } from "@qkt-studio/core";
 
 const DAY = 86_400_000;
@@ -278,23 +279,36 @@ function mode(streams: StreamDecl[], pick: (s: StreamDecl) => { ranges: DayRange
   return { runnable: ranges.length > 0, ranges, longest: longest(ranges), blocked };
 }
 
-export function readinessFor(report: ScanReport, strategy: string, source: string): Readiness {
+export function readinessFor(report: ScanReport, strategy: string, source: string, resolved?: ResolvedStrategy): Readiness {
   const info = parseStrategyInfo(source);
-  const streams = uniqueStreams(info.streams);
+  // a portfolio reads its children's streams too: use the union, with the imports followed
+  const streams = uniqueStreams(resolved && resolved.streams.length ? resolved.streams : info.streams);
   const bySymbol = new Map(report.symbols.map((s) => [s.symbol, s]));
-  const bars = mode(streams, (s) => {
+  const barsPick = (s: StreamDecl) => {
     const sym = bySymbol.get(s.symbol);
-    if (!sym) return { blocked: "symbol is not in the data source", fix: "fetch" };
+    if (!sym) return { blocked: "symbol is not in the data source", fix: "fetch" as const };
     const tf = sym.bars.find((b) => b.broker === s.broker && b.tf === s.tf && b.files > 0);
     if (tf) return { ranges: tf.usable };
-    return sym.ticks ? { blocked: `no ${s.tf} bars built for ${s.broker}`, fix: "build-bars" } : { blocked: `no ${s.tf} bars for ${s.broker}`, fix: "fetch" };
-  });
-  const ticks = mode(streams, (s) => {
+    return sym.ticks ? { blocked: `no ${s.tf} bars built for ${s.broker}`, fix: "build-bars" as const } : { blocked: `no ${s.tf} bars for ${s.broker}`, fix: "fetch" as const };
+  };
+  const ticksPick = (s: StreamDecl) => {
     const sym = bySymbol.get(s.symbol);
-    if (!sym?.ticks) return { blocked: sym ? "no tick files for this symbol" : "symbol is not in the data source", fix: "fetch" };
+    if (!sym?.ticks) return { blocked: sym ? "no tick files for this symbol" : "symbol is not in the data source", fix: "fetch" as const };
     return { ranges: sym.ticks.usable };
-  });
-  return { strategy, kind: info.kind, streams, bars, ticks };
+  };
+  const bars = mode(streams, barsPick), ticks = mode(streams, ticksPick);
+  const out: Readiness = { strategy, kind: info.kind, streams, bars, ticks };
+  if (resolved && resolved.members.length) {
+    // which children need each blocked stream, and whether each child could run alone
+    const key = (s: StreamDecl) => `${s.broker}:${s.symbol} ${s.tf}`;
+    for (const m of [bars, ticks]) for (const b of m.blocked) b.members = resolved.members.filter((x) => x.streams.some((s) => key(s) === b.stream)).map((x) => x.alias);
+    out.members = resolved.members.map((x) => ({
+      alias: x.alias, rel: x.rel, exists: x.exists, hold: x.hold, streams: uniqueStreams(x.streams),
+      bars: x.exists && x.streams.length > 0 && mode(uniqueStreams(x.streams), barsPick).runnable,
+      ticks: x.exists && x.streams.length > 0 && mode(uniqueStreams(x.streams), ticksPick).runnable,
+    }));
+  }
+  return out;
 }
 
 /** `.qkt` files under the workspace (skipping runs and studio state), for the readiness list. */

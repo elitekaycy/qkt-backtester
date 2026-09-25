@@ -44,7 +44,9 @@ export interface ModeReadiness {
   /** Windows (exclusive end) where every stream the strategy reads is complete. */
   ranges: DayRange[];
   longest: DayRange | null;
-  blocked: Array<{ stream: string; reason: string; fix?: "build-bars" | "fetch" }>;
+  blocked: Array<{ stream: string; reason: string; fix?: "build-bars" | "fetch"; /** Portfolio children that read this stream. */ members?: string[] }>;
 }
 
-export interface Readiness { strategy: string; kind: string; streams: StreamDecl[]; bars: ModeReadiness; ticks: ModeReadiness }
+/** One child of a portfolio and whether it could run on its own data. */
+export interface MemberReadiness { alias: string; rel: string | null; exists: boolean; hold: boolean; bars: boolean; ticks: boolean; streams: StreamDecl[] }
+export interface Readiness { strategy: string; kind: string; streams: StreamDecl[]; bars: ModeReadiness; ticks: ModeReadiness; members?: MemberReadiness[] }

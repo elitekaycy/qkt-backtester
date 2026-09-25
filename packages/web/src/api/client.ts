@@ -125,7 +125,7 @@ export const api = {
 
 function tripParams(q: TripQuery): Record<string, unknown> {
   return {
-    side: q.side, outcome: q.outcome, symbol: q.symbol, strategy: q.strategy, from: q.fromTs, to: q.toTs, minHold: q.minHoldMs, maxHold: q.maxHoldMs,
+    side: q.side, outcome: q.outcome, symbol: q.symbol, strategy: q.strategy, from: q.fromTs, to: q.toTs, strategies: q.strategies === undefined ? undefined : q.strategies.join(","), minHold: q.minHoldMs, maxHold: q.maxHoldMs,
     exitFrom: q.exitFromTs, exitTo: q.exitToTs, minQty: q.minQty, maxQty: q.maxQty, id: q.id, minPnl: q.minPnl, maxPnl: q.maxPnl, exit: q.exit, minR: q.minR, maxR: q.maxR, weekday: q.weekday, hour: q.hour, day: q.day, sort: q.sort, dir: q.dir, offset: q.offset, limit: q.limit,
   };
 }
