@@ -1,0 +1,16 @@
+STRATEGY xau_ema_p VERSION 1
+
+SYMBOLS
+    gold = BACKTEST:XAUUSD EVERY 15m
+
+PARAM fast = 9
+PARAM slow = 21
+
+RULES
+    WHEN ema(gold.close, fast) CROSSES ABOVE ema(gold.close, slow)
+     AND POSITION.gold = 0
+    THEN BUY gold SIZING 0.1 ; LOG "long entry"
+
+    WHEN ema(gold.close, fast) CROSSES BELOW ema(gold.close, slow)
+     AND POSITION.gold > 0
+    THEN CLOSE gold ; LOG "exit"
