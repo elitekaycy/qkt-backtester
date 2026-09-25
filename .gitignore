@@ -6,3 +6,8 @@ probes/ui-spike/node_modules/
 probes/ui-spike/dist/
 runs/
 .qkt-studio/
+workspace/
+.env
+qkt-data/
+coverage/
+*.tsbuildinfo
