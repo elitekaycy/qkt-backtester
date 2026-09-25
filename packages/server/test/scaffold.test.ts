@@ -59,3 +59,14 @@ describe.skipIf(!haveQkt || !haveData)("a scaffolded workspace runs out of the b
     expect(s.missing).toEqual([]);
   });
 });
+
+describe("scaffold endpoint defaults", () => {
+  it("never creates sample strategies unless asked for by name", async () => {
+    const ws = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sc3-")));
+    const studio = await createStudio({ workspace: ws, dataRoot: os.tmpdir(), defaultDataRoot: os.tmpdir(), qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 1, terminal: "restricted" });
+    const r = (await studio.app.inject({ method: "POST", url: "/api/workspace/scaffold", payload: {} })).json();
+    expect(r.created).not.toContain("strategies/ema_cross.qkt");
+    expect(existsSync(path.join(ws, "strategies"))).toBe(false);
+    await studio.app.close(); rmSync(ws, { recursive: true, force: true });
+  });
+});

@@ -79,7 +79,8 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
   /** Create the standard project files that are missing (never overwrites). `files` limits which. */
   app.post<{ Body: { files?: ScaffoldFile[] } }>("/api/workspace/scaffold", async (req) => {
     const scan = await scanCached(cfg.dataRoot).catch(() => null);
-    const files = Array.isArray(req.body?.files) ? req.body.files.filter((f) => [".env", ".env.example", ".gitignore", "qkt.config.yaml", "instruments.yaml", "strategies"].includes(f)) : undefined;
+    // sample strategies are only ever created when asked for by name: "add the missing project files" must not litter a workspace with them
+    const files = Array.isArray(req.body?.files) ? req.body.files.filter((f) => [".env", ".env.example", ".gitignore", "qkt.config.yaml", "instruments.yaml", "strategies"].includes(f)) : ["qkt.config.yaml", "instruments.yaml", ".env", ".env.example", ".gitignore"] as ScaffoldFile[];
     const r = await scaffoldWorkspace(cfg.workspace, scan, files);
     return { ...r, missing: await missingFiles(cfg.workspace) };
   });

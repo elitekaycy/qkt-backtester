@@ -49,7 +49,9 @@ ok("vim still on after reload", /NORMAL/.test(await mode()), await mode());
 const dbg = async (l) => console.log("  ~", l, await mode(), await p.evaluate(() => document.activeElement?.className.slice(0,25)));
 await p.evaluate(() => window.__qktEditor.focus()); await sleep(200); await dbg("before esc"); await p.keyboard.press("Escape"); await dbg("after esc"); await p.keyboard.type("gg", { delay: 40 }); await dbg("after gg"); await p.keyboard.type("i", { delay: 40 }); await dbg("after i"); await p.keyboard.type("VIMOKZ ", { delay: 30 }); await sleep(300);
 ok("vim insert works after reload", (await text()).includes("VIMOKZ"), (await mode()) + " | " + JSON.stringify((await text()).slice(0, 90)) + " | focus=" + (await p.evaluate(() => document.activeElement?.className)));
-await p.keyboard.press("Escape"); let un = 0; while ((await text()).includes("VIMOKZ") && un < 20) { await p.keyboard.type("u", { delay: 30 }); await sleep(100); un++; }
+await p.keyboard.press("Escape"); await sleep(150);
+ok("a single Esc leaves insert mode", /NORMAL/.test(await mode()), await mode());
+let un = 0; while ((await text()).includes("VIMOKZ") && un < 20) { await p.keyboard.type("u", { delay: 30 }); await sleep(100); un++; }
 ok("vim u undoes", !(await text()).includes("VIMOKZ"), String(un));
 await key(["Control"], "r"); await sleep(200);
 ok("vim Ctrl+R redoes", (await text()).includes("VIMOKZ"));

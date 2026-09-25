@@ -76,7 +76,7 @@ export function FilesSection() {
   async function addMissing() {
     setAdding(true);
     try {
-      const r = await api.scaffold(); setMissing(r.missing);
+      const r = await api.scaffold([...missing, ...(missing.includes(".env") ? [".env.example", ".gitignore"] : [])]); setMissing(r.missing);
       await store().refreshTree(""); await store().refreshTree("strategies");
       store().toast("info", r.created.length ? `Added ${r.created.join(", ")}` : "Nothing to add");
       const first = ["qkt.config.yaml", "instruments.yaml"].find((f) => r.created.includes(f));

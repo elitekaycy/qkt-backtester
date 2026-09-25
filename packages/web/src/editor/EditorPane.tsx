@@ -65,13 +65,14 @@ export function EditorPane() {
       ed.addCommand(C | K.Period, () => void store.getState().killAll());
       ed.addCommand(C | K.Backquote, () => ui().set({ dockOpen: !ui().dockOpen }));
       ([K.Digit1, K.Digit2, K.Digit3] as const).forEach((k, i) => ed.addCommand(C | k, () => ui().set({ section: (["files", "data", "runs"] as const)[i]! })));
-      // Esc closes an open completion/parameter popup first and stays in the mode you were in; vim only sees the Esc that follows.
+      // Esc with a completion popup open: in vim mode it closes the popup AND leaves insert mode in the same press (one Esc is all a
+      // vim user should ever need); without vim it only closes the popup, as in any Monaco editor.
       host.current?.addEventListener("keydown", (e: KeyboardEvent) => {
         if (e.key !== "Escape" || e.defaultPrevented) return;
-        const popup = host.current?.querySelector(".suggest-widget.visible, .parameter-hints-widget.visible, .monaco-hover:not(.hidden)");
+        const popup = host.current?.querySelector(".suggest-widget.visible, .parameter-hints-widget.visible"); // not the hover: its element always exists
         if (!popup) return;
-        e.stopPropagation(); e.preventDefault();
         ed.trigger("keyboard", "hideSuggestWidget", null); ed.trigger("keyboard", "closeParameterHints", null);
+        if (!useUi.getState().vim) { e.stopPropagation(); e.preventDefault(); }
       }, true);
       ed.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, col: e.position.column }));
       setBooted(true);

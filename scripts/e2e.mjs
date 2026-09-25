@@ -40,16 +40,19 @@ await ctrl("k"); await sleep(300); await page.keyboard.type("vim"); await sleep(
 await page.click(".monaco-editor .view-lines"); await sleep(300);
 let st = await page.evaluate(() => document.querySelector(".vim-status")?.textContent ?? "");
 ok("vim status shows NORMAL", /NORMAL/i.test(st) || st === "" ? /NORMAL/i.test(st) : false, st);
-const before = await page.evaluate(() => document.querySelector(".monaco-editor .view-lines")?.textContent?.length);
+const original = await page.evaluate(() => window.__qktEditor.getModel().getValue()); // auto-save writes edits to disk: restore the file at the end so the run is repeatable
+const before = original.length;
 await page.keyboard.press("i"); await page.keyboard.type("// hi\n"); await page.keyboard.press("Escape"); await sleep(300);
 st = await page.evaluate(() => document.querySelector(".vim-status")?.textContent ?? "");
-const after = await page.evaluate(() => document.querySelector(".monaco-editor .view-lines")?.textContent?.length);
+const after = await page.evaluate(() => window.__qktEditor.getModel().getValue().length);
 ok("vim insert typed text", after > before, `${before}->${after}`);
 ok("vim back to NORMAL", /NORMAL/i.test(st), st);
-await page.keyboard.type("dd"); await sleep(300);
-const after2 = await page.evaluate(() => document.querySelector(".monaco-editor .view-lines")?.textContent?.length);
-ok("vim dd deletes line", after2 < after, `${after}->${after2}`);
+const lc = () => page.evaluate(() => window.__qktEditor.getModel().getLineCount());
+const l0 = await lc(); await page.keyboard.type("dd"); await sleep(300);
+const l1 = await lc();
+ok("vim dd deletes a line", l1 === l0 - 1, `${l0}->${l1}`);
 await page.evaluate(() => { const ed = window.__qktEditor; ed?.getModel()?.setValue(ed.getModel().getValue()); });
+await page.evaluate((t) => window.__qktEditor.getModel().setValue(t), original); await sleep(2500);
 // data section
 await ctrl("2"); await sleep(1500);
 ok("data section shows symbols", (await page.$$(".sym-head")).length > 0);

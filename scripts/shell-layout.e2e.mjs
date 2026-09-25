@@ -14,12 +14,18 @@ const click = (label) => p.evaluate((l) => document.querySelector(`button[aria-l
 const dbl = async (label) => { await click(label); await click(label); };
 
 // 1. every pane: maximize -> others hidden -> Esc restores
-for (const [pane, label, expectHidden] of [["sidebar", "Full screen sidebar", ".main"], ["editor", "Full screen editor", ".pv-wrap"], ["chart", "Full screen chart", ".editor-col"], ["output panel", "Full screen output panel", ".pv-wrap"]]) {
+for (const [pane, label, expectHidden] of [["sidebar", "Full screen sidebar", ".app-main"], ["editor", "Full screen editor", ".pv-wrap"], ["chart", "Full screen chart", ".editor-col"], ["output panel", "Full screen output panel", ".pv-wrap"]]) {
   if (!(await p.$(`button[aria-label="${label}"]`))) { ok(`${pane}: full-screen button exists`, false, label); continue; }
   await click(label); await sleep(300);
   ok(`${pane}: maximized hides the rest`, (await rect(expectHidden))?.hidden === true);
   await p.evaluate(() => document.activeElement?.blur?.()); await p.keyboard.press("Escape"); await sleep(300);
-  ok(`${pane}: Esc restores`, (await rect(".main"))?.hidden === false && (await rect(".pv-wrap"))?.hidden === false && (await rect(".editor-col"))?.hidden === false);
+  if (pane === "editor") { // Esc must never take you out of a full-screen editor (vim users press it constantly)
+    ok("editor: Esc keeps it full screen and the cursor in it", (await rect(".pv-wrap"))?.hidden === true && (await p.evaluate(() => !!document.activeElement?.closest?.(".monaco-editor"))));
+    await click("Restore editor"); await sleep(300);
+    ok("editor: the Restore button brings the layout back", (await rect(".pv-wrap"))?.hidden === false);
+    continue;
+  }
+  ok(`${pane}: Esc restores`, (await rect(".app-main"))?.hidden === false && (await rect(".pv-wrap"))?.hidden === false && (await rect(".editor-col"))?.hidden === false);
 }
 // 2. double click every expand icon, also with the terminal open: no errors, always restored to a valid layout
 await p.evaluate(() => [...document.querySelectorAll(".dock-tab")].find((t) => /Terminal/.test(t.textContent)).click()); await sleep(1500);
