@@ -1,5 +1,5 @@
 import type { BarCols } from "@qkt-studio/core";
-import type { RunJson, Summary, RoundTrip, IntegrityReport, McResult, MonthRow, Diagnostic, TripQuery, RunRequest } from "./types.js";
+import type { RunJson, Summary, RoundTrip, IntegrityReport, McResult, MonthRow, Diagnostic, TripQuery, RunRequest, Analytics, ScanReport, Readiness , SymbolReport } from "./types.js";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body?: unknown) { super(message); }
@@ -43,13 +43,16 @@ export interface TreeEntry { name: string; path: string; type: "file" | "dir"; s
 export interface Info { workspace: string; dataRoot: string; terminal: "shell" | "restricted"; tokenRequired: boolean; hasConfig: boolean; maxParallel: number }
 export interface RunRow { id: string; hash: string; strategy: string; status: string; tier: string; from_d: string; to_d: string; created_at: string; seq: number; total_pnl: number | null; sharpe: number | null; trades: number | null; win_rate: number | null; duration_ms: number | null }
 export interface TripPage { total: number; offset: number; limit: number; rows: RoundTrip[] }
+export interface SymbolPref { source?: string; from?: string; to?: string }
+export interface SettingsView { sources: string[]; symbolPrefs: Record<string, SymbolPref>; dataRoot: string; defaultDataRoot: string; fromSettings: boolean; canChangeAnywhere: boolean; openRoots: string[]; looksLikeStore: boolean; exists: boolean }
+export interface DirList { path: string; parent: string | null; store: boolean; dirs: Array<{ name: string; store: boolean }> }
 export interface Overlay { total: number; truncated: boolean; rows: RoundTrip[] }
 export interface Equity { ts: number[]; equity: number[]; drawdown: number[] }
 export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string }>; strategies: string[]; fills: number; trips: number; qktVersion: string }
 export interface DayCoverage { day: string; bars: number; status: "ok" | "thin" | "closed" | "missing" }
 export interface Coverage { broker: string; symbol: string; tf: string; days: DayCoverage[]; summary: Record<string, number> }
 export interface SymbolRow { broker: string; symbol: string; timeframes: string[] }
-export interface Job { id: string; kind: string; status: "running" | "done" | "failed" | "cancelled"; startedAt: string; endedAt?: string; command?: string; log: string[]; progress?: { done: number; total: number }; result?: any; error?: { kind: string; message: string } }
+export interface Job { id: string; kind: string; cleaned?: string[]; status: "running" | "done" | "failed" | "cancelled"; startedAt: string; endedAt?: string; command?: string; log: string[]; progress?: { done: number; total: number }; result?: any; error?: { kind: string; message: string } }
 
 export const api = {
   info: () => req<Info>("/api/info"),
@@ -64,7 +67,26 @@ export const api = {
   runs: (strategy?: string, limit = 200) => req<{ runs: RunRow[] }>(`/api/runs${qs({ strategy, limit })}`),
   submit: (r: RunRequest) => req<{ runId: string; cached: boolean; joined: boolean }>("/api/runs", { method: "POST", body: JSON.stringify(r) }),
   run: (id: string) => req<RunJson>(`/api/runs/${id}`),
-  cancel: (id: string) => req<{ cancelled: boolean }>(`/api/runs/${id}/cancel`, { method: "POST" }),
+  /** `purge` also deletes the run's folder and history row, so nothing half-written is left behind. */
+  cancel: (id: string, purge = false) => req<{ cancelled: boolean }>(`/api/runs/${id}/cancel${purge ? "?purge=1" : ""}`, { method: "POST" }),
+  kill: () => req<{ runs: string[]; jobs: string[] }>("/api/kill", { method: "POST" }),
+  analytics: (id: string, q: TripQuery) => req<Analytics>(`/api/runs/${id}/analytics${qs(tripParams({ ...q, offset: undefined, limit: undefined }))}`),
+  settings: () => req<SettingsView>("/api/settings"),
+  setDataRoot: (dataRoot: string | null) => req<SettingsView & { warnings: string[] }>("/api/settings/data-root", { method: "PUT", body: JSON.stringify({ dataRoot }) }),
+  dirs: (path?: string) => req<DirList>(`/api/fs/dirs${qs({ path })}`),
+  scan: (refresh = false) => req<ScanReport>(`/api/data/scan${refresh ? "?refresh=1" : ""}`),
+  readiness: (refresh = false) => req<{ scannedAt: string; strategies: Readiness[] }>(`/api/data/readiness${refresh ? "?refresh=1" : ""}`),
+  scaffoldMissing: () => req<{ missing: string[] }>("/api/workspace/missing"),
+  scaffold: (files?: string[]) => req<{ created: string[]; skipped: string[]; missing: string[] }>("/api/workspace/scaffold", { method: "POST", body: JSON.stringify({ files }) }),
+  addSource: (path: string) => req<SettingsView & { warnings: string[] }>("/api/settings/sources", { method: "POST", body: JSON.stringify({ path }) }),
+  removeSource: (path: string) => req<SettingsView>("/api/settings/sources", { method: "DELETE", body: JSON.stringify({ path }) }),
+  setSymbolPref: (symbol: string, pref: { source?: string | null; from?: string | null; to?: string | null }) => req<SettingsView>(`/api/settings/symbol/${encodeURIComponent(symbol)}`, { method: "PUT", body: JSON.stringify(pref) }),
+  resetSymbolPrefs: () => req<SettingsView>("/api/settings/reset-symbols", { method: "POST", body: "{}" }),
+  symbolDetail: (symbol: string) => req<{ symbol: string; pref: SymbolPref; sources: Array<{ root: string; isDefault: boolean; report: SymbolReport | null }> }>(`/api/data/symbol/${encodeURIComponent(symbol)}`),
+  symbolDays: (symbol: string, kind: string, source?: string) => req<{ first: string; last: string; days: string }>(`/api/data/symbol/${encodeURIComponent(symbol)}/days${qs({ kind, source })}`),
+  autoFind: () => req<{ changes: Array<{ symbol: string; source: string; days: number }>; sourcesChecked: number } & SettingsView>("/api/data/auto-find", { method: "POST", body: "{}" }),
+  runsUsage: () => req<{ total: number; perRun: Record<string, number> }>("/api/runs-usage"),
+  pruneRuns: (b: { ids?: string[]; all?: boolean; olderThanDays?: number; keepLast?: number; strategy?: string }) => req<{ deleted: string[]; freedBytes: number }>("/api/runs/prune", { method: "POST", body: JSON.stringify(b) }),
   deleteRun: (id: string) => req<void>(`/api/runs/${id}`, { method: "DELETE" }),
   summary: (id: string) => req<Summary>(`/api/runs/${id}/derived/summary`),
   integrity: (id: string) => req<IntegrityReport>(`/api/runs/${id}/derived/integrity`),
@@ -104,7 +126,7 @@ export const api = {
 function tripParams(q: TripQuery): Record<string, unknown> {
   return {
     side: q.side, outcome: q.outcome, symbol: q.symbol, strategy: q.strategy, from: q.fromTs, to: q.toTs, minHold: q.minHoldMs, maxHold: q.maxHoldMs,
-    minPnl: q.minPnl, maxPnl: q.maxPnl, sort: q.sort, dir: q.dir, offset: q.offset, limit: q.limit,
+    exitFrom: q.exitFromTs, exitTo: q.exitToTs, minQty: q.minQty, maxQty: q.maxQty, id: q.id, minPnl: q.minPnl, maxPnl: q.maxPnl, exit: q.exit, minR: q.minR, maxR: q.maxR, weekday: q.weekday, hour: q.hour, day: q.day, sort: q.sort, dir: q.dir, offset: q.offset, limit: q.limit,
   };
 }
 

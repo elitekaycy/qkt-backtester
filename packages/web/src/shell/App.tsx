@@ -1,76 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewHeaderActionsProps } from "dockview-react";
-import "dockview-react/dist/styles/dockview.css";
-import { ChartsPanel } from "../panels/ChartsPanel.js";
-import { EditorPanel } from "../panels/EditorPanel.js";
-import { FileTree } from "../panels/FileTree.js";
-import { MetricsPanel } from "../panels/MetricsPanel.js";
-import { PipelinePanel } from "../panels/PipelinePanel.js";
-import { ProblemsPanel } from "../panels/ProblemsPanel.js";
-import { RobustnessPanel } from "../panels/RobustnessPanel.js";
-import { RunBar } from "../panels/RunBar.js";
-import { RunsPanel } from "../panels/RunsPanel.js";
-import { TerminalPanel } from "../panels/TerminalPanel.js";
-import { TradesPanel } from "../panels/TradesPanel.js";
-import { useStore } from "../state/store.js";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, getToken, setToken } from "../api/client.js";
-
-const components = {
-  explorer: FileTree, editor: EditorPanel, pipeline: PipelinePanel, problems: ProblemsPanel, terminal: TerminalPanel,
-  charts: ChartsPanel, trades: TradesPanel, results: MetricsPanel, robustness: RobustnessPanel, runs: RunsPanel,
-};
-const LAYOUT_KEY = "qkt-studio-layout-v2";
-const PANEL_IDS = Object.keys(components);
-
-/** Regions the top bar can collapse. Each lists the panels whose groups it hides. */
-const REGIONS: Array<{ id: string; label: string; panels: string[] }> = [
-  { id: "files", label: "Files", panels: ["explorer"] },
-  { id: "editor", label: "Editor", panels: ["editor"] },
-  { id: "console", label: "Console", panels: ["pipeline"] },
-  { id: "charts", label: "Charts", panels: ["charts"] },
-  { id: "trades", label: "Trades", panels: ["trades"] },
-  { id: "results", label: "Results", panels: ["results"] },
-];
-
-function buildDefault(api: DockviewApi): void {
-  const explorer = api.addPanel({ id: "explorer", component: "explorer", title: "Explorer", initialWidth: 210 });
-  const editor = api.addPanel({ id: "editor", component: "editor", title: "Editor", position: { referencePanel: explorer, direction: "right" }, initialWidth: 520 });
-  const pipeline = api.addPanel({ id: "pipeline", component: "pipeline", title: "Run pipeline", position: { referencePanel: editor, direction: "below" }, initialHeight: 250 });
-  api.addPanel({ id: "problems", component: "problems", title: "Problems", position: { referencePanel: pipeline, direction: "within" } });
-  api.addPanel({ id: "terminal", component: "terminal", title: "Terminal", position: { referencePanel: pipeline, direction: "within" } });
-  pipeline.api.setActive();
-  const charts = api.addPanel({ id: "charts", component: "charts", title: "Charts", position: { referencePanel: editor, direction: "right" } });
-  api.addPanel({ id: "trades", component: "trades", title: "Trades", position: { referencePanel: charts, direction: "below" }, initialHeight: 250 });
-  const results = api.addPanel({ id: "results", component: "results", title: "Results", position: { referencePanel: charts, direction: "right" }, initialWidth: 430 });
-  api.addPanel({ id: "robustness", component: "robustness", title: "Robustness", position: { referencePanel: results, direction: "within" } });
-  api.addPanel({ id: "runs", component: "runs", title: "Run history", position: { referencePanel: results, direction: "within" } });
-  results.api.setActive();
-  applySizes(api);
-}
-
-/** Sizes are applied after the grid has laid out; dockview ignores `initialWidth` when panels are added in a chain. */
-function applySizes(api: DockviewApi): void {
-  const total = api.width || window.innerWidth;
-  const left = 200, editorW = Math.round(Math.min(520, Math.max(360, total * 0.24))), right = Math.round(Math.min(560, Math.max(400, total * 0.29)));
-  const set = () => {
-    api.getPanel("explorer")?.group.api.setSize({ width: left });
-    api.getPanel("editor")?.group.api.setSize({ width: editorW });
-    api.getPanel("results")?.group.api.setSize({ width: right });
-    api.getPanel("pipeline")?.group.api.setSize({ height: 250 });
-    api.getPanel("trades")?.group.api.setSize({ height: Math.round((api.height || window.innerHeight) * 0.3) });
-  };
-  requestAnimationFrame(() => { set(); setTimeout(set, 120); });
-}
-
-function HeaderActions({ containerApi, activePanel, group }: IDockviewHeaderActionsProps) {
-  const [max, setMax] = useState(false);
-  useEffect(() => { const d = containerApi.onDidMaximizedGroupChange(() => setMax(group.api.isMaximized())); return () => d.dispose(); }, [containerApi, group]);
-  if (!activePanel) return null;
-  return (
-    <button className="btn ghost sm" style={{ margin: "3px 4px" }} title={max ? "Restore layout" : "Expand this panel to fill the window"}
-      onClick={() => (group.api.isMaximized() ? containerApi.exitMaximizedGroup() : containerApi.maximizeGroup(activePanel))}>{max ? "⤡" : "⤢"}</button>
-  );
-}
+import { DockBar, DockBody } from "../dock/Dock.js";
+import { EditorPane } from "../editor/EditorPane.js";
+import { Journal } from "../journal/Journal.js";
+import { PreviewPane } from "../preview/PreviewPane.js";
+import { DataSection } from "../sections/DataSection.js";
+import { FilesSection } from "../sections/FilesSection.js";
+import { RunsSection } from "../sections/RunsSection.js";
+import { useStore } from "../state/store.js";
+import { clamp, useUi } from "../state/ui.js";
+import { PaneControls } from "../ui/PaneControls.js";
+import { Splitter } from "../ui/Splitter.js";
+import { ChevronLeft } from "../ui/icons.js";
+import { CommandPalette, Shortcuts } from "./CommandPalette.js";
+import { Rail } from "./Rail.js";
+import { StatusBar } from "./StatusBar.js";
+import { TopBar } from "./TopBar.js";
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -79,79 +24,151 @@ function Toasts() {
 
 function TokenGate({ children }: { children: React.ReactNode }) {
   const info = useStore((s) => s.info);
-  const [needToken, setNeed] = useState(false);
+  const [need, setNeed] = useState(false);
   const [val, setVal] = useState("");
-  useEffect(() => {
-    void useStore.getState().init().catch((e) => { if (e instanceof ApiError && e.status === 401) setNeed(true); else useStore.getState().toast("error", (e as Error).message); });
-  }, []);
-  if (needToken) return (
+  useEffect(() => { void useStore.getState().init().catch((e) => { if (e instanceof ApiError && e.status === 401) setNeed(true); else useStore.getState().toast("error", (e as Error).message); }); }, []);
+  if (need) return (
     <div style={{ display: "grid", placeItems: "center", height: "100%" }}>
-      <form className="panel" style={{ height: "auto", padding: 20, border: "1px solid var(--border)", borderRadius: 6, width: 360, gap: 10 }}
-        onSubmit={(e) => { e.preventDefault(); setToken(val); location.reload(); }}>
-        <b>Access token required</b><span className="muted">This studio was started with STUDIO_TOKEN.{getToken() ? " The saved token was rejected." : ""}</span>
-        <input className="input" style={{ height: 30 }} type="password" autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder="token" />
+      <form className="card pad" style={{ width: 360, display: "flex", flexDirection: "column", gap: 12 }} onSubmit={(e) => { e.preventDefault(); setToken(val); location.reload(); }}>
+        <b style={{ fontSize: "var(--fs-lg)" }}>Access token required</b>
+        <span className="muted">This studio was started with STUDIO_TOKEN.{getToken() ? " The saved token was rejected." : ""}</span>
+        <input className="input" type="password" autoFocus value={val} onChange={(e) => setVal(e.target.value)} placeholder="token" aria-label="Access token" />
         <button className="btn primary" type="submit">Continue</button>
       </form>
     </div>
   );
-  return info ? <>{children}</> : <div className="empty">Connecting to the studio…</div>;
+  return info ? <>{children}</> : <div className="empty" style={{ height: "100%", justifyContent: "center" }}><span className="spin" />Connecting to the studio…</div>;
 }
 
-export function App() {
-  const apiRef = useRef<DockviewApi | null>(null);
-  const [hidden, setHidden] = useState<Record<string, boolean>>({});
-  const theme = useStore((s) => s.theme);
+// The chart pane is owned by another workstream; it may or may not still take these props, so pass them loosely.
+const ChartPane = PreviewPane as unknown as React.ComponentType<{ maxed: boolean; onMax(): void }>;
 
-  const onReady = useCallback((e: DockviewReadyEvent) => {
-    apiRef.current = e.api;
-    let restored = false;
-    try {
-      const saved = localStorage.getItem(LAYOUT_KEY);
-      if (saved) {
-        e.api.fromJSON(JSON.parse(saved));
-        restored = PANEL_IDS.every((id) => e.api.getPanel(id));
-        if (!restored) e.api.clear();
-      }
-    } catch { e.api.clear(); }
-    if (!restored) buildDefault(e.api);
-    e.api.onDidLayoutChange(() => { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(e.api.toJSON())); } catch { /* storage blocked */ } });
-    (window as unknown as { __dock: DockviewApi }).__dock = e.api;
+const MIN_SIDE = 160, MIN_CHART = 200, MIN_EDITOR = 160, MIN_DOCK = 96, STRIP = 40;
+
+function Shell() {
+  const ui = useUi();
+  const running = useStore((s) => s.running), run = useStore((s) => s.run);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 1200, h: 700, bodyW: 1600 });
+  const maxed = ui.maxed;
+
+  useEffect(() => {
+    const el = mainRef.current, body = bodyRef.current;
+    if (!el || !body) return;
+    let raf = 0;
+    // measured outside the observer callback: no "ResizeObserver loop" errors when a resize changes what is being observed
+    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setBox({ w: el.clientWidth, h: el.clientHeight, bodyW: body.clientWidth })); });
+    ro.observe(el); ro.observe(body);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
-  const toggle = (id: string) => {
-    const api = apiRef.current;
-    const region = REGIONS.find((r) => r.id === id);
-    if (!api || !region) return;
-    const next = !hidden[id];
-    for (const pid of region.panels) api.getPanel(pid)?.group.api.setVisible(!next);
-    setHidden((h) => ({ ...h, [id]: next }));
-  };
-  const reset = () => { const api = apiRef.current; if (!api) return; try { localStorage.removeItem(LAYOUT_KEY); } catch { /* ignore */ } api.clear(); buildDefault(api); setHidden({}); };
+  // the output panel opens by itself when a run starts or fails, so the steps are never hidden
+  useEffect(() => { if (running) useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [running]);
+  useEffect(() => { if (run?.status === "failed") useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [run?.status]);
+
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || !!t.closest?.(".monaco-editor, .xterm"));
+      const u = useUi.getState(), s = useStore.getState();
+      // Esc leaves full screen, unless something more specific (a dialog, the palette, vim, a text field) wants it
+      if (e.key === "Escape" && u.maxed && !typing && !e.defaultPrevented && !u.palette && !u.runSettings && !u.shortcuts && !u.journalOpen && !document.querySelector(".modal, .popover")) { e.preventDefault(); u.restore(); return; }
+      // undo/redo follow the editor even when focus is on a button or the chart, as in any editor app
+      if (mod && !typing && ["z", "y", "Z"].includes(e.key)) {
+        const ed = (window as unknown as { __qktEditor?: { focus(): void; trigger(s: string, id: string, a: unknown): void } }).__qktEditor;
+        if (ed) { e.preventDefault(); ed.focus(); ed.trigger("keyboard", e.key === "z" && !e.shiftKey ? "undo" : "redo", null); return; }
+      }
+      if (mod && e.key === "k") { e.preventDefault(); u.set({ palette: !u.palette }); }
+      else if (mod && e.key === "j") { e.preventDefault(); u.set({ journalOpen: !u.journalOpen }); }
+      else if (mod && e.key === "b") { e.preventDefault(); u.toggleCollapse("sidebar"); }
+      else if (mod && e.key === ",") { e.preventDefault(); u.set({ runSettings: !u.runSettings }); }
+      else if (mod && e.key === ".") { e.preventDefault(); void s.killAll(); }
+      else if (mod && e.key === "`") { e.preventDefault(); u.toggleCollapse("dock"); }
+      else if (mod && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); u.set({ section: (["files", "data", "runs"] as const)[Number(e.key) - 1]! }); }
+      else if (mod && e.key === "Enter" && !e.defaultPrevented) { e.preventDefault(); if (!s.running) void s.startRun(); }
+      else if (e.key === "?" && !typing && !mod) { e.preventDefault(); u.set({ shortcuts: true }); }
+    };
+    const leave = (e: BeforeUnloadEvent) => { if (useStore.getState().openFiles.some((f) => f.content !== f.saved)) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("keydown", key);
+    window.addEventListener("beforeunload", leave);
+    return () => { window.removeEventListener("keydown", key); window.removeEventListener("beforeunload", leave); };
+  }, []);
+
+  const row = ui.layout === "row";
+  const sideOpen = !!ui.section;
+  // limits are generous: a pane may take nearly everything, leaving a small minimum for the others (or collapse to a strip)
+  const sideMax = Math.max(MIN_SIDE, box.bodyW - 56 - 240);
+  const sideW = clamp(ui.sidebarW, MIN_SIDE, sideMax);
+  const chartStrip = ui.collapsed.chart, editorStrip = ui.collapsed.editor;
+  const chartMax = row ? Math.max(MIN_CHART, box.w - MIN_EDITOR - 24) : Math.max(MIN_CHART, box.h - MIN_EDITOR - 24);
+  const chartSize = clamp(ui.previewW || 560, MIN_CHART, chartMax);
+  const dockMax = Math.max(MIN_DOCK, box.h - 48 - MIN_EDITOR);
+  const dockH = clamp(ui.dockH, MIN_DOCK, dockMax);
+
+  const hide = (on: boolean): React.CSSProperties | undefined => (on ? { display: "none" } : undefined);
+  const showSide = sideOpen && (!maxed || maxed === "sidebar");
+  const showMain = maxed !== "sidebar";
+  const showEditor = !maxed || maxed === "editor" || maxed === "dock";
+  const showChart = !maxed || maxed === "chart";
+  const editorCol = !maxed || maxed === "editor" || maxed === "dock";
+  const dockMaxed = maxed === "dock";
+  const editorMaxed = maxed === "editor";
 
   return (
-    <TokenGate>
-      <div className="app">
-        <RunBar toggles={[...REGIONS.map((r) => ({ id: r.id, label: r.label, on: !hidden[r.id], toggle: () => toggle(r.id) })), { id: "reset", label: "Reset", on: false, toggle: reset }]} />
-        <div className="workspace">
-          <DockviewReact className="dockview-theme-qkt" components={components as never} onReady={onReady} rightHeaderActionsComponent={HeaderActions} disableFloatingGroups />
-        </div>
-        <StatusBar />
+    <div className="app" data-maxed={maxed ?? undefined}>
+      <a className="skip-link" href="#editor">Skip to the editor</a>
+      <div className="body" ref={bodyRef}>
+        <Rail />
+        {showSide && (
+          <>
+            <aside className={`sidebar${maxed === "sidebar" ? " maxed" : ""}`} style={maxed === "sidebar" ? { flex: 1, width: "auto" } : { width: sideW }} aria-label={ui.section ?? "sidebar"}>
+              <span className="side-controls"><PaneControls pane="sidebar" /></span>
+              {ui.section === "files" ? <FilesSection /> : ui.section === "data" ? <DataSection /> : <RunsSection />}
+            </aside>
+            {maxed !== "sidebar" && (
+              <div style={{ width: 0, position: "relative", flex: "none" }}>
+                <div className="side-split">
+                  <Splitter dir="v" label="Resize sidebar" value={sideW} min={MIN_SIDE} max={sideMax} onChange={(v) => ui.set({ sidebarW: v })} onReset={() => ui.resetPane("sidebar")} />
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        <main className="main" ref={mainRef} style={hide(!showMain)}>
+          <TopBar />
+          <div className="workbench" data-layout={ui.layout}>
+            <div className="editor-col" style={hide(!editorCol || (!!maxed && maxed !== "editor" && maxed !== "dock"))}>
+              <section className="pane grow" aria-label="Editor" style={{ ...(hide(dockMaxed) ?? {}), ...(editorStrip && !editorMaxed ? { flex: "none", height: STRIP } : {}) }}><EditorPane /></section>
+              {ui.dockOpen ? (
+                <>
+                  {!maxed && !editorStrip && <Splitter dir="h" label="Resize output panel" invert value={dockH} min={MIN_DOCK} max={dockMax} onChange={(v) => ui.set({ dockH: v })} onReset={() => ui.resetPane("dock")} />}
+                  {!maxed && editorStrip && <div style={{ height: "var(--gap)", flex: "none" }} />}
+                  <section className="pane" aria-label="Output" style={hide(editorMaxed) ?? (dockMaxed || editorStrip ? { flex: 1 } : { height: dockH, flex: "none" })}>
+                    <DockBar /><DockBody />
+                  </section>
+                </>
+              ) : <section className="pane dock-collapsed" aria-label="Output" style={hide(editorMaxed)}><DockBar /></section>}
+            </div>
+            {showChart && !chartStrip && !maxed && <Splitter dir={row ? "v" : "h"} label="Resize chart" invert value={chartSize} min={MIN_CHART} max={chartMax} onChange={(v) => ui.set({ previewW: v })} onReset={() => ui.resetPane("chart")} />}
+            {showChart && chartStrip && !maxed && (
+              <button className={`chart-strip ${row ? "v" : "h"}`} aria-label="Expand chart" onClick={() => ui.toggleCollapse("chart")}><ChevronLeft size={14} /><span>Chart</span></button>
+            )}
+            <div className={`pv-wrap${maxed === "chart" ? " maxed" : ""}`}
+              style={!showChart || (chartStrip && maxed !== "chart") ? { display: "none" } : maxed === "chart" ? undefined : row ? { width: chartSize, flex: "none", display: "flex" } : { height: chartSize, flex: "none", display: "flex" }}>
+              <ChartPane maxed={maxed === "chart"} onMax={() => ui.toggleMax("chart")} />
+            </div>
+          </div>
+          {ui.journalOpen && <Journal containerWidth={box.w} />}
+        </main>
       </div>
+      <StatusBar />
+      <CommandPalette />
+      <Shortcuts />
       <Toasts />
-      <span hidden data-theme-indicator={theme} />
-    </TokenGate>
-  );
-}
-
-function StatusBar() {
-  const { info, run, results } = useStore();
-  return (
-    <div className="statusbar">
-      <span>{info?.workspace}</span>
-      <span title="Bars are read from QKT_DATA_HOME">data: {info?.dataRoot}</span>
-      {run && <span>run {run.id.slice(-22)} · {run.status}</span>}
-      {results && <span>qkt {results.meta.qktVersion} · {results.meta.tier} · {results.meta.from} → {results.meta.to}</span>}
-      <span style={{ marginLeft: "auto" }}>All times UTC · window is [from, to)</span>
     </div>
   );
 }
+
+export function App() { return <TokenGate><Shell /></TokenGate>; }

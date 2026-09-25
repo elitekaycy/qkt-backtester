@@ -1,0 +1,44 @@
+/* shell styles: owned by one workstream, see AGENTS notes */
+.pane-controls { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.dock-term { flex: 1; min-height: 0; flex-direction: column; }
+
+/* ---------- sidebar chrome ---------- */
+.sidebar { position: relative; }
+.sidebar .side-head { padding-right: 108px; }
+.side-controls { position: absolute; top: 0; right: var(--s2); height: var(--top-h); display: flex; align-items: center; z-index: 2; }
+.sidebar.maxed { border-right: 0; }
+.sidebar.maxed .side-scroll { padding: 0 var(--s5) var(--s5); }
+.sidebar.maxed .side-head { padding-left: var(--s5); }
+
+/* ---------- editor header ---------- */
+.tabs-row { display: flex; align-items: stretch; flex: none; background: var(--side); border-bottom: 1px solid var(--line); min-width: 0; }
+.tabs-row .tabs { flex: 1; min-width: 0; border-bottom: 0; }
+.tabs-row .pane-controls { align-self: center; padding: 0 var(--s2); }
+
+/* ---------- collapsed chart strip ---------- */
+.chart-strip { flex: none; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); background: var(--main); color: var(--ink-3); border-radius: var(--r-lg); font-weight: 600; transition: background var(--t-fast), color var(--t-fast); }
+.chart-strip:hover { background: var(--card-2); color: var(--ink); }
+.chart-strip.v { width: 40px; margin-left: var(--gap); flex-direction: column; writing-mode: vertical-rl; }
+.chart-strip.h { height: 40px; margin-top: var(--gap); flex-direction: row; }
+.chart-strip.v svg { transform: rotate(90deg); }
+.chart-strip:focus-visible { outline-offset: -2px; }
+.side-split { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; z-index: 6; display: flex; }
+.side-split > .splitter { flex: 1; }
+
+/* ---------- files ---------- */
+.files-banner { margin: 0 var(--s1) var(--s3); align-items: center; gap: var(--s3); }
+.ficon.instr { color: var(--s3c); } .ficon.env { color: var(--s4c); }
+
+/* ---------- runs ---------- */
+.runs-tools { display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3) var(--s2) var(--s4); flex: none; }
+.runs-tools .disk { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: var(--fs-sm); }
+.runs-bulk { display: flex; align-items: center; gap: var(--s2); margin: 0 var(--s2) var(--s2); padding: var(--s2) var(--s3); border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--card); flex: none; }
+.menu-item .muted { margin-left: auto; }
+.menu-sep { height: 1px; margin: 4px 2px; background: var(--line); }
+.menu-item.danger { color: var(--loss-ink); }
+.term-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.term-wrap .xterm-viewport { background-color: transparent !important; }
+
+/* the missing-files banner lives in a narrow sidebar: stack it instead of squeezing the text beside the button */
+.files-banner { flex-direction: column; align-items: stretch; gap: var(--s2); margin: var(--s2); }
+.files-banner .btn { align-self: flex-start; }

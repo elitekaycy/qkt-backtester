@@ -1,7 +1,9 @@
 export type {
   RunJson, StepRecord, StepId, RunError, RunStatus, Summary, RoundTrip, IntegrityReport, IntegrityCheck, McResult, MonthRow,
-  Diagnostic, TripQuery, HoleDay, Tier, McMethod,
+  Diagnostic, TripQuery, HoleDay, Tier, McMethod, Analytics, Bucket, Histogram, ExitReason, RunOptions,
+  ScanReport, SymbolReport, TfReport, TickReport, Readiness, ModeReadiness, DayRange, YearRow, Completeness,
 } from "@qkt-studio/core";
+import type { RunOptions } from "@qkt-studio/core";
 import type { Tier } from "@qkt-studio/core";
 
 export interface RunRequest {
@@ -13,4 +15,5 @@ export interface RunRequest {
   allowIncomplete?: boolean;
   force?: boolean;
   auto?: boolean;
+  options?: RunOptions;
 }
