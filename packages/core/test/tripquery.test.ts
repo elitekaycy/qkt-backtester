@@ -4,7 +4,7 @@ import type { RoundTrip } from "../src/roundtrips.js";
 
 const mk = (id: number, p: Partial<RoundTrip> = {}): RoundTrip => ({
   id, strategy: "s", symbol: "X", side: "long", entryTs: id * 1000, entryPx: 100, exitTs: id * 1000 + 500, exitPx: 101, qty: 1,
-  pnl: id % 2 ? 10 : -5, fills: 2, holdMs: 500, open: false, ...p,
+  pnl: id % 2 ? 10 : -5, fills: 2, holdMs: 500, open: false, exit: "signal", ...p,
 });
 const trips: RoundTrip[] = [
   mk(1), mk(2), mk(3, { side: "short", pnl: 0 }), mk(4, { pnl: 40, holdMs: 9000 }), mk(5, { open: true, exitTs: null, exitPx: null, holdMs: null, pnl: 2 }),
@@ -87,5 +87,20 @@ describe("performance guard: 1,000,000 trades", () => {
     const t0 = performance.now();
     queryTrips(big, { sort: "pnl", dir: "desc", limit: 50 });
     expect(performance.now() - t0).toBeLessThan(5000);
+  });
+});
+
+describe("entry/exit windows, size and trade number", () => {
+  const base = { strategy: "s", symbol: "X", side: "long" as const, entryPx: 1, exitPx: 2, pnl: 1, open: false, holdMs: 1000, exit: "signal" as const, risk: 1, r: 1 };
+  const mk = (id: number, entry: string, exit: string | null, qty: number) => ({ ...base, id, qty, entryTs: Date.parse(entry), exitTs: exit ? Date.parse(exit) : null, open: exit === null }) as never;
+  const trips = [mk(1, "2024-10-01T10:00:00Z", "2024-10-01T12:00:00Z", 0.1), mk(2, "2024-10-15T10:00:00Z", "2024-10-16T09:00:00Z", 0.5), mk(3, "2024-11-02T10:00:00Z", null, 1)];
+  it("exit window excludes open trades and is half-open", () => {
+    expect(filterTrips(trips, { exitFromTs: Date.parse("2024-10-16T00:00:00Z"), exitToTs: Date.parse("2024-10-17T00:00:00Z") }).map((t) => t.id)).toEqual([2]);
+    expect(filterTrips(trips, { exitFromTs: 0 }).map((t) => t.id)).toEqual([1, 2]);
+  });
+  it("size bounds and trade id", () => {
+    expect(filterTrips(trips, { minQty: 0.5 }).map((t) => t.id)).toEqual([2, 3]);
+    expect(filterTrips(trips, { maxQty: 0.1 }).map((t) => t.id)).toEqual([1]);
+    expect(filterTrips(trips, { id: 3 }).map((t) => t.id)).toEqual([3]);
   });
 });

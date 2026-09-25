@@ -19,7 +19,14 @@ export interface Fill {
   orderId: string;
   sl?: number;
   tp?: number;
+  /** Dollar risk qkt recorded on the entry (stop distance x size), when the entry had a stop. */
+  risk?: number;
 }
+
+export interface TripEntry { ts: number; px: number; qty: number; sl?: number; tp?: number; risk?: number }
+
+/** How the trade ended. `stop`/`target` need a bracket on the entry; `signal` means a rule closed it. */
+export type ExitReason = "stop" | "target" | "signal" | "open";
 
 export interface RoundTrip {
   id: number;
@@ -38,6 +45,25 @@ export interface RoundTrip {
   open: boolean;
   sl?: number;
   tp?: number;
+  risk?: number;
+  /** Every entry fill of a trip that scaled in (two or more), each with the stop, target and risk it carried. Absent for single-entry trips. */
+  entries?: TripEntry[];
+  exit: ExitReason;
+  /** pnl / risk, present for closed trades whose entry carried a stop. */
+  r?: number;
+}
+
+/**
+ * Classify a finished trade. A bracketed entry that exits at its target is a `target`; a bracketed entry that exits on
+ * the losing side is a `stop` (Draft fills stops at a bar-approximated price, so exact price equality is not usable);
+ * everything else, including every exit of a strategy without brackets, is a rule-driven `signal`.
+ */
+export function classifyExit(t: Pick<RoundTrip, "open" | "sl" | "tp" | "side" | "entryPx">, exitPx: number | null): ExitReason {
+  if (t.open || exitPx === null) return "open";
+  if (t.sl === undefined && t.tp === undefined) return "signal";
+  if (t.tp !== undefined && Math.abs(exitPx - t.tp) <= Math.abs(t.entryPx) * 0.0002) return "target";
+  const lossSide = t.side === "long" ? exitPx < t.entryPx : exitPx > t.entryPx;
+  return t.sl !== undefined && lossSide ? "stop" : "signal";
 }
 
 /** One tolerance for every P&L comparison in the studio (spec §9, review focus 5). */
@@ -66,6 +92,7 @@ const optNum = (s: string | undefined) => (s === undefined || s === "" ? undefin
 class Columns {
   private ix = new Map<string, number>();
   constructor(header: string[]) { header.forEach((h, i) => this.ix.set(h, i)); }
+  opt(name: string): number { return this.ix.get(name) ?? -1; }
   need(name: string): number {
     const i = this.ix.get(name);
     if (i === undefined) throw new Error(`trades.csv is missing column '${name}'`);
@@ -79,7 +106,7 @@ function makeParser(headerLine: string): (line: string) => Fill {
     ts: c.need("timestamp"), strategy: c.need("strategy"), symbol: c.need("symbol"), side: c.need("side"),
     effect: c.need("positionEffect"), qty: c.need("quantity"), price: c.need("price"), realized: c.need("realized"),
     before: c.need("strategyPositionQtyBefore"), after: c.need("strategyPositionQtyAfter"),
-    leg: c.need("legId"), order: c.need("brokerOrderId"), sl: c.need("stopLossPrice"), tp: c.need("takeProfitPrice"),
+    leg: c.need("legId"), order: c.need("brokerOrderId"), sl: c.need("stopLossPrice"), tp: c.need("takeProfitPrice"), risk: c.opt("riskUsd"),
   };
   return (line) => {
     const f = splitCsvLine(line);
@@ -87,7 +114,7 @@ function makeParser(headerLine: string): (line: string) => Fill {
       ts: Number(f[ix.ts]), strategy: f[ix.strategy]!, symbol: f[ix.symbol]!, side: f[ix.side] as "BUY" | "SELL",
       effect: f[ix.effect]!, qty: num(f[ix.qty]), price: num(f[ix.price]), realized: num(f[ix.realized]),
       posBefore: num(f[ix.before]), posAfter: num(f[ix.after]), legId: f[ix.leg] ?? "", orderId: f[ix.order] ?? "",
-      sl: optNum(f[ix.sl]), tp: optNum(f[ix.tp]),
+      sl: optNum(f[ix.sl]), tp: optNum(f[ix.tp]), risk: ix.risk >= 0 ? optNum(f[ix.risk]) : undefined,
     };
   };
 }
@@ -114,6 +141,7 @@ export async function parseTradesFile(file: string): Promise<Fill[]> {
 
 interface Acc {
   trip: RoundTrip;
+  entries: TripEntry[];
   entryQty: number; entryNotional: number;
   exitQty: number; exitNotional: number;
 }
@@ -131,16 +159,19 @@ export function pairRoundTrips(fills: Fill[]): RoundTrip[] {
   const start = (f: Fill, side: "long" | "short", qtyNow: number, fillsCount: number): Acc => {
     const trip: RoundTrip = {
       id: nextId++, strategy: f.strategy, symbol: f.symbol, side, entryTs: f.ts, entryPx: f.price,
-      exitTs: null, exitPx: null, qty: Math.abs(qtyNow), pnl: 0, fills: fillsCount, holdMs: null, open: true, sl: f.sl, tp: f.tp,
+      exitTs: null, exitPx: null, qty: Math.abs(qtyNow), pnl: 0, fills: fillsCount, holdMs: null, open: true, sl: f.sl, tp: f.tp, risk: f.risk, exit: "open",
     };
     trips.push(trip);
-    return { trip, entryQty: 0, entryNotional: 0, exitQty: 0, exitNotional: 0 };
+    return { trip, entries: [], entryQty: 0, entryNotional: 0, exitQty: 0, exitNotional: 0 };
   };
   const finish = (a: Acc, f: Fill) => {
     a.trip.exitTs = f.ts;
     a.trip.exitPx = a.exitQty > 0 ? a.exitNotional / a.exitQty : f.price;
     a.trip.holdMs = f.ts - a.trip.entryTs;
     a.trip.open = false;
+    if (a.entries.length > 1) a.trip.entries = a.entries;
+    a.trip.exit = classifyExit(a.trip, a.trip.exitPx);
+    if (a.trip.risk && a.trip.risk > 0) a.trip.r = a.trip.pnl / a.trip.risk;
   };
 
   for (const f of fills) {
@@ -170,8 +201,10 @@ export function pairRoundTrips(fills: Fill[]): RoundTrip[] {
       acc.entryQty += added; acc.entryNotional += added * f.price;
       acc.trip.entryPx = acc.entryNotional / acc.entryQty;
       acc.trip.qty = Math.max(acc.trip.qty, Math.abs(after));
+      acc.entries.push({ ts: f.ts, px: f.price, qty: added, sl: f.sl, tp: f.tp, risk: f.risk });
       if (f.sl !== undefined) acc.trip.sl = f.sl;
       if (f.tp !== undefined) acc.trip.tp = f.tp;
+      if (f.risk !== undefined) acc.trip.risk = (increases ? acc.trip.risk ?? 0 : 0) + f.risk;
     } else if (reduces) {
       const closed = flips ? Math.abs(before) : Math.abs(before) - Math.abs(after);
       acc.exitQty += closed; acc.exitNotional += closed * f.price;
@@ -181,11 +214,13 @@ export function pairRoundTrips(fills: Fill[]): RoundTrip[] {
         if (flips) {
           const n = start(f, after > 0 ? "long" : "short", after, 1);
           n.entryQty = Math.abs(after); n.entryNotional = Math.abs(after) * f.price;
+          n.entries.push({ ts: f.ts, px: f.price, qty: Math.abs(after), sl: f.sl, tp: f.tp, risk: f.risk });
           openBy.set(key, n);
         }
       }
     }
   }
+  for (const a of openBy.values()) if (a.entries.length > 1) a.trip.entries = a.entries;
   return trips;
 }
 

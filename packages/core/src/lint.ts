@@ -98,6 +98,25 @@ export function relocate(source: string, message: string): Range | null {
   return null;
 }
 
+/**
+ * qkt reports "expected X, got 'TOKEN'" at the token it stumbled on, which is usually the first token of the NEXT line
+ * (e.g. `RULES`) while the mistake is an unfinished line above it. When the reported token starts a line, move the
+ * marker to the end of the previous non-blank line and say so, so the squiggle sits where the user has to type.
+ */
+export function anchorParseError(source: string, d: { line: number; col: number; endCol: number; message: string }): { line: number; col: number; endCol: number; message: string } {
+  if (!/^expected\b.*\bgot\b/i.test(d.message)) return d;
+  const lines = source.split(/\r?\n/);
+  const at = lines[d.line - 1];
+  if (at === undefined || at.slice(0, Math.max(0, d.col - 1)).trim() !== "") return d; // the offending token does not start its line
+  let j = d.line - 2;
+  while (j >= 0 && scrub(lines[j]!).trim() === "") j--;
+  if (j < 0) return d;
+  const prev = lines[j]!.replace(/\s+$/, "");
+  if (prev.length === 0) return d;
+  const col = prev.length + 1;
+  return { line: j + 1, col, endCol: col + 1, message: `${d.message} (unfinished line ${j + 1}, before line ${d.line})` };
+}
+
 const SECRET_KEY = /(api[_-]?key|secret|password|passwd|token|private[_-]?key|credential|auth)/i;
 
 /** Hide secrets and env-expansions while keeping the file's structure, for the per-run config snapshot. */
@@ -157,4 +176,24 @@ export function checkConfig(yaml: string | null, fileExists: boolean, env: { QKT
     out.push({ severity: "warning", code: "data_root_mismatch", message: `data_root is '${dr}' but bar data is read from QKT_DATA_HOME '${home}'. --bars ignores data_root [probed].` });
   }
   return out;
+}
+
+/** qkt's `${VAR}` / `${VAR:-default}` substitution, for the few values the studio reads itself. */
+export function substitute(v: string, env: Record<string, string | undefined>): string {
+  return v.replace(/\$\{([A-Za-z_][A-Za-z0-9_.]*)(?::-([^}]*))?\}/g, (_m, name: string, def?: string) => env[name] ?? def ?? "");
+}
+
+/**
+ * `qkt backtest` ignores the config's `starting_balance` and uses its own default (probed: 10000 whatever the file says).
+ * The studio reads the file's value, with `.env` substitution applied, and passes it as `--starting-balance`, so the
+ * number in qkt.config.yaml is the number the run actually uses.
+ */
+export function configStartingBalance(configText: string, env: Record<string, string | undefined>): number | undefined {
+  try {
+    const doc = parseDocument(configText).toJS() as { starting_balance?: unknown } | null;
+    const raw = doc?.starting_balance;
+    if (raw === undefined || raw === null) return undefined;
+    const n = Number(typeof raw === "string" ? substitute(raw, env) : raw);
+    return Number.isFinite(n) && n > 0 && n <= 1e9 ? n : undefined;
+  } catch { return undefined; }
 }

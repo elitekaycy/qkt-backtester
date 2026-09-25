@@ -169,3 +169,20 @@ describe("parseTradesCsv robustness", () => {
     expect(f[0]).toMatchObject({ strategy: "a,b", posBefore: 0, posAfter: 1, sl: undefined });
   });
 });
+
+describe("scaled-in trips keep each entry's own stop and target", () => {
+  it("records entries when a trip has two or more entry fills", () => {
+    const f = (ts: number, effect: string, side: "BUY" | "SELL", qty: number, price: number, before: number, after: number, sl?: number, tp?: number, realized = 0) => ({ ts, strategy: "s", symbol: "X", side, effect, qty, price, realized, posBefore: before, posAfter: after, legId: "l" + ts, orderId: "o" + ts, sl, tp, risk: sl ? Math.abs(price - sl) * qty : undefined }) as never;
+    const trips = pairRoundTrips([f(1, "OPEN_LONG", "BUY", 1, 100, 0, 1, 95, 110), f(2, "OPEN_LONG", "BUY", 1, 102, 1, 2, 97, 112), f(3, "CLOSE_LONG", "SELL", 2, 111, 2, 0, undefined, undefined, 20)]);
+    expect(trips).toHaveLength(1);
+    expect(trips[0]!.entries).toEqual([
+      { ts: 1, px: 100, qty: 1, sl: 95, tp: 110, risk: 5 },
+      { ts: 2, px: 102, qty: 1, sl: 97, tp: 112, risk: 5 },
+    ]);
+  });
+  it("leaves single-entry trips lean", () => {
+    const f = (ts: number, before: number, after: number, sl?: number) => ({ ts, strategy: "s", symbol: "X", side: "BUY", effect: "", qty: 1, price: 100, realized: 0, posBefore: before, posAfter: after, legId: "l", orderId: "o", sl, tp: undefined, risk: undefined }) as never;
+    const t = pairRoundTrips([f(1, 0, 1, 95), f(2, 1, 0)]);
+    expect(t[0]!.entries).toBeUndefined();
+  });
+});

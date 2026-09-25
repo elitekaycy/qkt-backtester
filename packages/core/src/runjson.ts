@@ -72,6 +72,8 @@ export interface RunJson {
   /** Live counters from the engine's log stream. */
   counts?: { fills: number; orders: number };
   durationMs?: number;
+  /** Extra qkt options this run was started with (see server run-options). */
+  options?: Record<string, string | number>;
 }
 
 export function newRunJson(p: Pick<RunJson, "id" | "hash" | "tier" | "strategy" | "from" | "to" | "params" | "engine" | "seq"> & { now?: Date }): RunJson {

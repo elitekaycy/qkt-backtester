@@ -25,6 +25,14 @@
     "./montecarlo": {
       "types": "./dist/montecarlo.d.ts",
       "default": "./dist/montecarlo.js"
+    },
+    "./analytics": {
+      "types": "./dist/analytics.d.ts",
+      "default": "./dist/analytics.js"
+    },
+    "./ranges": {
+      "types": "./dist/ranges.d.ts",
+      "default": "./dist/ranges.js"
     }
   },
   "scripts": {

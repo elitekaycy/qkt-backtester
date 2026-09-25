@@ -1,4 +1,4 @@
-import type { RoundTrip } from "./roundtrips.js";
+import type { ExitReason, RoundTrip } from "./roundtrips.js";
 
 export type TripSort = "entryTs" | "exitTs" | "pnl" | "holdMs" | "qty";
 
@@ -11,10 +11,27 @@ export interface TripQuery {
   /** Entry time window, epoch ms, [fromTs, toTs). */
   fromTs?: number;
   toTs?: number;
+  /** Exit time window, epoch ms, [exitFromTs, exitToTs). Open trades never match when set. */
+  exitFromTs?: number;
+  exitToTs?: number;
+  /** Position size bounds (lots / units, as traded). */
+  minQty?: number;
+  maxQty?: number;
+  /** One trade by its number in the run (the # column). */
+  id?: number;
   minHoldMs?: number;
   maxHoldMs?: number;
   minPnl?: number;
   maxPnl?: number;
+  /** How the trade ended. */
+  exit?: ExitReason;
+  /** R-multiple bounds (pnl / entry risk); trades without recorded risk never match when set. */
+  minR?: number;
+  maxR?: number;
+  /** UTC weekday (0 = Sunday) and hour of ENTRY, and UTC calendar day (YYYY-MM-DD) of EXIT. */
+  weekday?: number;
+  hour?: number;
+  day?: string;
   sort?: TripSort;
   dir?: "asc" | "desc";
   offset?: number;
@@ -29,6 +46,11 @@ export function matches(t: RoundTrip, q: TripQuery): boolean {
   if (q.strategy && t.strategy !== q.strategy) return false;
   if (q.fromTs !== undefined && t.entryTs < q.fromTs) return false;
   if (q.toTs !== undefined && t.entryTs >= q.toTs) return false;
+  if (q.exitFromTs !== undefined && (t.exitTs === null || t.exitTs < q.exitFromTs)) return false;
+  if (q.exitToTs !== undefined && (t.exitTs === null || t.exitTs >= q.exitToTs)) return false;
+  if (q.minQty !== undefined && t.qty < q.minQty) return false;
+  if (q.maxQty !== undefined && t.qty > q.maxQty) return false;
+  if (q.id !== undefined && t.id !== q.id) return false;
   switch (q.outcome) {
     case "win": if (t.open || !(t.pnl > 0)) return false; break;
     case "loss": if (t.open || !(t.pnl < 0)) return false; break;
@@ -38,6 +60,12 @@ export function matches(t: RoundTrip, q: TripQuery): boolean {
   }
   if (q.minHoldMs !== undefined && (t.holdMs === null || t.holdMs < q.minHoldMs)) return false;
   if (q.maxHoldMs !== undefined && (t.holdMs === null || t.holdMs > q.maxHoldMs)) return false;
+  if (q.exit && t.exit !== q.exit) return false;
+  if (q.minR !== undefined && (t.r === undefined || t.r < q.minR)) return false;
+  if (q.maxR !== undefined && (t.r === undefined || t.r > q.maxR)) return false;
+  if (q.weekday !== undefined && new Date(t.entryTs).getUTCDay() !== q.weekday) return false;
+  if (q.hour !== undefined && new Date(t.entryTs).getUTCHours() !== q.hour) return false;
+  if (q.day !== undefined && (t.exitTs === null || new Date(t.exitTs).toISOString().slice(0, 10) !== q.day)) return false;
   if (q.minPnl !== undefined && t.pnl < q.minPnl) return false;
   if (q.maxPnl !== undefined && t.pnl > q.maxPnl) return false;
   return true;

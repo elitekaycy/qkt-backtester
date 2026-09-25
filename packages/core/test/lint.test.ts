@@ -117,3 +117,20 @@ describe("checkConfig", () => {
     expect(checkConfig("- a\n- b\n", true, {})[0]).toMatchObject({ code: "bad_config_yaml" });
   });
 });
+
+import { anchorParseError } from "../src/lint.js";
+describe("anchorParseError", () => {
+  const src = "STRATEGY a VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n    fx = BACKTEST: \n\nRULES\n";
+  it("moves a next-line 'got' error to the end of the unfinished line", () => {
+    const r = anchorParseError(src, { line: 7, col: 1, endCol: 2, message: "expected symbol after ':', got 'RULES'" });
+    expect(r.line).toBe(5);
+    expect(r.col).toBe("    fx = BACKTEST:".length + 1);
+    expect(r.message).toMatch(/unfinished line 5/);
+  });
+  it("leaves errors inside a line, and other messages, alone", () => {
+    const a = { line: 4, col: 12, endCol: 13, message: "expected symbol after ':', got 'X'" };
+    expect(anchorParseError(src, a)).toEqual(a);
+    const b = { line: 7, col: 1, endCol: 2, message: "Unknown indicator: foo" };
+    expect(anchorParseError(src, b)).toEqual(b);
+  });
+});

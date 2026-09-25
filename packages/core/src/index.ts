@@ -8,3 +8,7 @@ export * from "./lint.js";
 export * from "./montecarlo.js";
 export * from "./strategy.js";
 export * from "./tripquery.js";
+export * from "./analytics.js";
+export * from "./ranges.js";
+export * from "./scantypes.js";
+export * from "./runtypes.js";
