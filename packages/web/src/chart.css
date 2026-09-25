@@ -68,8 +68,11 @@
 
 /* the trade search sits in a narrow pane: chips wrap onto more lines instead of pushing the pane sideways */
 .trades-tab > .trades-filters { width: 100%; max-width: 100%; min-width: 0; }
-.trades-tab .filterbar.compact { flex-wrap: wrap; min-width: 0; }
-.trades-tab .filterbar.compact .fsearch { flex-wrap: wrap; flex: 1 1 100%; min-width: 0; height: auto; min-height: 34px; }
+.trades-tab .filterbar.compact { flex: 1 1 0; width: 100%; max-width: 100%; min-width: 0; flex-wrap: wrap; align-items: flex-start; gap: var(--s2); }
+.trades-tab .filterbar.compact .fsearch { flex-wrap: wrap; flex: 1 1 200px; min-width: 0; height: auto; min-height: 34px; }
+.trades-tab .filterbar.compact > .btn { flex: none; height: 34px; }
+.trades-tab .filterbar.compact .stat { display: none; }
+.trades-tab .filterbar.compact .ferr { flex: 1 1 100%; }
 .trades-tab .filterbar.compact .fsearch .fin { min-width: 120px; flex: 1 1 120px; }
 .trades-tab .fsug { max-width: calc(100vw - 32px); }
 .stepper { display: inline-flex; align-items: center; gap: var(--s2); }

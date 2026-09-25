@@ -126,7 +126,7 @@ export function FilterBar({ compact = false, count }: { compact?: boolean; count
           </ul>
         )}
       </div>
-      <button ref={panelBtn} className="btn sm" aria-haspopup="dialog" aria-expanded={panel} onClick={() => setPanel(!panel)}><Filter size={14} />Filters{active && <span className="badge accent" style={{ height: 16 }}>{chips.length}</span>}</button>
+      <button ref={panelBtn} className={`btn sm${compact ? " icon-only" : ""}`} aria-label="Filters" title="Filters" aria-haspopup="dialog" aria-expanded={panel} onClick={() => setPanel(!panel)}><Filter size={14} />{!compact && "Filters"}{active && <span className="badge accent" style={{ height: 16 }}>{chips.length}</span>}</button>
       <Popover open={panel} onClose={() => setPanel(false)} anchor={panelBtn} label="Filters" width={440}><FilterPanel /></Popover>
       {active && <button className="btn ghost sm" onClick={() => { clear(); setText(""); setErrors([]); }}>Clear all</button>}
       <span className="stat" aria-live="polite">{count ? <>Showing <b className="num" style={{ color: "var(--ink)" }}>{count.shown.toLocaleString()}</b> of {count.total.toLocaleString()} trades</> : loading ? "Updating…" : a ? <>Showing <b className="num" style={{ color: "var(--ink)" }}>{a.count}</b> of {total} trades</> : ""}</span>
