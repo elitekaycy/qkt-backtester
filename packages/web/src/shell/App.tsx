@@ -74,7 +74,11 @@ function Shell() {
       const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || !!t.closest?.(".monaco-editor, .xterm"));
       const u = useUi.getState(), s = useStore.getState();
       // Esc leaves full screen, unless something more specific (a dialog, the palette, vim, a text field) wants it
-      if (e.key === "Escape" && u.maxed && !typing && !e.defaultPrevented && !u.palette && !u.runSettings && !u.shortcuts && !u.journalOpen && !document.querySelector(".modal, .popover")) { e.preventDefault(); u.restore(); return; }
+      // Esc never takes you out of the editor: in a full-screen editor it only puts the cursor back in it (vim users press it constantly)
+      if (e.key === "Escape" && u.maxed === "editor" && !typing && !e.defaultPrevented && !u.palette && !u.runSettings && !u.shortcuts && !u.journalOpen && !document.querySelector(".modal, .popover")) {
+        (window as unknown as { __qktEditor?: { focus(): void } }).__qktEditor?.focus(); return;
+      }
+      if (e.key === "Escape" && u.maxed && u.maxed !== "editor" && !typing && !e.defaultPrevented && !u.palette && !u.runSettings && !u.shortcuts && !u.journalOpen && !document.querySelector(".modal, .popover")) { e.preventDefault(); u.restore(); return; }
       // undo/redo follow the editor even when focus is on a button or the chart, as in any editor app
       if (mod && !typing && ["z", "y", "Z"].includes(e.key)) {
         const ed = (window as unknown as { __qktEditor?: { focus(): void; trigger(s: string, id: string, a: unknown): void } }).__qktEditor;
