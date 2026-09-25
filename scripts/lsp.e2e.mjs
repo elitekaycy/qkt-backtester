@@ -21,5 +21,14 @@ const vis = await p.evaluate(() => { const l = document.querySelector(".suggest-
 ok("suggestion labels are visible (not just icons)", vis);
 await p.keyboard.press("Escape"); await p.keyboard.press("Escape");
 await p.keyboard.type("\n    WHEN ema(gold.cl", { delay: 30 }); await sleep(1500);
-ok("member completion right after typing (the server saw the latest text)", (await rows()).includes("close"), JSON.stringify(await rows()));
+ok("member completion right after typing (the server saw the latest text)", (await rows()).some((r) => r.startsWith("close")), JSON.stringify(await rows()));
+await p.keyboard.press("Escape"); await p.keyboard.press("Escape");
+await p.keyboard.type("\n    WHEN gold.", { delay: 30 }); await sleep(1500);
+ok("fields right after `gold.` (qkt's server returns nothing there)", (await rows()).some((r) => r.startsWith("close")), JSON.stringify(await rows()));
+await p.keyboard.press("Escape"); await p.keyboard.press("Escape");
+await p.keyboard.type("close > 1\n    AND POSITION.", { delay: 30 }); await sleep(1500);
+ok("aliases after POSITION.", (await rows()).some((r) => r.startsWith("gold")), JSON.stringify(await rows()));
+await p.keyboard.press("Escape"); await p.keyboard.press("Escape");
+await p.keyboard.type("gold\n    THEN ", { delay: 30 }); await sleep(1500);
+ok("actions after THEN come first", (await rows()).slice(0, 3).join(",").includes("BUY"), JSON.stringify(await rows()));
 await b.close(); process.exit(fail ? 1 : 0);

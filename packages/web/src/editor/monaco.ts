@@ -56,9 +56,28 @@ export const CONFIG_TEMPLATE = `# qkt.config.yaml. qkt reads this file from the 
 starting_balance: 10000
 `;
 
+export interface VimHandlers { save(): Promise<boolean> | boolean; saveAll(): Promise<unknown> | unknown; close(force: boolean): void; run(): void; say(msg: string): void }
+
+let exDefined = false;
 /** Vim keybindings (monaco-vim) with a status line. Returns a disposer. Loaded lazily so it costs nothing when off. */
-export async function enableVim(editor: import("monaco-editor/editor/editor.api.js").editor.IStandaloneCodeEditor, statusEl: HTMLElement): Promise<() => void> {
-  const { initVimMode } = await import("monaco-vim");
+export async function enableVim(editor: import("monaco-editor/editor/editor.api.js").editor.IStandaloneCodeEditor, statusEl: HTMLElement, h?: VimHandlers): Promise<() => void> {
+  const { initVimMode, VimMode } = await import("monaco-vim");
+  // monaco-vim knows `:w` but it does nothing, and it has no `:q`/`:wq`: wire the ones an editor user reaches for to the studio.
+  if (h && !exDefined) {
+    exDefined = true;
+    const Vim = (VimMode as unknown as { Vim: { defineEx(name: string, short: string, fn: (cm: unknown, p: { argString?: string; line?: number }) => void): void } }).Vim;
+    const cur = { h };
+    (window as unknown as { __vimHandlers?: { h: VimHandlers } }).__vimHandlers = cur;
+    const H = () => (window as unknown as { __vimHandlers: { h: VimHandlers } }).__vimHandlers.h;
+    Vim.defineEx("write", "w", () => { void Promise.resolve(H().save()).then((ok) => ok && H().say("written")); });
+    Vim.defineEx("wall", "wa", () => { void Promise.resolve(H().saveAll()).then(() => H().say("all files written")); });
+    Vim.defineEx("wquit", "wq", () => { void Promise.resolve(H().save()).then((ok) => { if (ok) H().close(false); }); });
+    Vim.defineEx("xit", "x", () => { void Promise.resolve(H().save()).then((ok) => { if (ok) H().close(false); }); });
+    Vim.defineEx("exit", "exi", () => { void Promise.resolve(H().save()).then((ok) => { if (ok) H().close(false); }); });
+    Vim.defineEx("quit", "q", (_cm, p) => H().close(Boolean(p.argString?.trim().startsWith("!"))));
+    Vim.defineEx("bdelete", "bd", (_cm, p) => H().close(Boolean(p.argString?.trim().startsWith("!"))));
+    Vim.defineEx("run", "ru", () => H().run());
+  } else if (h) (window as unknown as { __vimHandlers: { h: VimHandlers } }).__vimHandlers.h = h;
   const vim = initVimMode(editor, statusEl);
   return () => vim.dispose();
 }

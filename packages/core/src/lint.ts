@@ -12,7 +12,7 @@ export interface Diagnostic {
 export interface Range { line: number; col: number; endCol: number }
 
 // Mirrors ExprCompiler.CANDLE_FIELDS + META_FIELDS in qkt (a stream reference is `<alias>.<field>`).
-const STREAM_FIELDS = new Set([
+export const STREAM_FIELDS = new Set([
   "close", "open", "high", "low", "volume", "price", "bid", "ask", "spread", "value", "timestamp",
   "tick_size", "contract_size", "volume_step", "volume_min", "swap_long_points", "swap_short_points",
 ]);

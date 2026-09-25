@@ -93,7 +93,13 @@ export function EditorPane() {
     const gen = ++vimGen.current;
     vimOff.current?.(); vimOff.current = null;
     if (!useUi.getState().vim || !s.ed.getModel()) { vimStatus.current.textContent = ""; return; }
-    void enableVim(s.ed, vimStatus.current).then((off) => { if (gen !== vimGen.current) off(); else vimOff.current = off; });
+    void enableVim(s.ed, vimStatus.current, {
+      save: () => { const p = store.getState().activePath; return p ? store.getState().saveFile(p) : false; },
+      saveAll: () => store.getState().saveAllDirty(),
+      close: (force) => { const st = store.getState(), p = st.activePath, f = st.openFiles.find((x) => x.path === p); if (!p || !f) return; if (!force && f.content !== f.saved) { st.toast("error", `${p} has unsaved changes. :w to save, or :q! to discard them.`); return; } st.closeFile(p); },
+      run: () => void store.getState().startRun(),
+      say: (m) => store.getState().toast("info", m),
+    }).then((off) => { if (gen !== vimGen.current) off(); else vimOff.current = off; });
   };
   useEffect(() => { if (booted) syncVim(); }, [vim, booted]);
 

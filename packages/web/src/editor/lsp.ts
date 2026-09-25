@@ -2,6 +2,8 @@ import type { editor, languages, IPosition, IRange } from "monaco-editor/editor/
 import type { Monaco } from "./monaco.js";
 import { wsUrl } from "../api/client.js";
 import type { Diagnostic } from "../api/types.js";
+import { useStore } from "../state/store.js";
+import { localCompletions } from "./completions.js";
 
 interface LspDiag { range: { start: { line: number; character: number }; end: { line: number; character: number } }; severity?: number; message: string; code?: string | number }
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
@@ -128,29 +130,41 @@ export class LspClient {
     };
     const pathOf = (model: editor.ITextModel) => model.uri.path.startsWith(this.rootPath) ? model.uri.path.slice(this.rootPath.length + 1) : model.uri.path;
     const completion = m.languages.registerCompletionItemProvider("qkt", {
-      triggerCharacters: [".", " "],
+      triggerCharacters: [".", " ", ":"],
       provideCompletionItems: async (model, position): Promise<languages.CompletionList> => {
-        if (!(await this.whenReady(4000))) return { suggestions: [] };
-        try {
-          // The editor sends changes after a short pause, but a completion is asked for at once: without this the server
-          // would answer for the text as it was a keystroke ago (the cursor is past the end of its line) and return nothing.
-          const cur = model.getValue(), known = this.docs.get(this.uriFor(pathOf(model)));
-          if (!known || known.text !== cur) this.change(pathOf(model), cur);
-          const res = await this.request<{ items?: any[] } | any[] | null>("textDocument/completion", { textDocument: { uri: this.uriFor(pathOf(model)) }, position: { line: position.lineNumber - 1, character: position.column - 1 } }, 8000);
-          const items = Array.isArray(res) ? res : res?.items ?? [];
-          const range = toRange(model, position);
-          return {
-            suggestions: items.map((it) => ({
-              label: it.label,
-              kind: m.languages.CompletionItemKind[KIND[it.kind ?? 1] ?? "Text"],
-              detail: it.detail,
-              documentation: typeof it.documentation === "string" ? it.documentation : it.documentation?.value,
-              insertText: it.insertText ?? it.label,
-              insertTextRules: it.insertTextFormat === 2 ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
-              filterText: it.filterText, sortText: it.sortText, range,
-            })),
-          };
-        } catch { return { suggestions: [] }; }
+        const path = pathOf(model), cur = model.getValue(), range = toRange(model, position);
+        // context-specific items first (fields after `gold.`, symbols and timeframes from the data source, actions after THEN...);
+        // they come from the studio itself, so they still work while the language server is starting or reconnecting
+        const loc = path.endsWith(".qkt") ? localCompletions(cur, position.lineNumber, position.column, useStore.getState().scan) : { items: [], exclusive: false };
+        const kindOf = (k: string) => m.languages.CompletionItemKind[(k === "field" ? "Field" : k === "alias" ? "Variable" : k === "symbol" ? "Constant" : k === "timeframe" ? "Unit" : k === "snippet" ? "Snippet" : "Keyword") as keyof typeof m.languages.CompletionItemKind];
+        const mine: languages.CompletionItem[] = loc.items.map((i) => ({
+          label: { label: i.label, detail: i.detail ? `  ${i.detail}` : undefined }, kind: kindOf(i.kind), documentation: i.doc, insertText: i.insert,
+          insertTextRules: i.snippet ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined, filterText: i.label, sortText: `0${i.sort}`, range,
+        }));
+        if (loc.exclusive) return { suggestions: mine };
+        let lspItems: any[] = [];
+        if (await this.whenReady(loc.items.length ? 300 : 4000)) {
+          try {
+            // The editor sends changes after a short pause, but a completion is asked for at once: without this the server
+            // would answer for the text as it was a keystroke ago (the cursor is past the end of its line) and return nothing.
+            const known = this.docs.get(this.uriFor(path));
+            if (!known || known.text !== cur) this.change(path, cur);
+            const res = await this.request<{ items?: any[] } | any[] | null>("textDocument/completion", { textDocument: { uri: this.uriFor(path) }, position: { line: position.lineNumber - 1, character: position.column - 1 } }, 8000);
+            lspItems = Array.isArray(res) ? res : res?.items ?? [];
+          } catch { /* keep the local items */ }
+        }
+        const taken = new Set(loc.items.map((i) => i.label.toLowerCase()));
+        return {
+          suggestions: [...mine, ...lspItems.filter((it) => !taken.has(String(it.label).toLowerCase())).map((it) => ({
+            label: it.label,
+            kind: m.languages.CompletionItemKind[KIND[it.kind ?? 1] ?? "Text"],
+            detail: it.detail,
+            documentation: typeof it.documentation === "string" ? it.documentation : it.documentation?.value,
+            insertText: it.insertText ?? it.label,
+            insertTextRules: it.insertTextFormat === 2 ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+            filterText: it.filterText, sortText: `1${it.sortText ?? it.label}`, range,
+          }))],
+        };
       },
     });
     const hover = m.languages.registerHoverProvider("qkt", {

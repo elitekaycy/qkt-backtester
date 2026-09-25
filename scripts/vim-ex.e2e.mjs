@@ -1,0 +1,25 @@
+// Vim ex commands (:w :q :wq :N). Types into the open file and saves it: run against a scratch workspace with FILE=<path of the open strategy>.
+import { createRequire } from "node:module";
+import fs from "node:fs";
+const require = createRequire(new URL("../packages/web/package.json", import.meta.url));
+const puppeteer = require("puppeteer-core");
+const b = await puppeteer.launch({ executablePath: "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox"] });
+const p = await b.newPage(); await p.setViewport({ width: 1500, height: 900 });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+await p.evaluateOnNewDocument(() => { localStorage.clear(); localStorage.setItem("qkt-studio-ui-v3", JSON.stringify({ vim: true, autosave: false })); });
+await p.goto(process.env.BASE ?? "http://127.0.0.1:8099/"); await sleep(3500);
+const FILE = process.env.FILE;
+const toasts = () => p.evaluate(() => [...document.querySelectorAll(".toast")].map((t) => t.textContent));
+const ex = async (cmd) => { await p.keyboard.press("Escape"); await p.keyboard.down("Shift"); await p.keyboard.press("Semicolon"); await p.keyboard.up("Shift"); await p.keyboard.type(cmd); await p.keyboard.press("Enter"); await sleep(600); };
+await p.click(".monaco-editor .view-lines");
+await p.keyboard.press("Escape"); await p.keyboard.press("G"); await p.keyboard.press("o"); await p.keyboard.type("-- EXTEST"); await p.keyboard.press("Escape"); await sleep(200);
+console.log("dirty marker:", await p.evaluate(() => !!document.querySelector(".tab .unsaved")));
+await ex("w");
+console.log(":w  -> disk has it:", fs.readFileSync(FILE, "utf8").includes("-- EXTEST"), "| toasts:", JSON.stringify(await toasts()), "| dirty:", await p.evaluate(() => !!document.querySelector(".tab .unsaved")));
+await p.keyboard.press("Escape"); await p.keyboard.press("o"); await p.keyboard.type("-- EX2"); await p.keyboard.press("Escape");
+await ex("q");
+console.log(":q with unsaved -> tab still open:", await p.evaluate(() => [...document.querySelectorAll(".tab")].length), JSON.stringify(await toasts()));
+await ex("wq");
+console.log(":wq -> tabs left:", await p.evaluate(() => [...document.querySelectorAll(".tab")].map((t) => t.textContent.trim())), "| disk has EX2:", fs.readFileSync(FILE, "utf8").includes("-- EX2"));
+await ex("12"); console.log(":12 line jump ok:", await p.evaluate(() => window.__qktEditor?.getPosition()?.lineNumber));
+await b.close();
