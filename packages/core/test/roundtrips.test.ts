@@ -56,8 +56,10 @@ describe("real qkt fixture with shorts and bracket exits", () => {
   it("119 fills -> 59 closed + 1 open round trips, both sides", () => {
     expect(fills.length).toBe(119);
     expect(trips.filter((t) => !t.open).length).toBe(59);
-    expect(trips.filter((t) => t.side === "short").length).toBe(33);
-    expect(trips.filter((t) => t.side === "long").length).toBe(27 - 1);
+    // effects: 26 long opens/closes, 34 short opens vs 33 short closes -> the still-open trip is a short
+    expect(trips.filter((t) => t.side === "long" && !t.open).length).toBe(26);
+    expect(trips.filter((t) => t.side === "short" && !t.open).length).toBe(33);
+    expect(trips.filter((t) => t.open).map((t) => t.side)).toEqual(["short"]);
   });
   it("reconciles with the engine to floating-point noise", () => {
     expect(reconcile(trips, Number(result.global.realizedTotal)).ok).toBe(true);
