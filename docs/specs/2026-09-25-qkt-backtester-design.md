@@ -325,3 +325,22 @@ failure needed a "soft" level; walk-forward needed a window-length hint; qkt's d
   so no tolerance was needed on those; the 2 bps Full tolerance remains as a precaution.
 - `qkt fetch` offline behaviour, Docker Desktop, Windows, non-XAUUSD calendars: not exercised.
 - Optional upstream asks (§12) remain optional; nothing in qkt was changed.
+
+## 15. UI redesign addendum (2026-09-25)
+
+Rail + sidebar + editor/preview + dock layout with persisted, resizable panes; journal slide-over driven by
+`/api/runs/:id/analytics` and the shared trip filter (adds exit type, R, weekday, hour, day). Runs default to bars
+(`tier: draft`). Data section = `data-scan.ts` (per symbol/tf/year completeness, 2% tolerance, usable windows,
+readiness per strategy); the data root is mutable at runtime within an allowed-roots policy. Kill = `/api/kill`
+(cancel with purge, stop jobs, remove partial bar files). Verified by `scripts/e2e.mjs` (theme, vim, Stop leaves no run
+dir, journal filter narrows trades, labelled icon buttons). Bug found by that e2e: Modal re-ran its focus effect on every
+parent render and returned focus to the opener, so palette typing went into the editor; fixed (effect keyed on `open`).
+
+## 16. Workspace files, data semantics, sources (2026-09-25, second pass)
+
+- **Probed:** `qkt backtest` ignores config `starting_balance` (always 10000 unless `--starting-balance`); instruments are looked up in `--instruments` (default `<dataRoot>/instruments.yaml`) then a built-in table of FX majors, XAU, XAG only; `${VAR:-default}` substitution reads the process environment (no `.env` support in qkt), so the studio injects the workspace `.env` into every child it spawns (runs, jobs, LSP, terminal).
+- **Completeness** (`data-scan.ts`): per-day ok/closed/thin/missing with 24/7 detection (Saturday share, per year), fixed holidays, cross-symbol holiday inference (>=3 symbols, >=80% without data), US-holiday learning per series (neighbour years count). On the real store this turned daily CL/HG from 1882/2110 false missing days into 5/6 real ones (2012-10-29 Sandy closure, 2018-12-05), moved 2 symbols to complete, and exposed 57 empty Saturdays of an older BTC feed as weekday-schedule years rather than gaps. Tests: `test/calendar.test.ts`.
+- **Per-symbol source/window:** `symbolPrefs`/`sources` in `.qkt-studio/settings.json`; a run with overridden symbols reads a folder of symlinks (`.qkt-studio/views/<hash>`), windows are enforced with a 400 naming the symbol.
+- **Terminal (restricted):** ls/cd/cat/head/tail/tree/pwd/echo/help builtins jailed to the workspace (`term-builtins.ts`); `clear`/Ctrl+L client side.
+- **Housekeeping:** `GET /api/runs-usage`, `POST /api/runs/prune`; DELETE removes the run folder, index row and caches.
+- **Diagnostics:** qkt reports "expected X, got 'TOKEN'" at the token that failed, usually the first token of the next line; `anchorParseError` moves the marker to the end of the unfinished line above.

@@ -12,16 +12,15 @@ first, then `docs/specs/2026-09-25-qkt-backtester-design.md` (design, probe evid
 - `packages/server`: Fastify. `runner.ts` is the pipeline; `postprocess.ts` writes `runs/<id>/derived`; routes in
   `run-routes|bars-routes|check-routes|fs-routes`, jobs (grid/walk-forward/data) in `jobs.ts`, bridges in
   `lsp-bridge.ts` and `terminal.ts`.
-- `packages/web`: React + dockview + Monaco/Shiki + Lightweight Charts + ECharts. State in `src/state/store.ts`.
-- `docker/`, `sample-workspace/`, `tools/demo-data.mjs` (synthetic DEMOUSD), `scripts/e2e*.mjs`, `probes/` (throwaway
+- `packages/web`: React + zustand + Monaco (vim via monaco-vim)/Shiki + Lightweight Charts + ECharts. State in `src/state/store.ts` (data/runs) and `src/state/ui.ts` (layout, persisted). Design tokens in `src/theme.css`; sections in `src/sections`, journal in `src/journal`.
+- `docker/`, `tools/demo-data.mjs` (synthetic DEMOUSD), `scripts/e2e.mjs`, `probes/` (throwaway
   evidence from the design phase; not part of the build).
 
 ## Commands
 
 ```bash
 pnpm -r build && pnpm -r test          # server tests run the REAL qkt binary against ~/.qkt/data (skipped if absent)
-node scripts/e2e.mjs                   # needs a running studio (default :8099) with WORKSPACE=<copy of probes/ws>
-BASE=http://127.0.0.1:8090 node scripts/e2e-demo.mjs   # against a fresh container
+node scripts/e2e.mjs                   # needs a running studio (default :8099) with WORKSPACE=./workspace (a new empty folder is seeded with config, instruments and samples)
 pnpm docker:build
 ```
 
