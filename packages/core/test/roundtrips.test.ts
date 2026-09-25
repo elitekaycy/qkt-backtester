@@ -49,6 +49,28 @@ describe("real qkt fixture", () => {
   });
 });
 
+describe("real qkt fixture with shorts and bracket exits", () => {
+  const fills = parseTradesCsv(readFileSync(fx("trades-both.csv"), "utf8"));
+  const result = JSON.parse(readFileSync(fx("result-both.json"), "utf8"));
+  const trips = pairRoundTrips(fills);
+  it("119 fills -> 59 closed + 1 open round trips, both sides", () => {
+    expect(fills.length).toBe(119);
+    expect(trips.filter((t) => !t.open).length).toBe(59);
+    expect(trips.filter((t) => t.side === "short").length).toBe(33);
+    expect(trips.filter((t) => t.side === "long").length).toBe(27 - 1);
+  });
+  it("reconciles with the engine to floating-point noise", () => {
+    expect(reconcile(trips, Number(result.global.realizedTotal)).ok).toBe(true);
+  });
+  it("derived win rate matches the engine's", () => {
+    const closed = trips.filter((t) => !t.open);
+    expect(closed.filter((t) => t.pnl > 0).length / closed.length).toBeCloseTo(Number(result.global.winRate), 6);
+  });
+  it("short trips exit below entry when they win", () => {
+    for (const t of trips.filter((x) => x.side === "short" && !x.open && x.pnl > 0)) expect(t.exitPx!).toBeLessThan(t.entryPx);
+  });
+});
+
 describe("edge cases (synthetic)", () => {
   it("empty input", () => expect(pairRoundTrips([])).toEqual([]));
 

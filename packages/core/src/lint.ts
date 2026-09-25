@@ -1,0 +1,160 @@
+import { LineCounter, parseDocument, isMap, isScalar } from "yaml";
+
+export interface Diagnostic {
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+  /** 1-based, like qkt's own parse errors. */
+  line: number;
+  col: number;
+  endCol: number;
+}
+export interface Range { line: number; col: number; endCol: number }
+
+// Mirrors ExprCompiler.CANDLE_FIELDS + META_FIELDS in qkt (a stream reference is `<alias>.<field>`).
+const STREAM_FIELDS = new Set([
+  "close", "open", "high", "low", "volume", "price", "bid", "ask", "spread", "value", "timestamp",
+  "tick_size", "contract_size", "volume_step", "volume_min", "swap_long_points", "swap_short_points",
+]);
+
+/** Blank out string literals and `--` comments while preserving column positions. */
+function scrub(line: string): string {
+  let out = "", i = 0;
+  while (i < line.length) {
+    const c = line[i]!;
+    if (c === '"') {
+      let j = i + 1;
+      while (j < line.length && line[j] !== '"') j += line[j] === "\\" ? 2 : 1;
+      out += " ".repeat(Math.min(j + 1, line.length) - i);
+      i = Math.min(j + 1, line.length);
+    } else if (c === "-" && line[i + 1] === "-") {
+      out += " ".repeat(line.length - i);
+      break;
+    } else { out += c; i++; }
+  }
+  return out;
+}
+
+function declaredAliases(lines: string[]): Set<string> {
+  const aliases = new Set<string>();
+  let inSymbols = false;
+  for (const raw of lines) {
+    const l = scrub(raw);
+    if (/^SYMBOLS\b/.test(l)) { inSymbols = true; continue; }
+    if (inSymbols) {
+      if (l.trim() === "") continue;
+      if (!/^\s/.test(l)) { inSymbols = false; continue; } // next top-level section
+      const m = /^\s+([A-Za-z_]\w*)\s*=/.exec(l);
+      if (m) aliases.add(m[1]!);
+    }
+  }
+  return aliases;
+}
+
+/**
+ * qkt runs a strategy that references an undeclared stream alias inside a rule condition WITHOUT any error
+ * (it just never trades) [probed]. Catch it while the user types.
+ */
+export function lintAliases(source: string): Diagnostic[] {
+  const lines = source.split(/\r?\n/);
+  if (!lines.some((l) => /^STRATEGY\b/.test(scrub(l)))) return [];
+  const aliases = declaredAliases(lines);
+  const out: Diagnostic[] = [];
+  lines.forEach((raw, idx) => {
+    const l = scrub(raw);
+    const stream = /(?<![\w.])([a-z_]\w*)\.([a-z_]\w*)/g;
+    for (let m = stream.exec(l); m; m = stream.exec(l)) {
+      if (aliases.has(m[1]!) || !STREAM_FIELDS.has(m[2]!)) continue;
+      out.push({
+        severity: "error", code: "unknown_alias", line: idx + 1, col: m.index + 1, endCol: m.index + 1 + m[1]!.length,
+        message: `Unknown stream alias '${m[1]}'. Declared in SYMBOLS: ${[...aliases].join(", ") || "(none)"}. qkt would run without error and never trade.`,
+      });
+    }
+    const pos = /\bPOSITION\.([a-z_]\w*)/g;
+    for (let m = pos.exec(l); m; m = pos.exec(l)) {
+      if (aliases.has(m[1]!)) continue;
+      const col = m.index + "POSITION.".length + 1;
+      out.push({ severity: "warning", code: "unknown_alias", line: idx + 1, col, endCol: col + m[1]!.length, message: `POSITION.${m[1]}: '${m[1]}' is not a declared stream alias` });
+    }
+  });
+  return out;
+}
+
+/** qkt reports some semantic errors at 1:1. Find the identifier in the source and return its real range. */
+export function relocate(source: string, message: string): Range | null {
+  const lines = source.split(/\r?\n/);
+  let re: RegExp | null = null;
+  let m = /^Unknown indicator:\s*(\w+)/i.exec(message);
+  if (m) re = new RegExp(`(?<![\\w.])(${m[1]})\\s*\\(`);
+  else if ((m = /^Unknown stream alias:\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})(?=\\.|\\b)`);
+  else if ((m = /^Unknown (?:function|constant):\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})\\b`);
+  if (!re) return null;
+  for (let i = 0; i < lines.length; i++) {
+    const l = scrub(lines[i]!);
+    if (/^\s*SYMBOLS\b/.test(l) || (/^\s+\w+\s*=\s*\S+:/.test(l) && !/WHEN|AND|THEN/.test(l))) continue;
+    const mm = re.exec(l);
+    if (mm) { const col = mm.index + 1; return { line: i + 1, col, endCol: col + mm[1]!.length }; }
+  }
+  return null;
+}
+
+const SECRET_KEY = /(api[_-]?key|secret|password|passwd|token|private[_-]?key|credential|auth)/i;
+
+/** Hide secrets and env-expansions while keeping the file's structure, for the per-run config snapshot. */
+export function redactConfig(yaml: string): string {
+  return yaml
+    .split("\n")
+    .map((line) => {
+      const m = /^(\s*(?:-\s+)?)([\w.-]+)(\s*:\s*)(.*)$/.exec(line);
+      let out = line;
+      if (m && SECRET_KEY.test(m[2]!)) {
+        const val = m[4]!;
+        const comment = /\s+#.*$/.exec(val)?.[0] ?? "";
+        const core = val.replace(/\s+#.*$/, "");
+        if (core.trim() !== "" && !/^[|>][-+]?$/.test(core.trim())) out = `${m[1]}${m[2]}${m[3]}***${comment}`;
+      }
+      return out.replace(/\$\{[^}]*\}/g, "${***}");
+    })
+    .join("\n");
+}
+
+export const KNOWN_CONFIG_KEYS = new Set([
+  "source", "data_root", "starting_balance", "log_level", "runtime", "account", "execution", "promotion", "tv", "fetchers",
+  "brokers", "risk", "state", "notify", "insights", "book_risk", "market_data", "hub", "bybit",
+]);
+
+export interface Finding { severity: "error" | "warning" | "info"; code: string; message: string; line?: number; col?: number }
+
+export function checkConfig(yaml: string | null, fileExists: boolean, env: { QKT_DATA_HOME?: string }): Finding[] {
+  const out: Finding[] = [];
+  if (!fileExists || yaml === null) {
+    out.push({ severity: "error", code: "missing_config", message: "qkt.config.yaml not found. qkt would silently run on built-in defaults, so the studio blocks the run." });
+    return out;
+  }
+  const lc = new LineCounter();
+  const doc = parseDocument(yaml, { lineCounter: lc });
+  for (const e of doc.errors) {
+    const p = e.linePos?.[0];
+    out.push({ severity: "error", code: "bad_config_yaml", message: e.message.split("\n")[0]!, line: p?.line, col: p?.col });
+  }
+  if (out.length) return out;
+  const root = doc.contents;
+  if (!isMap(root)) {
+    if (yaml.trim() !== "") out.push({ severity: "error", code: "bad_config_yaml", message: "Config must be a YAML mapping (key: value pairs)" });
+    return out;
+  }
+  for (const pair of root.items) {
+    const key = isScalar(pair.key) ? String(pair.key.value) : null;
+    if (key === null) continue;
+    if (!KNOWN_CONFIG_KEYS.has(key)) {
+      const p = isScalar(pair.key) && pair.key.range ? lc.linePos(pair.key.range[0]) : undefined;
+      out.push({ severity: "warning", code: "unknown_key", message: `Unknown top-level key '${key}'. qkt ignores it silently (only unknown 'risk' keys are rejected).`, line: p?.line, col: p?.col });
+    }
+  }
+  const dr: unknown = root.get("data_root");
+  const home = env.QKT_DATA_HOME;
+  if (typeof dr === "string" && home && dr.replace(/\/+$/, "") !== home.replace(/\/+$/, "")) {
+    out.push({ severity: "warning", code: "data_root_mismatch", message: `data_root is '${dr}' but bar data is read from QKT_DATA_HOME '${home}'. --bars ignores data_root [probed].` });
+  }
+  return out;
+}

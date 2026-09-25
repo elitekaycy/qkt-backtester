@@ -1,0 +1,21 @@
+STRATEGY xau_both VERSION 1
+
+SYMBOLS
+    gold = BACKTEST:XAUUSD EVERY 15m
+
+RULES
+    WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold.close, 21)
+     AND POSITION.gold = 0
+    THEN BUY gold SIZING 0.1
+        BRACKET {
+          STOP_LOSS BY 12,
+          TAKE_PROFIT BY 24
+        }
+
+    WHEN ema(gold.close, 9) CROSSES BELOW ema(gold.close, 21)
+     AND POSITION.gold = 0
+    THEN SELL gold SIZING 0.1
+        BRACKET {
+          STOP_LOSS BY 12,
+          TAKE_PROFIT BY 24
+        }
