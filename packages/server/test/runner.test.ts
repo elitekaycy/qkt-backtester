@@ -130,6 +130,28 @@ d("happy path (Draft, October 2024)", () => {
   });
 });
 
+d("run options reach qkt and change identity", () => {
+  it("starting balance and position mode are passed through and recorded", async () => {
+    const { runId } = await runner.submit({ strategy: "strategies/xau-ema.qkt", ...oct, options: { startingBalance: 50000, positionMode: "netting" } });
+    const run = await runner.waitFor(runId);
+    expect(run.status).toBe("done");
+    expect(run.options).toEqual({ startingBalance: 50000, positionMode: "netting" });
+    expect(run.steps.find((s) => s.id === "coverage")!.command).toContain("--starting-balance 50000 --position-mode netting");
+    const eq = JSON.parse(readFileSync(path.join(ws, "runs", runId, "derived", "equity.json"), "utf8"));
+    expect(eq.equity[0]).toBe(50000);
+    const plain = await runner.submit({ strategy: "strategies/xau-ema.qkt", ...oct });
+    expect(plain.runId).not.toBe(runId);
+    await runner.waitFor(plain.runId);
+    const again = await runner.submit({ strategy: "strategies/xau-ema.qkt", ...oct, options: { positionMode: "netting", startingBalance: 50000 } });
+    expect(again).toMatchObject({ runId, cached: true });
+  });
+  it("Full-only options are refused for Draft with the reason, before anything runs", async () => {
+    await expect(runner.submit({ strategy: "strategies/xau-ema.qkt", ...oct, options: { broker: "mt5-sim" } })).rejects.toThrow(/only available in Full/);
+    await expect(runner.submit({ strategy: "strategies/xau-ema.qkt", ...oct, options: { bogus: 1 } as never })).rejects.toThrow(/unknown option/);
+    expect(existsSync(path.join(ws, "runs")) ? runDirs().length : 0).toBe(0);
+  });
+});
+
 d("Draft fidelity is disclosed", () => {
   it("a bracket strategy in Draft carries a warning before any result is trusted; a plain one does not", async () => {
     const bracket = EMA.replace("THEN BUY gold SIZING 0.1", "THEN BUY gold SIZING 0.1\n        BRACKET {\n          STOP_LOSS BY 12,\n          TAKE_PROFIT BY 24\n        }");
@@ -258,6 +280,15 @@ d("crash recovery", () => {
 });
 
 const dt = describe.skipIf(!haveQkt || !haveTicks);
+dt("Full-tier execution options", () => {
+  it("the MT5 simulator runs on ticks with an execution preset and a seed", async () => {
+    const { runId } = await runner.submit({ strategy: "strategies/xau-ema.qkt", from: "2026-02-02", to: "2026-02-09", tier: "full", allowIncomplete: true, options: { broker: "mt5-sim", execution: "mt5-basic", seed: 5 } });
+    const run = await runner.waitFor(runId);
+    expect(run.status, JSON.stringify(run.error)).toBe("done");
+    expect(run.steps.find((s) => s.id === "coverage")!.command).toContain("--broker mt5-sim --execution mt5-basic");
+  }, 120_000);
+});
+
 dt("cancel and supersede (Full tier is slow enough to interrupt)", () => {
   const full = { from: "2026-02-02", to: "2026-03-31", tier: "full" as const };
   const alive = (marker: string) => execSync(`ps -eo args | grep -F -- '${marker}' | grep -v grep | wc -l`).toString().trim();

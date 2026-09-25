@@ -27,6 +27,7 @@ RULES
      AND POSITION.gold > 0
     THEN CLOSE gold
 `;
+const BRACKET = EMA.replace("STRATEGY xau_ema", "STRATEGY xau_br").replace("THEN BUY gold SIZING 0.1", "THEN BUY gold SIZING 0.1\n        BRACKET {\n          STOP_LOSS BY 12,\n          TAKE_PROFIT BY 24\n        }");
 const PARAM = EMA.replace("STRATEGY xau_ema", "STRATEGY xau_p").replace(/ema\(gold\.close, 9\)/g, "ema(gold.close, fast)").replace(/ema\(gold\.close, 21\)/g, "ema(gold.close, slow)")
   .replace("RULES", "PARAM fast = 9\nPARAM slow = 21\n\nRULES");
 
@@ -45,6 +46,7 @@ beforeAll(async () => {
   writeFileSync(path.join(ws, "qkt.config.yaml"), "starting_balance: 10000\n");
   writeFileSync(path.join(ws, "strategies", "xau-ema.qkt"), EMA);
   writeFileSync(path.join(ws, "strategies", "param.qkt"), PARAM);
+  writeFileSync(path.join(ws, "strategies", "br.qkt"), BRACKET);
   cfg = { workspace: ws, dataRoot: realData, qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
   studio = await createStudio(cfg);
   await studio.app.listen({ port: 0, host: "127.0.0.1" });
@@ -177,6 +179,76 @@ async function readAll(res: Response): Promise<string> {
     if (Date.now() - t0 > 60_000) throw new Error("SSE did not end");
   }
 }
+
+d("journal analytics react to filters", () => {
+  let brId = "";
+  it("aggregates a real bracket run: partitions agree and exit reasons are present", async () => {
+    const r = await post("/api/runs", { strategy: "strategies/br.qkt", ...oct });
+    brId = r.json().runId;
+    await until(async () => ["done", "failed"].includes((await get(`/api/runs/${brId}`)).json().status));
+    const a = (await get(`/api/runs/${brId}/analytics`)).json();
+    expect(a.closed).toBeGreaterThan(20);
+    expect(a.daily.reduce((n: number, d: { trades: number }) => n + d.trades, 0)).toBe(a.closed);
+    expect(a.hour).toHaveLength(24);
+    expect(a.weekday).toHaveLength(7);
+    expect(a.exit.map((e: { reason: string }) => e.reason)).toEqual(expect.arrayContaining(["target", "stop"]));
+    expect(a.rHistogram).not.toBeNull();
+    expect(a.pnlHistogram.counts.reduce((x: number, y: number) => x + y, 0)).toBe(a.closed);
+  });
+  it("every filter narrows the analytics and the trade list identically", async () => {
+    const all = (await get(`/api/runs/${brId}/analytics`)).json();
+    for (const q of ["exit=target", "exit=stop", "side=long", "outcome=win", "minR=1", "weekday=2", "hour=14", "minHold=60"]) {
+      const a = (await get(`/api/runs/${brId}/analytics?${q}`)).json();
+      const t = (await get(`/api/runs/${brId}/trades?${q}&limit=1000`)).json();
+      expect(a.count, q).toBe(t.total);
+      expect(a.count, q).toBeLessThanOrEqual(all.count);
+    }
+    // a filter that changes nothing would slip through the loop above, so the selective ones must strictly narrow
+    for (const q of ["exit=target", "exit=stop", "side=short", "outcome=win", "minR=1"]) {
+      const a = (await get(`/api/runs/${brId}/analytics?${q}`)).json();
+      expect(a.count, `${q} narrows`).toBeLessThan(all.count);
+    }
+    expect((await get(`/api/runs/${brId}/analytics?exit=target`)).json().count).toBe(all.exit.find((e: { reason: string }) => e.reason === "target").trades);
+    const tg = (await get(`/api/runs/${brId}/analytics?exit=target`)).json();
+    expect(tg.wins).toBe(tg.closed);
+    expect(tg.exit).toHaveLength(1);
+    const day = all.daily[2].day;
+    const oneDay = (await get(`/api/runs/${brId}/analytics?day=${day}`)).json();
+    expect(oneDay.closed).toBe(all.daily[2].trades);
+    expect((await get(`/api/runs/${brId}/analytics?exit=bogus`)).json().count).toBe(all.count); // unknown values are ignored, not errors
+    expect((await get("/api/runs/does-not-exist/analytics")).statusCode).toBe(404);
+  });
+  it("run options travel through the HTTP API", async () => {
+    const r = await post("/api/runs", { strategy: "strategies/xau-ema.qkt", ...oct, options: { startingBalance: 20000 } });
+    expect(r.statusCode).toBe(202);
+    const id = r.json().runId as string;
+    await until(async () => ["done", "failed"].includes((await get(`/api/runs/${id}`)).json().status));
+    expect((await get(`/api/runs/${id}/derived/equity`)).json().equity[0]).toBe(20000);
+    const bad = await post("/api/runs", { strategy: "strategies/xau-ema.qkt", ...oct, options: { broker: "mt5-sim" } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toMatch(/only available in Full/);
+  });
+});
+
+d("data inventory", () => {
+  it("lists ticks and every built bar timeframe per symbol without reading data", async () => {
+    const r = (await get("/api/data/symbols")).json();
+    const x = r.symbols.find((s: { symbol: string }) => s.symbol === "XAUUSD");
+    expect(x.ticks.files).toBeGreaterThan(100);
+    expect(x.ticks.first <= "2024-10-01" && x.ticks.last >= "2026-01-01").toBe(true);
+    expect(x.bars.find((b: { tf: string }) => b.tf === "15m")).toMatchObject({ broker: "BACKTEST" });
+    expect(x.bars.find((b: { tf: string }) => b.tf === "15m").files).toBeGreaterThan(1000);
+  });
+  it("tick coverage marks present and absent days", async () => {
+    const c = (await get("/api/data/ticks/coverage?symbol=XAUUSD&from=2024-10-01&to=2024-10-08")).json();
+    expect(c.days).toHaveLength(7);
+    expect(c.days[0]).toMatchObject({ day: "2024-10-01", present: true });
+    const none = (await get("/api/data/ticks/coverage?symbol=NOPE&from=2024-10-01&to=2024-10-03")).json();
+    expect(none.summary).toEqual({ present: 0, absent: 2 });
+    expect((await get("/api/data/ticks/coverage?symbol=..&from=2024-10-01&to=2024-10-03")).statusCode).toBe(400);
+    expect((await get("/api/data/ticks/coverage?symbol=X&from=2024-10-03&to=2024-10-01")).statusCode).toBe(400);
+  });
+});
 
 d("live check of unsaved buffers", () => {
   const check = (kind: string, content: string) => post("/api/check", { kind, content });
@@ -401,9 +473,27 @@ describe("terminal helpers", () => {
   it("checkRestricted allows the whitelist and blocks escapes", () => {
     expect(checkRestricted(["qkt", "backtest", "s.qkt", "--report-dir", "runs/x"], "/w", "/d")).toBeNull();
     expect(checkRestricted(["qkt", "daemon"], "/w", "/d")).toMatch(/Not allowed/);
-    expect(checkRestricted(["ls"], "/w", "/d")).toMatch(/Only qkt/);
+    expect(checkRestricted(["rm"], "/w", "/d")).toMatch(/command not found/);
     expect(checkRestricted(["qkt", "parse", "a/../../b"], "/w", "/d")).toMatch(/\.\./);
     expect(checkRestricted(["qkt", "parse", "/etc/passwd"], "/w", "/d")).toMatch(/outside/);
     expect(checkRestricted(["qkt", "parse", "/w/s.qkt"], "/w", "/d")).toBeNull();
+  });
+});
+
+describe("run housekeeping", () => {
+  it("prune deletes the files of the chosen runs and reports the space it freed; usage lists them", async () => {
+    // relies on the runs created by earlier tests in this file being present
+    const before = (await studio.app.inject({ url: "/api/runs-usage" })).json() as { total: number; perRun: Record<string, number> };
+    const ids = Object.keys(before.perRun);
+    if (!ids.length) return;
+    const victim = ids[0]!;
+    const r = (await studio.app.inject({ method: "POST", url: "/api/runs/prune", payload: { ids: [victim] } })).json();
+    expect(r.deleted).toEqual([victim]);
+    expect(r.freedBytes).toBeGreaterThan(0);
+    expect(existsSync(path.join(ws, "runs", victim))).toBe(false);
+    expect((await studio.app.inject({ url: `/api/runs/${victim}` })).statusCode).toBe(404);
+    const after = (await studio.app.inject({ url: "/api/runs-usage" })).json() as { total: number };
+    expect(after.total).toBeLessThan(before.total);
+    expect((await studio.app.inject({ method: "POST", url: "/api/runs/prune", payload: {} })).statusCode).toBe(400);
   });
 });

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  isTerminal, MC_MAX_SIMS, overlayTrips, queryTrips, runMonteCarlo, type McMethod, type RoundTrip, type TripQuery, type TripSort,
+  analyze, filterTrips, isTerminal, MC_MAX_SIMS, overlayTrips, queryTrips, runMonteCarlo, type McMethod, type RoundTrip, type TripQuery, type TripSort,
 } from "@qkt-studio/core";
 import { resolveInJail } from "./jail.js";
 import { Runner, RunRequestError, type RunRequest } from "./runner.js";
@@ -31,6 +31,8 @@ export function parseTripQuery(q: Record<string, string | undefined>): TripQuery
     outcome: (["win", "loss", "breakeven", "open", "closed"] as const).find((o) => o === q.outcome),
     symbol: q.symbol || undefined, strategy: q.strategy || undefined,
     fromTs: time(q.from), toTs: time(q.to), minHoldMs: num(q.minHold), maxHoldMs: num(q.maxHold), minPnl: num(q.minPnl), maxPnl: num(q.maxPnl),
+    exit: (["stop", "target", "signal", "open"] as const).find((x) => x === q.exit),
+    exitFromTs: time(q.exitFrom), exitToTs: time(q.exitTo), minQty: num(q.minQty), maxQty: num(q.maxQty), id: num(q.id), minR: num(q.minR), maxR: num(q.maxR), weekday: num(q.weekday), hour: num(q.hour), day: /^\d{4}-\d{2}-\d{2}$/.test(q.day ?? "") ? q.day : undefined,
     sort: sorts.find((s) => s === q.sort), dir: q.dir === "desc" ? "desc" : "asc", offset: num(q.offset), limit: num(q.limit),
   };
 }
@@ -73,8 +75,49 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
     return reply.code(204).send();
   });
 
-  app.post<{ Params: { id: string } }>("/api/runs/:id/cancel", async (req, reply) => {
-    const ok = await runner.cancel(req.params.id);
+
+  /** Disk used by each run folder, so the UI can show what deleting frees. */
+  app.get("/api/runs-usage", async () => {
+    const root = path.join(runner.runDir("x"), "..");
+    const size = async (dir: string): Promise<number> => {
+      let n = 0;
+      for (const e of await fs.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) n += await size(p); else n += (await fs.stat(p).catch(() => null))?.size ?? 0;
+      }
+      return n;
+    };
+    const perRun: Record<string, number> = {};
+    let total = 0;
+    for (const e of await fs.readdir(root, { withFileTypes: true }).catch(() => [])) if (e.isDirectory()) { const n = await size(path.join(root, e.name)); perRun[e.name] = n; total += n; }
+    return { total, perRun };
+  });
+
+  /** Delete many runs at once: `{ ids }`, or `{ all: true }`, or `{ olderThanDays }` / `{ keepLast, strategy? }`. Active runs are cancelled first. */
+  app.post<{ Body: { ids?: string[]; all?: boolean; olderThanDays?: number; keepLast?: number; strategy?: string } }>("/api/runs/prune", async (req, reply) => {
+    const b = req.body ?? {};
+    const rows = runner.index.list({ strategy: b.strategy, limit: 100_000 });
+    let victims: string[];
+    if (Array.isArray(b.ids)) victims = b.ids.filter((x) => typeof x === "string");
+    else if (b.all) victims = rows.map((r) => r.id);
+    else if (typeof b.olderThanDays === "number" && b.olderThanDays >= 0) victims = rows.filter((r) => Date.now() - Date.parse(r.created_at) > b.olderThanDays! * 86_400_000).map((r) => r.id);
+    else if (typeof b.keepLast === "number" && b.keepLast >= 0) victims = rows.slice(b.keepLast).map((r) => r.id); // rows are newest first
+    else return reply.code(400).send({ error: "give ids, all, olderThanDays or keepLast" });
+    let freed = 0;
+    const deleted: string[] = [];
+    for (const id of victims) {
+      const dir = runner.runDir(id);
+      if (await runner.cancel(id)) await runner.waitFor(id).catch(() => undefined);
+      const size = async (d: string): Promise<number> => { let n = 0; for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) { const p = path.join(d, e.name); n += e.isDirectory() ? await size(p) : (await fs.stat(p).catch(() => null))?.size ?? 0; } return n; };
+      freed += await size(dir);
+      await fs.rm(dir, { recursive: true, force: true });
+      runner.index.remove(id); tripCache.delete(id); deleted.push(id);
+    }
+    return { deleted, freedBytes: freed };
+  });
+
+  app.post<{ Params: { id: string }; Querystring: { purge?: string } }>("/api/runs/:id/cancel", async (req, reply) => {
+    const ok = await runner.cancel(req.params.id, { purge: req.query.purge === "1" });
     return ok ? { cancelled: true } : reply.code(409).send({ error: "run is not active" });
   });
 
@@ -114,6 +157,14 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
     const trips = await loadTrips(req.params.id);
     if (!trips) return notFound(reply, "trades not available");
     return queryTrips(trips, parseTripQuery(req.query));
+  });
+
+  /** Journal aggregates for the (filtered) trades: every widget is one call, so filters make all of them react at once. */
+  app.get<{ Params: { id: string }; Querystring: Record<string, string | undefined> }>("/api/runs/:id/analytics", async (req, reply) => {
+    const trips = await loadTrips(req.params.id);
+    if (!trips) return notFound(reply, "trades not available");
+    const q = parseTripQuery(req.query);
+    return analyze(filterTrips(trips, q));
   });
 
   app.get<{ Params: { id: string }; Querystring: Record<string, string | undefined> }>("/api/runs/:id/overlay", async (req, reply) => {
