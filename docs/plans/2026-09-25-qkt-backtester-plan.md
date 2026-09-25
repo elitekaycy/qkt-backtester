@@ -1,7 +1,5 @@
 # qkt-backtester Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (native, chosen by the owner's `/goal`
-> directive to run straight through). Steps use checkbox syntax.
 
 **Goal:** A one-container browser workspace to write qkt strategies/config, run Draft/Full backtests, and study
 results (multi-timeframe charts, trade table, metrics, Monte Carlo) — without modifying qkt.
