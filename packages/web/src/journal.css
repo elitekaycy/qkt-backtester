@@ -1,0 +1,96 @@
+/* journal.css: Journal workstream. Filter bar, scrim, chart affordances, control borders, narrow-width layout. Loaded after app.css. */
+
+/* ---- control borders meet 3:1 (WCAG 1.4.11) in both themes; dividers stay quiet ---- */
+html .input, html .select, html .chipbtn { border-color: var(--ctl); }
+html .input:hover:not(:disabled), html .select:hover:not(:disabled) { border-color: var(--ink-3); }
+html .input::placeholder { color: var(--ink-3); opacity: 1; }
+html .btn:not(.ghost):not(.primary):not(.danger) { border-color: var(--ctl); }
+html .btn:not(.ghost):not(.primary):not(.danger):hover { border-color: var(--ink-3); }
+
+/* ---- scrim: dims the WHOLE app behind the journal, and only the journal is above it ---- */
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: var(--z-drawer); cursor: pointer; backdrop-filter: saturate(0.85); }
+.drawer { container-type: inline-size; container-name: drawer; }
+
+/* ---- filter bar: one search box, chips inside it ---- */
+.filterbar { position: relative; align-items: flex-start; gap: var(--s2); padding: var(--s2) var(--s5); }
+.fsearch { position: relative; flex: 1 1 320px; min-width: 240px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 34px; padding: 3px 8px; background: var(--card); border: 1px solid var(--ctl); border-radius: var(--r-md); cursor: text; transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.fsearch:hover { border-color: var(--ink-3); }
+.fsearch.focus { border-color: var(--accent-hi); box-shadow: 0 0 0 3px var(--accent-soft); }
+.fsearch.bad { border-color: var(--danger); }
+.fsearch .ico { color: var(--ink-3); flex: none; }
+.fsearch .chip { height: 24px; padding: 0 4px 0 8px; gap: 4px; font-size: var(--fs-sm); }
+.fsearch .fin { flex: 1 1 140px; min-width: 120px; height: 26px; border: 0; outline: none; background: transparent; padding: 0 4px; font-size: var(--fs-md); color: var(--ink); }
+.fsearch .fin::placeholder { color: var(--ink-3); }
+.fsug { position: absolute; left: -1px; right: -1px; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px; background: var(--card); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-2); max-height: 340px; overflow: auto; }
+.fsug li[role="option"] { display: grid; grid-template-columns: minmax(96px, 150px) 1fr auto; gap: var(--s3); align-items: center; padding: 6px var(--s2); border-radius: var(--r-sm); cursor: pointer; font-size: var(--fs-sm); }
+.fsug li[role="option"].on { background: var(--accent-soft); }
+.fsug .k { color: var(--accent-ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fsug .lbl { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fsug .grp { color: var(--ink-3); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+.fsug .foot { display: flex; gap: 6px; align-items: center; padding: 6px var(--s2) 2px; color: var(--ink-3); font-size: var(--fs-xs); border-top: 1px solid var(--line); margin-top: 4px; }
+.ferr { flex-basis: 100%; color: var(--loss-ink); font-size: var(--fs-sm); padding-left: 2px; }
+.filterbar .stat { align-self: center; white-space: nowrap; }
+.filterbar > .btn { align-self: center; }
+.fpanel { display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4); }
+.fpanel .fgroup { display: flex; align-items: center; gap: var(--s3); }
+.fpanel .fgroup .label { width: 74px; flex: none; color: var(--ink-3); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.fpanel .seg { flex-wrap: wrap; }
+.fpanel .hint { font-size: var(--fs-xs); line-height: 1.5; }
+
+/* ---- charts and tables ---- */
+.zoombar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2) var(--s3); padding-top: var(--s2); border-top: 1px solid var(--line); font-size: var(--fs-sm); color: var(--ink-2); min-height: 38px; }
+.tblwrap { overflow: auto; border-radius: var(--r-md); }
+table.tbl td.num, table.tbl th.r { font-variant-numeric: tabular-nums; }
+table.tbl tr[tabindex]:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
+table.tbl td.hcell { cursor: pointer; }
+table.tbl td.hcell:hover { box-shadow: inset 0 0 0 2px var(--accent-hi); }
+.vrow:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
+.bar-row .num { min-width: 60px; }
+.jhead h1 { line-height: 1.2; }
+.jbody { scrollbar-gutter: stable; }
+.widget .wh { min-height: 20px; }
+
+/* ---- narrow journal: the section menu folds to icons so the content keeps its room ---- */
+@container drawer (max-width: 860px) {
+  .jnav { width: 56px; padding-inline: var(--s1); align-items: stretch; }
+  .jnav h2 { justify-content: center; padding-inline: 0; }
+  .jnav h2 span, .jnav-btn span, .jnav .foot { display: none; }
+  .jnav-btn { justify-content: center; padding: 0; }
+  .jnav-btn[aria-current="page"]::before { left: -4px; }
+  .jhead { padding-inline: var(--s3); }
+  .filterbar { padding-inline: var(--s3); }
+  .jbody { padding: var(--s3); }
+}
+@container drawer (max-width: 620px) {
+  .filterbar .stat { flex-basis: 100%; }
+  .zoombar { gap: var(--s2) var(--s3); }
+}
+
+/* ---- layout fixes found by looking at every view ---- */
+/* KPI cards: as many as fit, never a clipped number or an orphan on its own row */
+.jbody .grid.cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@container (max-width: 1000px) { .jbody .grid.cols-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .jbody .grid.cols-5 > .kcard { grid-column: span 2; } }
+@container (max-width: 560px) { .jbody .grid.cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.widget .big { font-size: 24px; }
+@container (min-width: 1001px) { .jbody .grid.cols-5 .big { font-size: 20px; } }
+.jbody { container-type: inline-size; }
+.jbody .grid.cols-5 > .widget { min-width: 0; }
+/* wide two-up tables stack before they squeeze */
+@container (max-width: 1080px) { .jbody .grid.cols-2 { grid-template-columns: 1fr; } }
+.tbl-scroll, .widget:has(> table.tbl) { overflow-x: auto; }
+table.tbl.heat { min-width: 560px; }
+table.tbl.heat th, table.tbl.heat td { padding-inline: 2px; }
+/* the Year x month heat keeps every value readable */
+table.tbl.heat td { font-size: 11px; min-width: 40px; }
+table.tbl.heat th { font-size: 10px; letter-spacing: 0.02em; text-align: center; }
+
+.widget.flush > .wh { padding: var(--s4) var(--s4) var(--s2); }
+/* empty states read as one message, not a stack of fragments */
+.jbody .empty { display: block; text-align: center; padding: var(--s6) var(--s4); color: var(--ink-2); line-height: 1.6; }
+.jbody .empty > b { display: block; color: var(--ink); font-size: var(--fs-lg); margin-bottom: 4px; }
+.jbody .empty .spin { margin-right: var(--s2); vertical-align: -2px; }
+.jbody .empty .btn { margin-top: var(--s3); }
+
+/* days outside the shown month are inactive: quieter, not faded to nothing */
+.cal-cell.out { opacity: 1; }
+.cal-cell.out .d { color: var(--ink-4); }
