@@ -1,7 +1,37 @@
 {
-  "name": "@qkt-studio/core", "version": "0.1.0", "private": true, "type": "module",
-  "main": "dist/index.js", "types": "dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
-  "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run" },
-  "dependencies": { "yaml": "^2.8.0" }
+  "name": "@qkt-studio/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./lint": {
+      "types": "./dist/lint.d.ts",
+      "default": "./dist/lint.js"
+    },
+    "./strategy": {
+      "types": "./dist/strategy.d.ts",
+      "default": "./dist/strategy.js"
+    },
+    "./tripquery": {
+      "types": "./dist/tripquery.d.ts",
+      "default": "./dist/tripquery.js"
+    },
+    "./montecarlo": {
+      "types": "./dist/montecarlo.d.ts",
+      "default": "./dist/montecarlo.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  }
 }

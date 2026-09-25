@@ -1,0 +1,10 @@
+{
+  "name": "@qkt-studio/web", "version": "0.1.0", "private": true, "type": "module",
+  "scripts": { "dev": "vite", "build": "tsc --noEmit -p tsconfig.json && vite build", "test": "vitest run", "preview": "vite preview" },
+  "dependencies": {
+    "@qkt-studio/core": "workspace:*", "react": "^19.1.0", "react-dom": "^19.1.0", "dockview-react": "^8.3.1",
+    "monaco-editor": "^0.56.0", "shiki": "^4.4.3", "@shikijs/monaco": "^4.4.3", "lightweight-charts": "^5.2.1",
+    "echarts": "^6.1.0", "@xterm/xterm": "^6.0.0", "@xterm/addon-fit": "^0.11.0", "zustand": "^5.0.8"
+  },
+  "devDependencies": { "vite": "^8.3.0", "@vitejs/plugin-react": "^6.1.1", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "puppeteer-core": "^25.12.0" }
+}

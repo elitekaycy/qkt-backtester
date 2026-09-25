@@ -178,6 +178,38 @@ async function readAll(res: Response): Promise<string> {
   }
 }
 
+d("live check of unsaved buffers", () => {
+  const check = (kind: string, content: string) => post("/api/check", { kind, content });
+  it("a clean strategy has no diagnostics", async () => {
+    expect((await check("qkt", EMA)).json().diagnostics).toEqual([]);
+  });
+  it("syntax errors carry qkt's real position", async () => {
+    const d = (await check("qkt", EMA.replace("SIZING 0.1", "SIZING"))).json().diagnostics;
+    expect(d[0]).toMatchObject({ severity: "error", code: "parse" });
+    expect(d[0].line).toBeGreaterThan(1);
+  });
+  it("an unknown indicator is relocated from 1:1 to the identifier's range", async () => {
+    const d = (await check("qkt", EMA.replace("ema(gold.close, 9)", "emaa(gold.close, 9)"))).json().diagnostics;
+    expect(d[0]).toMatchObject({ code: "unknown_indicator", line: 7, col: 10, endCol: 14 });
+  });
+  it("the silent unknown-alias mistake is reported", async () => {
+    const d = (await check("qkt", EMA.replace("ema(gold.close, 9)", "ema(gld.close, 9)"))).json().diagnostics;
+    expect(d.find((x: { code: string }) => x.code === "unknown_alias")).toMatchObject({ severity: "error", line: 7 });
+  });
+  it("checks config text: YAML errors and unknown keys", async () => {
+    expect((await check("config", "starting_balance: 10000\n")).json().diagnostics).toEqual([]);
+    expect((await check("config", "data_root: [unclosed\n")).json().diagnostics[0]).toMatchObject({ severity: "error", code: "bad_config_yaml" });
+    expect((await check("config", "source: tv\nbogus: 1\n")).json().diagnostics[0]).toMatchObject({ severity: "warning", code: "unknown_key", line: 2 });
+  });
+  it("validates its input and leaves no temp files behind", async () => {
+    expect((await check("nope", "x")).statusCode).toBe(400);
+    expect((await post("/api/check", { kind: "qkt" })).statusCode).toBe(400);
+    expect((await check("qkt", "x".repeat(1024 * 1024 + 1))).statusCode).toBe(413);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(execSync("ls /tmp | grep -c '^qkt-check-' || true").toString().trim()).toBe("0");
+  });
+});
+
 d("bars and coverage", () => {
   it("serves packed columnar bars with exclusive upper bound and honest counts", async () => {
     const from = Date.UTC(2024, 9, 1), to = Date.UTC(2024, 9, 31);
@@ -209,6 +241,14 @@ d("bars and coverage", () => {
     expect(c.summary.missing).toBe(0);
     const future = (await get("/api/bars/coverage?broker=BACKTEST&symbol=XAUUSD&tf=15m&from=2031-01-05&to=2031-01-08")).json();
     expect(future.summary).toMatchObject({ missing: 3, ok: 0 });
+  });
+  it("reports the first and last day available, and nulls for an unknown symbol", async () => {
+    const r = (await get("/api/bars/range?broker=BACKTEST&symbol=XAUUSD&tf=15m")).json();
+    expect(r.first).toBe("2017-01-02");
+    expect(r.last >= "2026-01-31").toBe(true);
+    expect(r.files).toBeGreaterThan(1000);
+    expect((await get("/api/bars/range?broker=BACKTEST&symbol=NOPE&tf=15m")).json()).toMatchObject({ first: null, last: null, files: 0 });
+    expect((await get("/api/bars/range?broker=..&symbol=X&tf=15m")).statusCode).toBe(400);
   });
   it("lists the symbols and timeframes in the store", async () => {
     const s = (await get("/api/bars/symbols")).json().symbols;

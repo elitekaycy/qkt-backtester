@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { buildApp } from "./app.js";
 import { registerBarsRoutes } from "./bars-routes.js";
+import { registerCheckRoutes } from "./check-routes.js";
 import { loadConfig, type ServerConfig } from "./config.js";
 import { Jobs, registerJobRoutes } from "./jobs.js";
 import { registerLspBridge } from "./lsp-bridge.js";
@@ -16,6 +17,7 @@ export async function createStudio(cfg: ServerConfig) {
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner);
     registerBarsRoutes(a, cfg);
+    registerCheckRoutes(a, cfg);
     registerJobRoutes(a, jobs);
     registerLspBridge(a, cfg);
     registerTerminal(a, cfg);

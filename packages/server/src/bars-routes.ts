@@ -70,6 +70,14 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
     return { symbols: out };
   });
 
+  /** First and last day that has a day file for this symbol/timeframe (names only; no file reads). */
+  app.get<{ Querystring: Record<string, string | undefined> }>("/api/bars/range", async (req, reply) => {
+    const { broker, symbol, tf } = req.query;
+    if (!broker || !symbol || !tf || !NAME.test(broker) || !NAME.test(symbol) || !TF.test(tf)) return reply.code(400).send(bad("broker, symbol and tf are required"));
+    const days = (await fs.readdir(barDir(root, broker, symbol, tf)).catch(() => [] as string[])).filter((f) => /^\d{4}-\d{2}-\d{2}\.bin$/.test(f)).map((f) => f.slice(0, 10)).sort();
+    return { broker, symbol, tf, first: days[0] ?? null, last: days[days.length - 1] ?? null, files: days.length };
+  });
+
   app.get<{ Querystring: Record<string, string | undefined> }>("/api/bars", async (req, reply) => {
     const { broker, symbol, tf } = req.query;
     if (!broker || !symbol || !tf || !NAME.test(broker) || !NAME.test(symbol) || !TF.test(tf)) return reply.code(400).send(bad("broker, symbol and tf are required and must be plain identifiers"));

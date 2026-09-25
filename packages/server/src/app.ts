@@ -45,7 +45,7 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
   app.get("/api/health", async () => ({ ok: true }));
 
   if (cfg.webRoot && existsSync(cfg.webRoot)) {
-    await app.register(fastifyStatic, { root: cfg.webRoot, wildcard: false });
+    await app.register(fastifyStatic, { root: cfg.webRoot, index: ["index.html"] });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith("/api") || req.url.startsWith("/ws")) return reply.code(404).send({ error: "not found" });
       return reply.sendFile("index.html", path.resolve(cfg.webRoot!));
