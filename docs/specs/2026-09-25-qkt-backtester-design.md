@@ -1,6 +1,6 @@
 # qkt-backtester — design spec
 
-Status: approved to build by the owner's `/goal` directive (2026-09-25). Every technical claim below is
+Status: BUILT and verified (see §14). Approved to build by the owner's `/goal` directive (2026-09-25). Every technical claim below is
 tagged **[probed]** (verified against a real qkt run in this session, evidence in Appendix A) or
 **[assumed]** (not yet verified; listed in §13).
 
@@ -268,3 +268,60 @@ holiday handling in non-XAUUSD calendars. Each has a test or explicit UI disclos
 | Sweep | 6 scenarios 1.9 s; no `--report-dir`; JSON mixed with logs |
 | Walk-forward | 5 folds 3.6 s; summary + stitched OOS equity + per-fold bundles |
 | UI spike (headless Chrome) | dockview 4 panels; Shiki-highlighted Monaco + squiggle; 2 synced LWC charts (15m/1h), 40 boxes, 80 markers; ECharts; xterm; layout resize |
+
+## 14. Implementation status and verification (added after the build)
+
+Suites: core 143 tests, server 76 (real qkt + real data), web 9; browser e2e 35 checks (local, XAUUSD) and 23 checks
+(fresh Docker install with the synthetic demo). All green at the time of writing.
+
+### Edge-case register: what verifies each row
+
+| # | Status | Verified by |
+|---|---|---|
+| E1 missing config | done | runner test (never spawns qkt), lint tests |
+| E2 unknown top-level key | done | lint + `/api/check` tests |
+| E3 stack traces | done | outputs tests on real captures, runner bad-YAML test |
+| E4 unknown alias | done | lint, runner, `/api/check` tests, e2e |
+| E5 unknown indicator at 1:1 | done | relocate tests, runner test, `/api/check` test |
+| E6 one error at a time | limit, documented | not fixable without touching qkt |
+| E7 `data_root` vs `QKT_DATA_HOME` | done | container run finds bars; mismatch warning tested |
+| E8 silent coverage phase | done (UI text), no automated UI test | screenshot review |
+| E9 holidays / waive | server + UI done; the waive **button** has no automated UI test | `allowIncomplete` exercised by cancel/grid tests |
+| E10 sparse store | done | coverage API tests, coverage strip e2e |
+| E11 exclusive `--to` | done | bars tests (2021 bars), e2e |
+| E12 fills vs trades | done | roundtrips + results tests, e2e |
+| E13 realised vs unrealised | done | results tests |
+| E14 sweep | done as studio-owned grid; `extractJsonDocs` exists for `sweep --json` but the server does not call it | api grid test, demo e2e |
+| E15 Draft vs Full | done and **measured**: identical for market orders, ~7-10% apart with brackets | runner fidelity test, demo e2e |
+| E16 cancel | done | runner tests (63 ms class, no debris, no orphan) |
+| E17 foreign JVMs | done by design (only own process groups are signalled) | observed during the session |
+| E18 stale results | done in the client (run-id guards on SSE and result loads); `seq` is recorded | no dedicated test |
+| E19 data fingerprint in the hash | done | core hash tests; no end-to-end "new data changes the id" test |
+| E20 restart recovery | done | runner test |
+| E21 concurrent identical submits | done | runner + api tests |
+| E22 fill pairing | done | real long-only and long/short/bracket fixtures reconcile to <1e-12 |
+| E23 huge outputs | done | 1M-trade query test, server paging, LOD, 2M-fill refusal |
+| E24 secrets | snapshots redacted (tested); the editor necessarily shows the user's own config to that authenticated user | redact tests |
+| E25 traversal | done, and the tests **found a real hole** (a `..` identifier) that is now closed | fs, api tests |
+| E26 UID mismatch | done: the container drops to the workspace owner | docker run with host-owned mounts |
+| E27 file watching | **not implemented**: on-disk changes surface as a save conflict (etag), the tree refreshes on demand | documented deviation |
+| E28 version drift | done: schema gate, image reports its qkt version | results tests |
+| E29 LSP crash | bridge closes and the client reconnects with backoff and re-opens documents; no crash-injection test | code review only |
+| E30 two tabs | done server-side (etag 412) and in the UI (conflict banner); no e2e | fs tests |
+| E31 bundle size | done (one 301 kB worker; main bundle 5.7 MB, 1.5 MB gzipped) | build output |
+| E32 Monte Carlo < 30 trades | done | core, api tests, UI disabled state |
+
+### Found while building (not in the original register)
+
+Dot-only identifiers (`..`) escaped the bar directory; a refused terminal command exited 0; event snapshots aliased the live
+run object; `@fastify/static` served a stale file list after a rebuild; dockview ignored `initialWidth`, leaving the chart
+100 px wide; Lightweight Charts' default minimum bar spacing hid most of a month; pnpm 12 needs `allowBuilds`; qkt refuses a
+symbol without an instrument spec (the demo ships one); container root-owned bind mounts; a Draft-only fill-outside-bar
+failure needed a "soft" level; walk-forward needed a window-length hint; qkt's dash character becomes `?` in a container locale.
+
+### Open items (verified as far as possible, not further)
+
+- Bar side (bid/ask/mid) vs fills: consistent on every run tested in both tiers (81/81 fills inside bars, Full and Draft),
+  so no tolerance was needed on those; the 2 bps Full tolerance remains as a precaution.
+- `qkt fetch` offline behaviour, Docker Desktop, Windows, non-XAUUSD calendars: not exercised.
+- Optional upstream asks (§12) remain optional; nothing in qkt was changed.

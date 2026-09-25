@@ -130,6 +130,18 @@ d("happy path (Draft, October 2024)", () => {
   });
 });
 
+d("Draft fidelity is disclosed", () => {
+  it("a bracket strategy in Draft carries a warning before any result is trusted; a plain one does not", async () => {
+    const bracket = EMA.replace("THEN BUY gold SIZING 0.1", "THEN BUY gold SIZING 0.1\n        BRACKET {\n          STOP_LOSS BY 12,\n          TAKE_PROFIT BY 24\n        }");
+    writeFileSync(path.join(ws, "strategies", "br.qkt"), bracket);
+    const br = await runner.waitFor((await runner.submit({ strategy: "strategies/br.qkt", ...oct })).runId);
+    expect(br.status).toBe("done");
+    expect(br.warnings.join(" ")).toMatch(/stops, targets or brackets/);
+    const plain = await runner.waitFor((await runner.submit({ strategy: "strategies/xau-ema.qkt", ...oct })).runId);
+    expect(plain.warnings.join(" ")).not.toMatch(/stops, targets/);
+  });
+});
+
 d("failures are caught at the right step, with real positions", () => {
   it("a missing qkt.config.yaml blocks the run before qkt is ever started", async () => {
     rmSync(path.join(ws, "qkt.config.yaml"));

@@ -109,7 +109,7 @@ export function MetricsPanel() {
           <div style={{ padding: "0 10px 8px" }}>
             {integrity.checks.map((c) => (
               <div key={c.id} style={{ display: "grid", gridTemplateColumns: "16px 1fr", gap: 6, padding: "2px 0" }} title={c.detail}>
-                <span style={{ color: c.ok === null ? "var(--ink-3)" : c.ok ? "var(--ok)" : "var(--bad)" }}>{c.ok === null ? "–" : c.ok ? "✓" : "✕"}</span>
+                <span style={{ color: c.ok === null ? "var(--ink-3)" : c.ok ? "var(--ok)" : c.soft ? "var(--warn)" : "var(--bad)" }}>{c.ok === null ? "–" : c.ok ? "✓" : c.soft ? "!" : "✕"}</span>
                 <span><span className="ink2">{c.label}</span><br /><span className="muted" style={{ fontSize: 11.5 }}>{c.detail}</span></span>
               </div>
             ))}

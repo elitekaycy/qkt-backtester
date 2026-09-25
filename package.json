@@ -8,7 +8,10 @@
     "test": "pnpm -r --workspace-concurrency=1 test",
     "build": "pnpm -r build",
     "dev:server": "pnpm --filter @qkt-studio/server dev",
-    "dev:web": "pnpm --filter @qkt-studio/web dev"
+    "dev:web": "pnpm --filter @qkt-studio/web dev",
+    "e2e": "node scripts/e2e.mjs",
+    "e2e:demo": "node scripts/e2e-demo.mjs",
+    "docker:build": "docker build -f docker/Dockerfile -t qkt-backtester:local ."
   },
   "devDependencies": { "typescript": "^5.9.0", "vitest": "^3.2.0", "@types/node": "^22.0.0" }
 }

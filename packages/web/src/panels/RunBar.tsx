@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { parseStrategyInfo } from "@qkt-studio/core/strategy";
+import { parseStrategyInfo, usesIntrabarOrders } from "@qkt-studio/core/strategy";
 import { useStore } from "../state/store.js";
 import { addDays, daysBetween, fmtDur } from "../util/format.js";
 
@@ -15,6 +15,7 @@ export function RunBar({ toggles }: { toggles: Array<{ id: string; label: string
   const span = cfg.from && cfg.to ? daysBetween(cfg.from, cfg.to) : 0;
   const bad = !strategy || !cfg.from || !cfg.to || span <= 0;
   const tierOfResults = results?.meta.tier;
+  const approx = cfg.tier === "draft" && !!file && usesIntrabarOrders(file.content);
 
   return (
     <div className="topbar">
@@ -25,6 +26,7 @@ export function RunBar({ toggles }: { toggles: Array<{ id: string; label: string
         <button aria-pressed={cfg.tier === "draft"} onClick={() => store().setCfg({ tier: "draft" })} title="Draft: uses built bars (--bars). Seconds per run; bar-approximated intrabar fills.">Draft</button>
         <button aria-pressed={cfg.tier === "full"} onClick={() => store().setCfg({ tier: "full" })} title="Full: replays ticks. Slower (tens of seconds per month) and the reference result.">Full</button>
       </div>
+      {approx && <span className="badge warn" title="This strategy uses stops, targets or brackets. Draft approximates their fills from bars, so numbers can differ from Full (about 7% on the demo). Use Full to verify.">⚠ stops: Draft is approximate</span>}
       <label className="field">from <input type="date" value={cfg.from} onChange={(e) => store().setCfg({ from: e.target.value })} /></label>
       <label className="field" title="Exclusive upper bound, like qkt --to">to <input type="date" value={cfg.to} onChange={(e) => store().setCfg({ to: e.target.value })} /></label>
       <div className="seg" role="group" aria-label="Range presets">

@@ -55,3 +55,15 @@ export function uniqueStreams(streams: StreamDecl[]): StreamDecl[] {
   const seen = new Set<string>();
   return streams.filter((s) => { const k = `${s.broker}:${s.symbol}:${s.tf}`; if (seen.has(k)) return false; seen.add(k); return true; });
 }
+
+/**
+ * True when the strategy places orders whose fill depends on intrabar price movement (stops, targets, brackets,
+ * trailing or limit orders). Draft (`--bars`) approximates those fills, so its numbers can differ from Full [probed].
+ */
+export function usesIntrabarOrders(source: string): boolean {
+  for (const raw of source.split(/\r?\n/)) {
+    const line = scrub(raw);
+    if (/\b(STOP_LOSS|TAKE_PROFIT|BRACKET|TRAILING|STOP_LIMIT)\b/.test(line) || /\bORDER_TYPE\s*=\s*(STOP|LIMIT|STOP_LIMIT|TRAILING)\b/.test(line)) return true;
+  }
+  return false;
+}

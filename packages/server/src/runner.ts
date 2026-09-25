@@ -1,7 +1,7 @@
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
-  checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
+  usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
   parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, transition, uniqueStreams,
   type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
 } from "@qkt-studio/core";
@@ -237,6 +237,9 @@ export class Runner {
     const run = newRunJson({ id, hash, tier: req.tier, strategy: stratRel, from: req.from, to: req.to, params, engine, seq: this.index.nextSeq(stratRel) });
     run.auto = req.auto;
     run.studioVersion = STUDIO_VERSION;
+    if (req.tier === "draft" && Object.values(sources).some(usesIntrabarOrders)) {
+      run.warnings.push("This strategy uses stops, targets or brackets. Draft mode approximates their fills from bars, so results can differ from Full (measured ~7% on a demo). Verify with Full before trusting the numbers.");
+    }
     let resolve!: (r: RunJson) => void;
     const finished = new Promise<RunJson>((r) => { resolve = r; });
     const a: Active = {

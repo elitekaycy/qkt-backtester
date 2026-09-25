@@ -104,7 +104,8 @@ export function monthlyPnl(trips: RoundTrip[]): MonthRow[] {
   return [...m.values()].sort((a, b) => a.month.localeCompare(b.month));
 }
 
-export interface IntegrityCheck { id: string; label: string; ok: boolean | null; detail: string }
+/** `soft`: a failure that is expected for this run type (Draft bar-approximated fills) and must not fail the report. */
+export interface IntegrityCheck { id: string; label: string; ok: boolean | null; detail: string; soft?: boolean }
 export interface IntegrityReport { ok: boolean; checks: IntegrityCheck[] }
 
 export interface IntegrityInput {
@@ -117,6 +118,8 @@ export interface IntegrityInput {
   bars?: Record<string, BarCols>;
   /** Extra price tolerance (e.g. spread) for the fill-inside-bar check. */
   priceTol?: number;
+  /** Draft (bars) approximates intrabar stop/target fills, so a fill outside its bar is expected there. */
+  softFillsInBars?: boolean;
   manifest?: { ok: boolean; detail: string };
 }
 
@@ -159,9 +162,11 @@ export function integrity(inp: IntegrityInput): IntegrityReport {
       if (f.price >= bars.low[i]! - tol && f.price <= bars.high[i]! + tol) inside++;
       else { outside++; maxExc = Math.max(maxExc, f.price < bars.low[i]! ? bars.low[i]! - f.price : f.price - bars.high[i]!); }
     }
+    const soft = outside > 0 && inp.softFillsInBars === true;
     checks.push({
       id: "fillsInBars", label: "Every fill lies inside its bar", ok: outside === 0,
-      detail: `${inside} inside, ${outside} outside${outside ? ` (max excursion ${maxExc.toFixed(4)})` : ""}, ${noBar} without a bar`,
+      detail: `${inside} inside, ${outside} outside${outside ? ` (max excursion ${maxExc.toFixed(4)})` : ""}, ${noBar} without a bar${soft ? ". Expected in Draft mode: stop and target fills are approximated from bars. Run Full to verify." : ""}`,
+      ...(soft ? { soft: true } : {}),
     });
   } else checks.push({ id: "fillsInBars", label: "Every fill lies inside its bar", ok: null, detail: "not evaluated (no bars loaded)" });
 
@@ -169,7 +174,7 @@ export function integrity(inp: IntegrityInput): IntegrityReport {
     ? { id: "manifest", label: "Engine artifact checksums", ok: inp.manifest.ok, detail: inp.manifest.detail }
     : { id: "manifest", label: "Engine artifact checksums", ok: null, detail: "not evaluated" });
 
-  return { ok: checks.every((c) => c.ok !== false), checks };
+  return { ok: checks.every((c) => c.ok !== false || c.soft === true), checks };
 }
 
 /** Verify sha256/size of every artifact listed in the engine's manifest.json against the files on disk. */

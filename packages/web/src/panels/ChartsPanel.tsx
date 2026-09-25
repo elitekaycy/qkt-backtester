@@ -213,7 +213,8 @@ export function ChartsPanel() {
 
   const win = { from: Date.parse(meta.from + "T00:00:00Z"), to: Date.parse(meta.to + "T00:00:00Z") };
   const integ = results.integrity;
-  const failed = integ.checks.filter((c) => c.ok === false);
+  const failed = integ.checks.filter((c) => c.ok === false && !c.soft);
+  const soft = integ.checks.filter((c) => c.ok === false && c.soft);
   const addable = tfOptions.flatMap((o) => o.tfs.filter((tf) => !streams.some((s) => s.broker === o.broker && s.symbol === o.symbol && s.tf === tf)).map((tf) => ({ broker: o.broker, symbol: o.symbol, tf })));
 
   return (
@@ -221,8 +222,8 @@ export function ChartsPanel() {
       <div className="panel-head">
         <span className="title">Charts</span>
         <span className={`badge ${meta.tier}`}>{meta.tier === "draft" ? "Draft · bars" : "Full · ticks"}</span>
-        <span className={`badge ${failed.length ? "bad" : "ok"}`} title={integ.checks.map((c) => `${c.ok === null ? "–" : c.ok ? "✓" : "✕"} ${c.label}: ${c.detail}`).join("\n")}>
-          {failed.length ? `✕ integrity: ${failed.map((c) => c.label).join(", ")}` : "✓ chart matches engine"}
+        <span className={`badge ${failed.length ? "bad" : soft.length ? "warn" : "ok"}`} title={integ.checks.map((c) => `${c.ok === null ? "–" : c.ok ? "✓" : c.soft ? "!" : "✕"} ${c.label}: ${c.detail}`).join("\n")}>
+          {failed.length ? `✕ integrity: ${failed.map((c) => c.label).join(", ")}` : soft.length ? "! some fills outside bars (Draft approximation)" : "✓ chart matches engine"}
         </span>
         <span className="muted">{meta.from} → {meta.to} (to exclusive) · UTC</span>
         <span className="grow" />

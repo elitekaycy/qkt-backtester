@@ -84,6 +84,16 @@ describe("integrity", () => {
     const loose = integrity({ result, trips, fills: bad, bars: { "BACKTEST:XAUUSD:15m": day }, priceTol: 1000 });
     expect(loose.checks.find((c) => c.id === "fillsInBars")!.ok).toBe(true);
   });
+  it("a Draft-only fill-outside-bar failure is soft: reported, explained, and does not fail the report", () => {
+    const f0 = dayFills[0]!;
+    const rep = integrity({ result, trips, fills: [{ ...f0, price: f0.price + 500 }], bars: { "BACKTEST:XAUUSD:15m": day }, softFillsInBars: true });
+    const c = rep.checks.find((x) => x.id === "fillsInBars")!;
+    expect(c).toMatchObject({ ok: false, soft: true });
+    expect(c.detail).toMatch(/Expected in Draft mode/);
+    expect(rep.ok).toBe(true);
+    const hard = integrity({ result, trips, fills: [{ ...f0, price: f0.price + 500 }], bars: { "BACKTEST:XAUUSD:15m": day } });
+    expect(hard.ok).toBe(false);
+  });
   it("flags tampered P&L", () => {
     const tampered = trips.map((t, i) => (i === 0 ? { ...t, pnl: t.pnl + 50 } : t));
     const rep = integrity({ result, trips: tampered, fills: [] });

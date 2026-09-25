@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { parseStrategyInfo, uniqueStreams } from "../src/strategy.js";
+import { parseStrategyInfo, uniqueStreams, usesIntrabarOrders } from "../src/strategy.js";
 
 describe("parseStrategyInfo", () => {
   it("reads a plain strategy", () => {
@@ -40,5 +40,15 @@ describe("parseStrategyInfo", () => {
     expect(i.streams.length).toBeGreaterThan(0);
     expect(i.streams[0]!.symbol).toBe("XAUUSD");
     expect(i.params.some((p) => p.name === "riskPct")).toBe(true);
+  });
+});
+
+describe("usesIntrabarOrders", () => {
+  it("detects brackets, stops, targets, trailing and limit order types", () => {
+    for (const s of ["THEN BUY x SIZING 1\n  BRACKET {\n STOP_LOSS BY 1 PCT,\n TAKE_PROFIT BY 2 PCT }", "THEN BUY x SIZING 1 STOP_LOSS BY 5", "THEN SELL x SIZING 1 ORDER_TYPE = TRAILING PCT 5", "THEN BUY x SIZING 1 ORDER_TYPE = LIMIT AT 10"]) expect(usesIntrabarOrders(s), s).toBe(true);
+  });
+  it("is false for plain market-order strategies and ignores comments and strings", () => {
+    expect(usesIntrabarOrders("THEN BUY x SIZING 1 ; LOG \"hit STOP_LOSS\"\n-- BRACKET later")).toBe(false);
+    expect(usesIntrabarOrders("")).toBe(false);
   });
 });

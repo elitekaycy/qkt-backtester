@@ -94,10 +94,11 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
     result, trips, fills,
     barCounts: Object.keys(barCounts).length ? barCounts : undefined,
     bars: Object.keys(bars).length ? bars : undefined,
-    priceTol, manifest,
+    priceTol, manifest, softFillsInBars: run.tier === "draft",
   });
   if (streamNotes.length) rep.checks.push({ id: "streams", label: "Bar store coverage", ok: null, detail: streamNotes.join("; ") });
 
+  if (rep.checks.some((c) => c.id === "fillsInBars" && c.ok === false && c.soft)) warnings.push("Some fills fall outside their bar. Draft mode approximates stop and target fills from bars, so verify this strategy with a Full run.");
   const summary = summarize(result, trips);
   const eqRaw = await readEquity(path.join(engineDir, "equity_global.csv")).catch(() => ({ ts: [] as number[], eq: [] as number[] }));
   const equity = downsampleEquity(eqRaw.ts, eqRaw.eq);

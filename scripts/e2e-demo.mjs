@@ -43,7 +43,13 @@ try {
   check("results show trades and metrics", Number(k1["Trades"]) > 20 && /%$/.test(k1["Win rate"] ?? ""), JSON.stringify({ trades: k1["Trades"], win: k1["Win rate"], sharpe: k1["Sharpe"] }));
   check("shorts and longs both present (bracket strategy)", await page.evaluate(() => { const t = [...document.querySelectorAll(".kpi")]; const n = (l) => Number(t.find((k) => k.querySelector(".l").textContent === l)?.querySelector(".v").textContent); return n("Long") > 0 && n("Short") > 0; }));
   check("one chart for one timeframe, all its trades drawn", await waitFor(() => document.querySelectorAll(".chart-cell").length === 1 && document.querySelector(".chart-cell .plot").__chart.__tradesDrawn > 0));
-  check("integrity all green", await waitFor(() => /chart matches engine/.test(document.body.innerText)));
+  check("bracket strategy in Draft: run bar warns that stops are approximated", await page.evaluate(() => /stops: Draft is approximate/.test(document.querySelector(".topbar").innerText)));
+  check("Draft fill-outside-bar is amber (expected approximation), not a red failure", await waitFor(() => { const b = document.querySelector(".panel-head .badge.warn, .panel-head .badge.ok"); const t = [...document.querySelectorAll(".panel-head .badge")].map((x) => x.className + "|" + x.textContent).join(" ; "); return /warn\|! some fills outside bars|ok\|✓ chart matches engine/.test(t) && !/bad\|✕ integrity/.test(t) ? t : null; }));
+  const draftTrades = k1["Trades"], draftNet = k1["Net P&L"];
+  await page.evaluate(() => [...document.querySelectorAll(".topbar button")].find((b) => /Verify with Full/.test(b.textContent))?.click());
+  check("Verify with Full completes and the charts integrity is green", (await runDone()) === "done" && await waitFor(() => /Full · ticks/.test(document.body.innerText) && /✓ chart matches engine/.test(document.body.innerText), 30000));
+  const k2 = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll(".kpi")].map((k) => [k.querySelector(".l").textContent, k.querySelector(".v").textContent])));
+  check("Full differs from Draft for a stop/target strategy (the warning is earned)", k2["Trades"] !== draftTrades || k2["Net P&L"] !== draftNet, `Draft ${draftTrades} trades ${draftNet} vs Full ${k2["Trades"]} trades ${k2["Net P&L"]}`);
 
   // run 2: two timeframes
   await clickText(".tree-row", "demo_two_timeframes.qkt");
