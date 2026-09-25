@@ -1,0 +1,83 @@
+/* chart pane: candle colours, toolbar, trade strip, trade list. Owned by the CHART workstream. */
+:root, :root[data-theme="dark"] { --ck-up: #2fbf71; --ck-dn: #ef5350; --trade-tip-bg: #2a2c33; }
+:root[data-theme="light"] { --ck-up: #0d9558; --ck-dn: #d63a3a; --trade-tip-bg: #ffffff; }
+
+.chart-body { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; outline: none; }
+.chart-body:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
+.chart-area { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.chart-area[data-layout="grid"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(200px, 1fr); }
+.chart-area[data-layout="grid"] .chart-cell { border-right: 1px solid var(--line); }
+.chart-area .chart-cell { min-height: 160px; min-width: 0; }
+.chart-cell.maximized { position: absolute; inset: 0; z-index: 20; background: var(--main); }
+.chart-cell .cap { top: 6px; gap: 6px; right: 64px; }
+.chart-cell .cap .ohlc { margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
+.chart-cell .cap > b { font-weight: 650; }
+.chart-cell .cap .btn.icon { background: color-mix(in srgb, var(--main) 78%, transparent); }
+
+.chart-toolbar { display: flex; align-items: center; gap: var(--s2); padding: 6px var(--s3); border-bottom: 1px solid var(--line); flex: none; flex-wrap: wrap; min-height: 40px; }
+.chart-toolbar .sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 2px; }
+.chart-toolbar .grow { flex: 1; }
+.chart-toolbar .stepper { display: inline-flex; align-items: center; gap: 2px; font-size: var(--fs-sm); color: var(--ink-2); }
+.chart-toolbar .stepper .num { min-width: 64px; text-align: center; }
+.chart-toolbar .btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; }
+.chart-tabs button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.chart-menu { display: flex; flex-direction: column; gap: var(--s1); padding: var(--s2); }
+.chart-menu ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.chart-menu li { display: flex; align-items: center; gap: 4px; padding: 3px 4px; border-radius: var(--r-sm); border: 1px solid transparent; }
+.chart-menu li:hover { background: var(--hover); }
+.chart-menu li.dragging { opacity: 0.45; }
+.chart-menu li.over { border-top-color: var(--accent-hi); }
+.chart-menu li label { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; }
+.chart-menu li .grip { color: var(--ink-3); cursor: grab; display: inline-flex; }
+.chart-menu li input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+
+.trade-tip { position: absolute; z-index: 8; pointer-events: none; width: 236px; background: var(--trade-tip-bg); color: var(--ink); border: 1px solid var(--line-2); border-radius: var(--r-md); box-shadow: var(--shadow-2); padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.trade-tip b { font-size: var(--fs-sm); }
+.trade-tip em { color: var(--ink-3); font-style: normal; margin-top: 2px; }
+
+.trade-strip { flex: none; border-top: 1px solid var(--line); background: var(--main); padding: 6px var(--s3) 8px; display: flex; flex-direction: column; gap: 6px; }
+.trade-strip.empty-strip { flex-direction: row; align-items: center; justify-content: space-between; gap: var(--s3); font-size: var(--fs-sm); min-height: 34px; flex-wrap: wrap; }
+.trade-strip .legend { display: inline-flex; gap: var(--s3); color: var(--ink-3); font-size: var(--fs-xs); flex-wrap: wrap; }
+.trade-strip .head { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
+.trade-strip .head .side { font-size: var(--fs-md); }
+.trade-strip .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px var(--s3); }
+.trade-strip .tf { display: flex; flex-direction: column; min-width: 0; }
+.trade-strip .tf .l { font-size: var(--fs-xs); color: var(--ink-3); }
+.trade-strip .tf .v { font-size: var(--fs-sm); font-weight: 560; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trade-strip .tf .v .muted { font-weight: 400; font-size: var(--fs-xs); }
+
+.trades-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-x: auto; }
+.trades-tab > .trades-scroll { min-width: 780px; }
+.trades-tab.multi > .trades-scroll { min-width: 850px; }
+.trades-tab > .trades-filters { position: sticky; left: 0; }
+.trades-filters { display: flex; align-items: center; gap: var(--s2); padding: 6px var(--s3); border-bottom: 1px solid var(--line); flex-wrap: wrap; flex: none; }
+.trades-head, .trow { display: grid; grid-template-columns: 40px 68px minmax(112px, 1.3fr) 48px 72px repeat(3, minmax(64px, 1fr)) 84px minmax(72px, 1fr) 62px; min-width: 780px; align-items: center; gap: 8px; padding: 0 var(--s3); font-size: var(--fs-sm); }
+.trades-tab.multi .trades-head, .trades-tab.multi .trow { grid-template-columns: 40px 68px 64px minmax(112px, 1.3fr) 48px 72px repeat(3, minmax(64px, 1fr)) 84px minmax(72px, 1fr) 62px; min-width: 850px; }
+.trades-head { height: 26px; color: var(--ink-3); font-size: var(--fs-xs); border-bottom: 1px solid var(--line); flex: none; font-weight: 550; }
+.trades-head .r, .trow .r { text-align: right; }
+.trades-scroll { flex: 1; min-height: 0; overflow: auto; }
+.trow { position: absolute; left: 0; right: 0; cursor: pointer; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.trow:hover { background: var(--hover); }
+.trow.sel { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent-hi); }
+.trow > span { overflow: hidden; text-overflow: ellipsis; }
+.trow .long, .trow .short { font-weight: 560; }
+
+.trade-strip .tf.wide { grid-column: span 2; }
+.chart-cell .cap .badge { flex: none; }
+
+/* the trade search sits in a narrow pane: chips wrap onto more lines instead of pushing the pane sideways */
+.trades-tab > .trades-filters { width: 100%; max-width: 100%; min-width: 0; }
+.trades-tab .filterbar.compact { flex-wrap: wrap; min-width: 0; }
+.trades-tab .filterbar.compact .fsearch { flex-wrap: wrap; flex: 1 1 100%; min-width: 0; height: auto; min-height: 34px; }
+.trades-tab .filterbar.compact .fsearch .fin { min-width: 120px; flex: 1 1 120px; }
+.trades-tab .fsug { max-width: calc(100vw - 32px); }
+.stepper { display: inline-flex; align-items: center; gap: var(--s2); }
+.stepper .step-count { min-width: 96px; text-align: center; font-size: var(--fs-sm); color: var(--ink-2); white-space: nowrap; }
+
+/* trades that scaled in list each entry with its own stop, target and risk */
+.trade-strip .entries { width: 100%; border-collapse: collapse; margin-top: var(--s2); font-size: var(--fs-xs); }
+.trade-strip .entries th { text-align: left; color: var(--ink-3); font-weight: 550; padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.trade-strip .entries td { padding: 2px 6px; border-bottom: 1px solid var(--line); }
+.trade-strip .entries .r { text-align: right; }
+.trade-strip { max-height: 42%; overflow: auto; }
