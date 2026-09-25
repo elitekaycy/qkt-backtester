@@ -1,0 +1,19 @@
+{
+  "schema": "qkt-report-bundle-v1",
+  "schemaVersion": 1,
+  "selfHashIncluded": false,
+  "generatedAt": "2026-09-16T10:58:39.693512471Z",
+  "qktVersion": "0.49.0",
+  "gitSha": "107bb211",
+  "artifacts": [
+    {"path": "result.json", "sha256": "sha256:56eec49b9160f4b6b86afd2a473148952aba257f692ec3819d5c003b4d6ccea5", "bytes": 394045},
+    {"path": "equity_global.csv", "sha256": "sha256:4fcbb489b92a806307f979af97cff23436d20deb68e2f9edf7deedd48a4e6a2a", "bytes": 57301},
+    {"path": "equity_xau_ema.csv", "sha256": "sha256:4fcbb489b92a806307f979af97cff23436d20deb68e2f9edf7deedd48a4e6a2a", "bytes": 57301},
+    {"path": "trades.csv", "sha256": "sha256:9f918d5a3b83edc1be4108274b1f8621e48b0fb198399078fbc52c3de9508e46", "bytes": 22253},
+    {"path": "financing.csv", "sha256": "sha256:3dc97d9daa5c6230ccc056a75efc5b3a50265f3380d1edfcd334635f172d31e0", "bytes": 55},
+    {"path": "rejections.csv", "sha256": "sha256:c2af13ab23a385ce234286ab2ca09e7eb85ad078edd508f31862c28734f86fba", "bytes": 33},
+    {"path": "orders.jsonl", "sha256": "sha256:835a70b32f521ddfc3661e33fc6a09d076aa9c6f43edd5216a97df84f14e46ad", "bytes": 38043},
+    {"path": "pnl_components.csv", "sha256": "sha256:71428b2f7f49ff2f7c8059771387c7df7dd4f1b32df3ed445e18f62a3c1ef8cd", "bytes": 2946},
+    {"path": "report.html", "sha256": "sha256:7404579a28f6b613fa4cef42a2aa9294fb6f74a67747b2fca984fe06389e36bc", "bytes": 119302}
+  ]
+}

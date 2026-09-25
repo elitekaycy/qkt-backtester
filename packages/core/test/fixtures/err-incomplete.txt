@@ -1,0 +1,7 @@
+qkt: tick coverage XAUUSD 73/77 trading days
+qkt: error: incomplete data for XAUUSD:
+  2026-01-19  incomplete (empty hours 20,21,22)
+  2026-02-16  incomplete (empty hours 20,21,22)
+  2026-04-02  incomplete (empty hours 21,22)
+  2026-04-03  missing
+  re-run with --allow-incomplete to proceed anyway

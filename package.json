@@ -1,0 +1,14 @@
+{
+  "name": "qkt-backtester",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "build": "pnpm -r build",
+    "dev:server": "pnpm --filter @qkt-studio/server dev",
+    "dev:web": "pnpm --filter @qkt-studio/web dev"
+  },
+  "devDependencies": { "typescript": "^5.9.0", "vitest": "^3.2.0", "@types/node": "^22.0.0" }
+}

@@ -1,0 +1,8 @@
+qkt: bar coverage BACKTEST:NOPE 0/4 trading days (15m)
+Exception in thread "main" com.qkt.backtest.IncompleteDataException: --bars: incomplete built bars for BACKTEST:NOPE: 0/4 trading days; missing 2024-10-01,2024-10-02,2024-10-03,2024-10-04. Run: qkt data build-bars NOPE --tf 15m --from 2024-10-01 --to 2024-10-05
+  re-run with --allow-incomplete to proceed anyway
+	at com.qkt.cli.BacktestContext$Companion.resolveBarReplay-pYhUBlY(BacktestContext.kt:388)
+	at com.qkt.cli.BacktestContext$Companion.build(BacktestContext.kt:492)
+	at com.qkt.cli.BacktestCommand.run(BacktestCommand.kt:63)
+	at com.qkt.cli.MainKt.runMain(Main.kt:21)
+	at com.qkt.cli.MainKt.main(Main.kt:4)

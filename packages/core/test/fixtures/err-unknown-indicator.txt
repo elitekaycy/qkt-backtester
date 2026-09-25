@@ -1,0 +1,2 @@
+/tmp/bad1.qkt:1:1 — Unknown indicator: emaa
+1 error

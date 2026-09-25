@@ -1,0 +1,2 @@
+/tmp/bad4.qkt:12:1 — expected expression, got ''
+1 error

@@ -1,0 +1,35 @@
+Exception in thread "main" while parsing a flow sequence
+ in reader, line 1, column 12:
+    data_root: [unclosed
+               ^
+expected ',' or ']', but got <stream end>
+ in reader, line 2, column 1:
+    
+    ^
+
+	at org.snakeyaml.engine.v2.parser.ParserImpl$ParseFlowSequenceEntry.produce(ParserImpl.java:847)
+	at org.snakeyaml.engine.v2.parser.ParserImpl.lambda$produce$1(ParserImpl.java:232)
+	at java.base/java.util.Optional.ifPresent(Optional.java:178)
+	at org.snakeyaml.engine.v2.parser.ParserImpl.produce(ParserImpl.java:232)
+	at org.snakeyaml.engine.v2.parser.ParserImpl.peekEvent(ParserImpl.java:206)
+	at org.snakeyaml.engine.v2.comments.CommentEventsCollector$1.peek(CommentEventsCollector.java:57)
+	at org.snakeyaml.engine.v2.comments.CommentEventsCollector$1.peek(CommentEventsCollector.java:43)
+	at org.snakeyaml.engine.v2.comments.CommentEventsCollector.collectEvents(CommentEventsCollector.java:135)
+	at org.snakeyaml.engine.v2.comments.CommentEventsCollector.collectEvents(CommentEventsCollector.java:115)
+	at org.snakeyaml.engine.v2.composer.Composer.composeScalarNode(Composer.java:244)
+	at org.snakeyaml.engine.v2.composer.Composer.composeNode(Composer.java:206)
+	at org.snakeyaml.engine.v2.composer.Composer.composeSequenceNode(Composer.java:277)
+	at org.snakeyaml.engine.v2.composer.Composer.composeNode(Composer.java:208)
+	at org.snakeyaml.engine.v2.composer.Composer.composeValueNode(Composer.java:364)
+	at org.snakeyaml.engine.v2.composer.Composer.composeMappingChildren(Composer.java:343)
+	at org.snakeyaml.engine.v2.composer.Composer.composeMappingNode(Composer.java:321)
+	at org.snakeyaml.engine.v2.composer.Composer.composeNode(Composer.java:210)
+	at org.snakeyaml.engine.v2.composer.Composer.next(Composer.java:162)
+	at org.snakeyaml.engine.v2.composer.Composer.getSingleNode(Composer.java:128)
+	at org.snakeyaml.engine.v2.api.Load.loadOne(Load.java:110)
+	at org.snakeyaml.engine.v2.api.Load.loadFromString(Load.java:146)
+	at com.qkt.cli.Config$Companion.load(Config.kt:382)
+	at com.qkt.cli.BacktestContext$Companion.build(BacktestContext.kt:487)
+	at com.qkt.cli.BacktestCommand.run(BacktestCommand.kt:63)
+	at com.qkt.cli.MainKt.runMain(Main.kt:21)
+	at com.qkt.cli.MainKt.main(Main.kt:4)
