@@ -55,3 +55,10 @@ RULES
 export const CONFIG_TEMPLATE = `# qkt.config.yaml. qkt reads this file from the working directory of every run.
 starting_balance: 10000
 `;
+
+/** Vim keybindings (monaco-vim) with a status line. Returns a disposer. Loaded lazily so it costs nothing when off. */
+export async function enableVim(editor: import("monaco-editor/editor/editor.api.js").editor.IStandaloneCodeEditor, statusEl: HTMLElement): Promise<() => void> {
+  const { initVimMode } = await import("monaco-vim");
+  const vim = initVimMode(editor, statusEl);
+  return () => vim.dispose();
+}

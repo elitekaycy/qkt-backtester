@@ -64,6 +64,16 @@ export class LspClient {
 
   dispose(): void { this.closed = true; this.ws?.close(); }
 
+  /** Resolve once the connection is ready (or after `ms`): a completion asked for during a reconnect waits instead of returning nothing. */
+  private whenReady(ms: number): Promise<boolean> {
+    if (this.ready) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const tick = () => { if (this.ready) resolve(true); else if (this.closed || Date.now() - t0 >= ms) resolve(false); else setTimeout(tick, 100); };
+      tick();
+    });
+  }
+
   private send(msg: object, force = false): void {
     const s = JSON.stringify({ jsonrpc: "2.0", ...msg });
     if (this.ws && this.ws.readyState === WebSocket.OPEN && (this.ready || force)) this.ws.send(s);
@@ -120,9 +130,13 @@ export class LspClient {
     const completion = m.languages.registerCompletionItemProvider("qkt", {
       triggerCharacters: [".", " "],
       provideCompletionItems: async (model, position): Promise<languages.CompletionList> => {
-        if (!this.ready) return { suggestions: [] };
+        if (!(await this.whenReady(4000))) return { suggestions: [] };
         try {
-          const res = await this.request<{ items?: any[] } | any[] | null>("textDocument/completion", { textDocument: { uri: this.uriFor(pathOf(model)) }, position: { line: position.lineNumber - 1, character: position.column - 1 } });
+          // The editor sends changes after a short pause, but a completion is asked for at once: without this the server
+          // would answer for the text as it was a keystroke ago (the cursor is past the end of its line) and return nothing.
+          const cur = model.getValue(), known = this.docs.get(this.uriFor(pathOf(model)));
+          if (!known || known.text !== cur) this.change(pathOf(model), cur);
+          const res = await this.request<{ items?: any[] } | any[] | null>("textDocument/completion", { textDocument: { uri: this.uriFor(pathOf(model)) }, position: { line: position.lineNumber - 1, character: position.column - 1 } }, 8000);
           const items = Array.isArray(res) ? res : res?.items ?? [];
           const range = toRange(model, position);
           return {
