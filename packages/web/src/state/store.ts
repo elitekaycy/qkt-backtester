@@ -1,8 +1,12 @@
+import { anchorParseError } from "@qkt-studio/core/lint";
 import { create } from "zustand";
+import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { api, ApiError, openRunEvents, type Equity, type Info, type RunMeta, type RunRow, type TreeEntry } from "../api/client.js";
-import type { Diagnostic, IntegrityReport, MonthRow, RoundTrip, RunJson, Summary, Tier, TripQuery } from "../api/types.js";
+import { api, ApiError, openRunEvents, type Equity, type Info, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
+import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJson, RunOptions, ScanReport, Summary, Tier, TripQuery } from "../api/types.js";
 import { addDays } from "../util/format.js";
+import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
+import type { SymbolReport } from "../api/types.js";
 
 export interface OpenFile { path: string; content: string; saved: string; etag: string; conflict?: boolean }
 export interface Progress { phase: string; fills: number; orders: number; elapsedMs: number; etaMs: number | null }
@@ -10,7 +14,8 @@ export interface Results { runId: string; summary: Summary; integrity: Integrity
 export interface Toast { id: number; kind: "info" | "error" | "ok"; text: string }
 export type DiagSource = "lsp" | "check" | "run" | "config";
 
-export interface RunConfig { tier: Tier; from: string; to: string; autoRun: boolean; paramsByStrategy: Record<string, Record<string, string>> }
+export interface RunConfig { tier: Tier; from: string; to: string; autoRun: boolean; paramsByStrategy: Record<string, Record<string, string>>; options: RunOptions; allowIncomplete: boolean }
+export interface TrackedJob { id: string; label: string; status: "running" | "done" | "failed" | "cancelled"; message?: string }
 
 const PREF_KEY = "qkt-studio-prefs-v1";
 function loadPrefs(): Partial<RunConfig & { theme: "dark" | "light" }> {
@@ -37,6 +42,26 @@ interface State {
   lastStrategy: string | null;
 
   cfg: RunConfig;
+
+  settings: SettingsView | null;
+  scan: ScanReport | null;
+  readiness: Readiness[];
+  /** Reports of symbols read from a source other than the default (their own source's view). */
+  overrideReports: Record<string, SymbolReport | undefined>;
+  /** Symbol whose detail dialog is open. */
+  symbolDialog: string | null;
+  openSymbol(symbol: string | null): void;
+  /** The server's last message when a run was refused (e.g. window outside a symbol's range); shown in Run settings. */
+  submitError: string | null;
+  setSymbolPref(symbol: string, pref: { source?: string | null; from?: string | null; to?: string | null }): Promise<void>;
+  resetSymbolPrefs(): Promise<void>;
+  autoFindSources(): Promise<Array<{ symbol: string; source: string; days: number }>>;
+  addSource(path: string): Promise<string[]>;
+  removeSource(path: string): Promise<void>;
+  scanning: boolean;
+  jobs: TrackedJob[];
+  /** Runs ticked for side-by-side comparison in the Journal. */
+  compare: string[];
 
   runId: string | null;
   run: RunJson | null;
@@ -79,7 +104,16 @@ interface State {
   applyDefaultRange(): Promise<void>;
 
   startRun(opts?: { allowIncomplete?: boolean; force?: boolean; tier?: Tier; auto?: boolean }): Promise<void>;
-  cancelRun(): Promise<void>;
+  /** Stop the current run and remove everything it wrote. */
+  stopRun(): Promise<void>;
+  /** Stop every run and job and clean up partially written files. */
+  killAll(): Promise<void>;
+  refreshData(force?: boolean): Promise<void>;
+  setDataRoot(path: string | null): Promise<string[]>;
+  trackJob(id: string, label: string): void;
+  toggleCompare(id: string): void;
+  reorderFiles(from: string, to: string): void;
+  setOption<K extends keyof RunOptions>(key: K, value: RunOptions[K] | undefined): void;
   selectRun(id: string): Promise<void>;
   loadResults(id: string): Promise<void>;
   refreshRuns(): Promise<void>;
@@ -91,6 +125,7 @@ interface State {
   setDiagnostics(path: string, source: DiagSource, list: Diagnostic[]): void;
 }
 
+const autosaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const prefs = loadPrefs();
 
 export const useStore = create<State>((set, get) => ({
@@ -98,7 +133,8 @@ export const useStore = create<State>((set, get) => ({
   theme: prefs.theme === "light" ? "light" : "dark",
   toasts: [],
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
-  cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun === true, paramsByStrategy: prefs.paramsByStrategy ?? {} },
+  cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun === true, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
+  settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, scanning: false, jobs: [], compare: [],
   runId: null, run: null, progress: null, logs: [], running: false, runs: [],
   results: null, resultsStale: false,
   filters: {}, selectedTrip: null, focus: null,
@@ -117,6 +153,7 @@ export const useStore = create<State>((set, get) => ({
     if (first) await get().openFile(first.path);
     await get().refreshRuns();
     if (!get().cfg.from || !get().cfg.to) await get().applyDefaultRange();
+    void get().refreshData();
   },
 
   toast(kind, text) {
@@ -164,7 +201,12 @@ export const useStore = create<State>((set, get) => ({
     });
   },
   setActive(path) { set((s) => ({ activePath: path, lastStrategy: isStrategy(path) ? path : s.lastStrategy })); },
-  setContent(path, content) { set((s) => ({ openFiles: s.openFiles.map((f) => (f.path === path ? { ...f, content } : f)) })); },
+  setContent(path, content) {
+    set((s) => ({ openFiles: s.openFiles.map((f) => (f.path === path ? { ...f, content } : f)) }));
+    // auto-save after a pause in typing, so an edit is never lost to a reload, a crash or a forgotten Ctrl+S
+    clearTimeout(autosaveTimers.get(path));
+    if (useUi.getState().autosave) autosaveTimers.set(path, setTimeout(() => { const f = get().openFiles.find((x) => x.path === path); if (f && f.content !== f.saved && !f.conflict) void get().saveFile(path); }, 1200));
+  },
 
   async saveFile(path) {
     const f = get().openFiles.find((x) => x.path === path);
@@ -238,7 +280,7 @@ export const useStore = create<State>((set, get) => ({
     return isStrategy(s.activePath) ? s.activePath : s.lastStrategy;
   },
   setCfg(patch) {
-    set((s) => ({ cfg: { ...s.cfg, ...patch } }));
+    set((s) => ({ cfg: { ...s.cfg, ...patch }, ...(("from" in patch || "to" in patch || "tier" in patch) ? { submitError: null } : {}) }));
     savePrefs({ ...loadPrefs(), ...get().cfg });
   },
   setParam(strategy, name, value) {
@@ -247,6 +289,10 @@ export const useStore = create<State>((set, get) => ({
   },
   async applyDefaultRange() {
     const sp = get().strategyPath();
+    const ready = get().readiness.find((r) => r.strategy === sp);
+    const allowed = ready ? (get().cfg.tier === "draft" ? ready.bars : ready.ticks).ranges : [];
+    const win = defaultWindow(allowed);
+    if (win) { get().setCfg({ from: win.from, to: win.to }); return; }
     const f = get().openFiles.find((x) => x.path === sp);
     const stream = f ? parseStrategyInfo(f.content).streams[0] : undefined;
     try {
@@ -273,9 +319,13 @@ export const useStore = create<State>((set, get) => ({
     const declared = new Map((f ? parseStrategyInfo(f.content).params : []).map((p) => [p.name, p.default]));
     const overrides = Object.fromEntries(Object.entries(cfg.paramsByStrategy[strategy] ?? {}).filter(([k, v]) => declared.has(k) && v !== "" && v !== declared.get(k)));
     closeEvents?.();
-    set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null }));
+    set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null }));
     try {
-      const { runId } = await api.submit({ strategy, from: cfg.from, to: cfg.to, tier: opts.tier ?? cfg.tier, params: overrides, allowIncomplete: opts.allowIncomplete, force: opts.force, auto: opts.auto });
+      const tier = opts.tier ?? cfg.tier;
+      const { broker, execution, slippage, ...common } = cfg.options;
+      const options: RunOptions = tier === "full" ? { ...common, broker, execution, slippage } : common;
+      const clean = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined && v !== "")) as RunOptions;
+      const { runId } = await api.submit({ strategy, from: cfg.from, to: cfg.to, tier, params: overrides, allowIncomplete: opts.allowIncomplete ?? cfg.allowIncomplete, force: opts.force, auto: opts.auto, options: clean });
       set({ runId });
       closeEvents = openRunEvents(runId, (e) => {
         if (get().runId !== runId) return;
@@ -297,13 +347,104 @@ export const useStore = create<State>((set, get) => ({
         })();
       });
     } catch (e) {
-      set({ running: false, resultsStale: false });
+      set({ running: false, resultsStale: false, submitError: e instanceof ApiError && e.status === 400 ? e.message : null });
       get().toast("error", (e as Error).message);
     }
   },
-  async cancelRun() {
+  async stopRun() {
     const id = get().runId;
-    if (id) await api.cancel(id).catch(() => undefined);
+    if (!id || !get().running) return;
+    closeEvents?.();
+    await api.cancel(id, true).catch(() => undefined);
+    set({ running: false, run: null, progress: null, runId: get().results?.runId ?? null, resultsStale: false });
+    await get().refreshRuns();
+    get().toast("ok", "Stopped. The partial run was removed.");
+  },
+  async killAll() {
+    closeEvents?.();
+    try {
+      const k = await api.kill();
+      set((s) => ({ running: false, run: null, progress: null, resultsStale: false, runId: s.results?.runId ?? null, jobs: s.jobs.map((j) => (j.status === "running" ? { ...j, status: "cancelled" as const } : j)) }));
+      await get().refreshRuns();
+      void get().refreshData(true);
+      get().toast("ok", k.runs.length + k.jobs.length ? `Stopped ${k.runs.length} run(s) and ${k.jobs.length} job(s); partial output removed.` : "Nothing was running.");
+    } catch (e) { get().toast("error", (e as Error).message); }
+  },
+  async refreshData(force = false) {
+    set({ scanning: true });
+    try {
+      const [settings, scan, ready] = await Promise.all([api.settings(), api.scan(force), api.readiness(force)]);
+      // symbols pointed at another source are judged by THAT source's report, and every strategy is re-evaluated with the
+      // per-symbol windows applied (the server's readiness only knows the default source)
+      const overrideReports: Record<string, SymbolReport | undefined> = {};
+      await Promise.all(Object.entries(settings.symbolPrefs).filter(([, p]) => p.source).map(async ([sym, p]) => {
+        try { overrideReports[sym] = (await api.symbolDetail(sym)).sources.find((x) => x.root === p.source)?.report ?? undefined; } catch { /* keep the default report */ }
+      }));
+      const readiness = ready.strategies.map((r) => recomputeReadiness(r, scan, settings.symbolPrefs, overrideReports));
+      set({ settings, scan, readiness, overrideReports, scanning: false });
+    } catch (e) { set({ scanning: false }); if (!(e instanceof ApiError && e.status === 401)) get().toast("error", `Data scan failed: ${(e as Error).message}`); }
+  },
+  openSymbol(symbol) { set({ symbolDialog: symbol }); },
+  async setSymbolPref(symbol, pref) {
+    const r = await api.setSymbolPref(symbol, pref);
+    set({ settings: r });
+    void get().refreshData(true); // readiness follows; the dialog does not wait for a full rescan
+  },
+  async resetSymbolPrefs() {
+    const r = await api.resetSymbolPrefs();
+    set({ settings: r });
+    await get().refreshData(true);
+    get().toast("ok", "Every symbol now uses the default source and the full range found there.");
+  },
+  async autoFindSources() {
+    const r = await api.autoFind();
+    set({ settings: r });
+    await get().refreshData(true);
+    get().toast("ok", r.changes.length ? `Auto-find moved ${r.changes.length} symbol(s) to a better source.` : `Checked ${r.sourcesChecked} source${r.sourcesChecked === 1 ? "" : "s"}: the default source is already the best for every symbol.`);
+    return r.changes;
+  },
+  async addSource(path) {
+    const r = await api.addSource(path);
+    set({ settings: r });
+    void get().refreshData(true);
+    return r.warnings;
+  },
+  async removeSource(path) {
+    const r = await api.removeSource(path);
+    set({ settings: r });
+    void get().refreshData(true);
+  },
+  async setDataRoot(path) {
+    const r = await api.setDataRoot(path);
+    set({ settings: r });
+    await get().refreshData(true);
+    await get().applyDefaultRange();
+    return r.warnings;
+  },
+  trackJob(id, label) {
+    set((s) => ({ jobs: [{ id, label, status: "running" as const }, ...s.jobs.filter((j) => j.id !== id)].slice(0, 12) }));
+    const poll = async () => {
+      const j = await api.job(id).catch(() => null);
+      if (!j) return;
+      set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? { ...x, status: j.status, message: j.error?.message ?? (j.cleaned?.length ? `${j.cleaned.length} partial file(s) removed` : undefined) } : x)) }));
+      if (j.status === "running") setTimeout(poll, 700);
+      else { void get().refreshData(true); if (j.status === "done") get().toast("ok", `${label} finished`); else if (j.status === "failed") get().toast("error", `${label} failed: ${j.error?.message ?? "see log"}`); }
+    };
+    void poll();
+  },
+  toggleCompare(id) { set((s) => ({ compare: s.compare.includes(id) ? s.compare.filter((x) => x !== id) : [...s.compare, id].slice(-4) })); },
+  reorderFiles(from, to) {
+    set((s) => {
+      const a = s.openFiles.findIndex((f) => f.path === from), b = s.openFiles.findIndex((f) => f.path === to);
+      if (a < 0 || b < 0 || a === b) return s;
+      const next = [...s.openFiles]; const [m] = next.splice(a, 1); next.splice(b, 0, m!);
+      return { openFiles: next };
+    });
+  },
+  setOption(key, value) {
+    const options = { ...get().cfg.options };
+    if (value === undefined || value === "") delete options[key]; else options[key] = value;
+    get().setCfg({ options });
   },
   async selectRun(id) {
     closeEvents?.();
@@ -337,6 +478,10 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setDiagnostics(path, source, list) {
+    if (path.endsWith(".qkt") && list.length) {
+      const text = get().openFiles.find((f) => f.path === path)?.content;
+      if (text !== undefined) list = list.map((d) => (d.severity === "error" ? { ...d, ...anchorParseError(text, d) } : d));
+    }
     set((s) => {
       const cur = { ...(s.problems[path] ?? {}) };
       if (list.length) cur[source] = list; else delete cur[source];
