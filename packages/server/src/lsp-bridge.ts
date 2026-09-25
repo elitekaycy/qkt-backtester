@@ -1,3 +1,4 @@
+import { spawnEnv } from "./workspace-env.js";
 import type { FastifyInstance } from "fastify";
 import { spawn } from "node:child_process";
 import type { ServerConfig } from "./config.js";
@@ -14,7 +15,7 @@ export function registerLspBridge(app: FastifyInstance, cfg: ServerConfig): void
   app.get("/ws/lsp", { websocket: true }, (socket) => {
     if (active >= MAX_EDITORS) { socket.close(1013, "too many editor sessions"); return; }
     active++;
-    const child = spawn(cfg.qktBin, ["lsp"], { cwd: cfg.workspace, env: { ...process.env, QKT_DATA_HOME: cfg.dataRoot }, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const child = spawn(cfg.qktBin, ["lsp"], { cwd: cfg.workspace, env: spawnEnv(cfg), stdio: ["pipe", "pipe", "pipe"], detached: true });
     let buf = Buffer.alloc(0);
     let alive = true;
 

@@ -1,11 +1,24 @@
 import os from "node:os";
 import path from "node:path";
 
+export interface SymbolPref {
+  /** Absolute data folder for this symbol; omitted = the default source. */
+  source?: string;
+  /** Inclusive first day and exclusive last day (like qkt --to) the strategies may use for this symbol; omitted = whatever the source has. */
+  from?: string; to?: string;
+}
+
 export interface ServerConfig {
   /** Directory the user owns: qkt.config.yaml, strategies/, runs/. */
   workspace: string;
   /** qkt data store root; also exported to every child as QKT_DATA_HOME (bars ignore config data_root). */
   dataRoot: string;
+  /** The data source the server started with (env); the UI can change `dataRoot` at runtime. */
+  defaultDataRoot?: string;
+  /** Extra data folders the user added (besides `dataRoot`); a symbol can be pointed at any of them. Persisted in the workspace. */
+  sources?: string[];
+  /** Per-symbol data preferences. Absent = use `dataRoot` and the full range found there. */
+  symbolPrefs?: Record<string, SymbolPref>;
   qktBin: string;
   port: number;
   host: string;
@@ -30,6 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     workspace: path.resolve(env.WORKSPACE ?? process.cwd()),
     dataRoot: path.resolve(env.QKT_DATA_HOME ?? path.join(os.homedir(), ".qkt", "data")),
+    defaultDataRoot: path.resolve(env.QKT_DATA_HOME ?? path.join(os.homedir(), ".qkt", "data")),
     qktBin: env.QKT_BIN ?? "qkt",
     port: Number(env.PORT ?? 8080),
     host,

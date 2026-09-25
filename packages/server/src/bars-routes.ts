@@ -1,7 +1,9 @@
+import { rootFor } from "./settings.js";
 import type { FastifyInstance } from "fastify";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { availableTimeframes, barDir, lodAggregate, packBars, readBars, tfToMs } from "@qkt-studio/core";
+import { barCountOf } from "./barfile.js";
 import type { ServerConfig } from "./config.js";
 
 const DAY_MS = 86_400_000;
@@ -20,20 +22,6 @@ const toMs = (v: string | undefined): number | null => {
   const d = Date.parse(v);
   return Number.isNaN(d) ? null : d;
 };
-
-/** Bar count of a day file from its header alone (no column reads). */
-async function barCountOf(file: string): Promise<number | null> {
-  let fh;
-  try { fh = await fs.open(file, "r"); } catch { return null; }
-  try {
-    const buf = Buffer.alloc(256);
-    const { bytesRead } = await fh.read(buf, 0, 256, 0);
-    if (bytesRead < 28 || buf.toString("latin1", 0, 4) !== "QKB1") return null;
-    const symLen = buf.readInt32LE(20);
-    const at = 24 + symLen;
-    return at + 4 <= bytesRead ? buf.readInt32LE(at) : null;
-  } finally { await fh.close(); }
-}
 
 /**
  * Per-day store coverage. A day file with 0 bars is one qkt wrote for a closed day; no file at all means the
@@ -56,15 +44,65 @@ export async function dayCoverage(dataRoot: string, broker: string, symbol: stri
 }
 
 export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): void {
-  const root = cfg.dataRoot;
+  /** The data source can be changed from the UI at runtime, so it is read on every request. */
+  const rootOf = (symbol?: string) => (symbol ? rootFor(cfg, symbol) : cfg.dataRoot);
   const bad = (msg: string) => ({ error: msg });
+
+  /**
+   * Inventory of the data store for the Data section: per symbol, the tick files (with the fetcher's manifest) and every
+   * bar timeframe that has been built, each with its first/last day and file count. Names only; no data is read.
+   */
+  app.get("/api/data/symbols", async () => {
+    const days = async (dir: string, ext: RegExp) => (await fs.readdir(dir).catch(() => [] as string[])).filter((f) => ext.test(f)).map((f) => f.slice(0, 10)).sort();
+    const bySymbol = new Map<string, { symbol: string; ticks: null | { files: number; first: string | null; last: string | null; source?: string; ranges?: unknown }; bars: Array<{ broker: string; tf: string; files: number; first: string | null; last: string | null }> }>();
+    const entry = (symbol: string) => { let e = bySymbol.get(symbol); if (!e) { e = { symbol, ticks: null, bars: [] }; bySymbol.set(symbol, e); } return e; };
+    for (const symbol of await fs.readdir(path.join(rootOf(), "symbols")).catch(() => [] as string[])) {
+      if (!NAME.test(symbol)) continue;
+      const dir = path.join(rootOf(), "symbols", symbol);
+      const d = await days(dir, /^\d{4}-\d{2}-\d{2}\.csv(\.gz)?$/);
+      const manifest = JSON.parse(await fs.readFile(path.join(dir, "manifest.json"), "utf8").catch(() => "null")) as { source?: string; ranges?: unknown } | null;
+      entry(symbol).ticks = { files: d.length, first: d[0] ?? null, last: d[d.length - 1] ?? null, source: manifest?.source, ranges: manifest?.ranges };
+    }
+    for (const broker of await fs.readdir(path.join(rootOf(), "bars")).catch(() => [] as string[])) {
+      if (!NAME.test(broker)) continue;
+      for (const symbol of await fs.readdir(path.join(rootOf(), "bars", broker)).catch(() => [] as string[])) {
+        if (!NAME.test(symbol)) continue;
+        for (const tf of await availableTimeframes(rootOf(), broker, symbol)) {
+          const d = await days(barDir(rootOf(), broker, symbol, tf), /^\d{4}-\d{2}-\d{2}\.bin$/);
+          entry(symbol).bars.push({ broker, tf, files: d.length, first: d[0] ?? null, last: d[d.length - 1] ?? null });
+        }
+      }
+    }
+    return { dataRoot: rootOf(), symbols: [...bySymbol.values()].sort((a, b) => a.symbol.localeCompare(b.symbol)) };
+  });
+
+  /** Which tick day files exist in [from, to). Ticks have no calendar here: a weekend without a file is normal. */
+  app.get<{ Querystring: Record<string, string | undefined> }>("/api/data/ticks/coverage", async (req, reply) => {
+    const { symbol } = req.query;
+    const from = toMs(req.query.from), to = toMs(req.query.to);
+    if (!symbol || !NAME.test(symbol)) return reply.code(400).send(bad("symbol is required"));
+    if (from === null || to === null || to <= from) return reply.code(400).send(bad("from/to required; to is exclusive"));
+    if ((to - from) / DAY_MS > MAX_BAR_DAYS) return reply.code(400).send(bad(`range longer than ${MAX_BAR_DAYS} days`));
+    const dir = path.join(rootOf(), "symbols", symbol);
+    const present = new Map<string, number>();
+    for (const f of await fs.readdir(dir).catch(() => [] as string[])) {
+      const m = /^(\d{4}-\d{2}-\d{2})\.csv(\.gz)?$/.exec(f);
+      if (m) present.set(m[1]!, (await fs.stat(path.join(dir, f)).catch(() => null))?.size ?? 0);
+    }
+    const days: Array<{ day: string; present: boolean; bytes: number }> = [];
+    for (let d = Math.floor(from / DAY_MS) * DAY_MS; d < to; d += DAY_MS) {
+      const iso = new Date(d).toISOString().slice(0, 10);
+      days.push({ day: iso, present: present.has(iso), bytes: present.get(iso) ?? 0 });
+    }
+    return { symbol, days, summary: { present: days.filter((x) => x.present).length, absent: days.filter((x) => !x.present).length } };
+  });
 
   app.get("/api/bars/symbols", async () => {
     const out: Array<{ broker: string; symbol: string; timeframes: string[] }> = [];
-    const brokers = await fs.readdir(path.join(root, "bars")).catch(() => [] as string[]);
+    const brokers = await fs.readdir(path.join(rootOf(), "bars")).catch(() => [] as string[]);
     for (const broker of brokers) {
-      for (const symbol of await fs.readdir(path.join(root, "bars", broker)).catch(() => [] as string[])) {
-        out.push({ broker, symbol, timeframes: await availableTimeframes(root, broker, symbol) });
+      for (const symbol of await fs.readdir(path.join(rootOf(), "bars", broker)).catch(() => [] as string[])) {
+        out.push({ broker, symbol, timeframes: await availableTimeframes(rootOf(), broker, symbol) });
       }
     }
     return { symbols: out };
@@ -74,7 +112,7 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
   app.get<{ Querystring: Record<string, string | undefined> }>("/api/bars/range", async (req, reply) => {
     const { broker, symbol, tf } = req.query;
     if (!broker || !symbol || !tf || !NAME.test(broker) || !NAME.test(symbol) || !TF.test(tf)) return reply.code(400).send(bad("broker, symbol and tf are required"));
-    const days = (await fs.readdir(barDir(root, broker, symbol, tf)).catch(() => [] as string[])).filter((f) => /^\d{4}-\d{2}-\d{2}\.bin$/.test(f)).map((f) => f.slice(0, 10)).sort();
+    const days = (await fs.readdir(barDir(rootOf(symbol), broker, symbol, tf)).catch(() => [] as string[])).filter((f) => /^\d{4}-\d{2}-\d{2}\.bin$/.test(f)).map((f) => f.slice(0, 10)).sort();
     return { broker, symbol, tf, first: days[0] ?? null, last: days[days.length - 1] ?? null, files: days.length };
   });
 
@@ -85,7 +123,7 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
     if (from === null || to === null || to <= from) return reply.code(400).send(bad("from/to required; to is exclusive and must be after from"));
     if ((to - from) / DAY_MS > MAX_BAR_DAYS) return reply.code(400).send(bad(`range longer than ${MAX_BAR_DAYS} days`));
     const max = Math.min(Math.max(Number(req.query.max ?? 5000) || 5000, 100), 20_000);
-    const r = await readBars(root, broker, symbol, tf, from, to);
+    const r = await readBars(rootOf(symbol), broker, symbol, tf, from, to);
     const cols = lodAggregate(r.cols, max);
     const body = packBars(cols);
     return reply
@@ -103,7 +141,7 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
     const from = toMs(req.query.from), to = toMs(req.query.to);
     if (from === null || to === null || to <= from) return reply.code(400).send(bad("from/to required; to is exclusive"));
     if ((to - from) / DAY_MS > MAX_BAR_DAYS) return reply.code(400).send(bad(`range longer than ${MAX_BAR_DAYS} days`));
-    const days = await dayCoverage(root, broker, symbol, tf, from, to);
+    const days = await dayCoverage(rootOf(symbol), broker, symbol, tf, from, to);
     const count = (s: DayStatus) => days.filter((d) => d.status === s).length;
     return { broker, symbol, tf, days, summary: { ok: count("ok"), thin: count("thin"), closed: count("closed"), missing: count("missing") } };
   });

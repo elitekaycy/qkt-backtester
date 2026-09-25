@@ -1,3 +1,4 @@
+import { spawnEnv } from "./workspace-env.js";
 import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -6,6 +7,8 @@ import { normalizeError, parseStrategyInfo, type RunError, type Tier } from "@qk
 import type { ServerConfig } from "./config.js";
 import { resolveInJail } from "./jail.js";
 import { downsampleEquity } from "./postprocess.js";
+import { cleanupPartialFiles, validBarFile, validGzip } from "./cleanup.js";
+import { invalidateScan } from "./data-scan.js";
 import { spawnGroup, type ProcHandle } from "./proc.js";
 import { Runner, RunRequestError } from "./runner.js";
 
@@ -21,6 +24,8 @@ export interface Job {
   command?: string;
   log: string[];
   progress?: { done: number; total: number };
+  /** Files removed because the job was interrupted while writing them. */
+  cleaned?: string[];
   result?: unknown;
   error?: RunError;
 }
@@ -46,11 +51,12 @@ export class Jobs {
   private jobs = new Map<string, Job>();
   private procs = new Map<string, ProcHandle>();
   private cancelled = new Set<string>();
+  private meta = new Map<string, { sinceMs: number; dir: string; pattern: RegExp; validate: (b: Buffer) => boolean }>();
 
   constructor(private cfg: ServerConfig, private runner: Runner) {}
 
   private get dir() { return path.join(this.cfg.workspace, ".qkt-studio", "jobs"); }
-  private env() { return { ...process.env, QKT_DATA_HOME: this.cfg.dataRoot }; }
+  private env() { return spawnEnv(this.cfg); }
 
   async init(): Promise<void> {
     await fs.mkdir(this.dir, { recursive: true });
@@ -93,8 +99,15 @@ export class Jobs {
     if (!job || job.status !== "running") return false;
     this.cancelled.add(id);
     await this.procs.get(id)?.kill();
-    if (job.kind === "grid") for (const r of (job.result as { rows: Array<{ runId?: string }> } | undefined)?.rows ?? []) if (r.runId) void this.runner.cancel(r.runId);
+    if (job.kind === "grid") for (const r of (job.result as { rows: Array<{ runId?: string }> } | undefined)?.rows ?? []) if (r.runId) void this.runner.cancel(r.runId, { purge: true });
     return true;
+  }
+
+  /** Stop every running job. Returns their ids. */
+  async cancelAll(): Promise<string[]> {
+    const ids = [...this.jobs.values()].filter((j) => j.status === "running").map((j) => j.id);
+    await Promise.all(ids.map((id) => this.cancel(id)));
+    return ids;
   }
 
   // ---- data jobs ----------------------------------------------------------------------------------------------
@@ -105,15 +118,23 @@ export class Jobs {
     need(r.from && DATE.test(r.from) && r.to && DATE.test(r.to) && Date.parse(r.from) < Date.parse(r.to), "from/to must be YYYY-MM-DD with from before to");
   }
 
+  private async cleanup(job: Job): Promise<void> {
+    const m = this.meta.get(job.id);
+    if (!m) return;
+    const removed = await cleanupPartialFiles(m.dir, m.sinceMs, m.pattern, m.validate);
+    if (removed.length) { job.cleaned = removed; this.pushLog(job, `removed ${removed.length} partially written file(s): ${removed.slice(0, 5).join(", ")}${removed.length > 5 ? "…" : ""}`); }
+    invalidateScan();
+  }
+
   private runProcess(job: Job, args: string[], after?: (code: number | null, stderr: string) => Promise<void>): void {
     job.command = `${this.cfg.qktBin} ${args.map(quote).join(" ")}`;
     const proc = spawnGroup(this.cfg.qktBin, args, { cwd: this.cfg.workspace, env: this.env(), timeoutMs: 60 * 60_000, onLine: (l) => this.pushLog(job, l) });
     this.procs.set(job.id, proc);
     void proc.exited.then(async (exit) => {
       this.procs.delete(job.id);
-      if (this.cancelled.has(job.id)) return this.finish(job, "cancelled", { kind: "cancelled", message: "Cancelled" });
-      if (exit.code !== 0) return this.finish(job, "failed", normalizeError(exit.stderr, exit.code));
-      try { await after?.(exit.code, exit.stderr); this.finish(job, "done"); }
+      if (this.cancelled.has(job.id)) { await this.cleanup(job); return this.finish(job, "cancelled", { kind: "cancelled", message: "Stopped. Partially written files were removed." }); }
+      if (exit.code !== 0) { await this.cleanup(job); return this.finish(job, "failed", normalizeError(exit.stderr, exit.code)); }
+      try { await after?.(exit.code, exit.stderr); invalidateScan(); this.finish(job, "done"); }
       catch (e) { this.finish(job, "failed", { kind: "internal", message: (e as Error).message }); }
     });
   }
@@ -121,6 +142,7 @@ export class Jobs {
   buildBars(req: { symbol: string; tf: string; from: string; to: string }): Job {
     this.validateRange(req);
     const job = this.create("build-bars");
+    this.meta.set(job.id, { sinceMs: Date.now(), dir: path.join(this.cfg.dataRoot, "bars", "BACKTEST", req.symbol, req.tf), pattern: /^\d{4}-\d{2}-\d{2}\.bin$/, validate: validBarFile });
     this.runProcess(job, ["data", "build-bars", req.symbol, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
     return job;
   }
@@ -129,6 +151,7 @@ export class Jobs {
     this.validateRange(req);
     need(req.broker && NAME.test(req.broker), "broker must be a plain identifier");
     const job = this.create("fetch");
+    this.meta.set(job.id, { sinceMs: Date.now(), dir: path.join(this.cfg.dataRoot, "symbols", req.symbol), pattern: /\.csv\.gz$/, validate: validGzip });
     this.runProcess(job, ["fetch", `${req.broker}:${req.symbol}`, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
     return job;
   }

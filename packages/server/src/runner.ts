@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { prepareDataView, allowedWindow } from "./data-view.js";
+import { configStartingBalance } from "@qkt-studio/core";
+import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
+import { rootFor } from "./settings.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
@@ -10,6 +15,7 @@ import { RunIndex, type IndexRow } from "./index-db.js";
 import { JailError, resolveInJail, toRel } from "./jail.js";
 import { postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
 import { execQkt, spawnGroup, type ProcHandle } from "./proc.js";
+import { optionArgs, OptionsError, validateOptions, type RunOptions } from "./run-options.js";
 
 export interface RunRequest {
   strategy: string;
@@ -23,6 +29,8 @@ export interface RunRequest {
   force?: boolean;
   /** Auto-run on save: a newer auto run of the same strategy cancels this one. */
   auto?: boolean;
+  /** Extra qkt options (starting balance, position mode, seed; broker/execution/slippage for Full runs). */
+  options?: RunOptions;
 }
 
 export class RunRequestError extends Error {
@@ -44,6 +52,9 @@ class Cancelled extends Error {}
 
 interface Active {
   run: RunJson;
+  /** Data folder qkt reads for this run: the source itself, or a folder of symlinks when symbols come from different sources. */
+  dataRoot: string;
+  wsEnv: WorkspaceEnv;
   dir: string;
   cancelled: boolean;
   proc?: ProcHandle;
@@ -55,6 +66,8 @@ interface Active {
   logCount: number;
   finished: Promise<RunJson>;
   resolve: (r: RunJson) => void;
+  /** Delete the run directory (and its history row) once it has stopped: used by Stop/kill. */
+  purge?: boolean;
   request: RunRequest;
   stratAbs: string;
   stratSource: string;
@@ -135,6 +148,7 @@ export class Runner {
     if (span <= 0) throw new RunRequestError("'to' must be after 'from' (the upper bound is exclusive)");
     if (span > MAX_RANGE_DAYS) throw new RunRequestError(`range is longer than ${MAX_RANGE_DAYS} days`);
     if (req.tier !== "draft" && req.tier !== "full") throw new RunRequestError("tier must be 'draft' or 'full'");
+    try { validateOptions(req.tier, req.options); } catch (e) { if (e instanceof OptionsError) throw new RunRequestError(e.message); throw e; }
     for (const [k, v] of Object.entries(req.params ?? {})) {
       if (!/^[A-Za-z_]\w*$/.test(k)) throw new RunRequestError(`invalid param name '${k}'`);
       if (typeof v !== "string" || v.length > 200 || /[\n\r\0]/.test(v)) throw new RunRequestError(`invalid value for param '${k}'`);
@@ -172,8 +186,8 @@ export class Runner {
     const days: string[] = [];
     for (let d = start; d < end; d += DAY_MS) days.push(isoDay(d));
     const paths: string[] = [];
-    if (tier === "draft") for (const s of streams) for (const d of days) paths.push(path.join(this.cfg.dataRoot, "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
-    else for (const sym of new Set(streams.map((s) => s.symbol))) for (const d of days) paths.push(path.join(this.cfg.dataRoot, "symbols", sym, `${d}.csv.gz`));
+    if (tier === "draft") for (const s of streams) for (const d of days) paths.push(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
+    else for (const sym of new Set(streams.map((s) => s.symbol))) for (const d of days) paths.push(path.join(rootFor(this.cfg, sym), "symbols", sym, `${d}.csv.gz`));
     const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
     for (let i = 0; i < paths.length; i += 256) {
       const stats = await Promise.all(paths.slice(i, i + 256).map((p) => fs.stat(p).then((s) => ({ path: p, size: s.size, mtimeMs: s.mtimeMs }), () => null)));
@@ -204,10 +218,17 @@ export class Runner {
     const cfgAbs = path.join(ws, "qkt.config.yaml");
     const configText = await fs.readFile(cfgAbs, "utf8").catch(() => "");
     const files = await this.dataFiles(streams, req.tier, req.from, req.to);
+    const wsEnv = await loadWorkspaceEnv(ws);
+    // per-symbol data windows (Data -> symbol): a run may not reach outside them
+    const win = allowedWindow(this.cfg, streams.map((s) => s.symbol));
+    if (win.from && req.from < win.from) throw new RunRequestError(`The window starts ${req.from}, before ${win.from}, the start you set for ${win.by.from} in Data. Move the start date or change that symbol's range.`, 400);
+    if (win.to && req.to > win.to) throw new RunRequestError(`The window ends ${req.to}, after ${win.to}, the end you set for ${win.by.to} in Data. Move the end date or change that symbol's range.`, 400);
     const params = Object.fromEntries(Object.entries(req.params ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+    const options = validateOptions(req.tier, req.options);
+    if (options.startingBalance === undefined) { const sb = configStartingBalance(configText, childEnv(this.cfg, wsEnv)); if (sb !== undefined) options.startingBalance = sb; }
     const hashInput: RunHashInput = {
       strategySources: sources, config: configText, params, from: req.from, to: req.to, tier: req.tier, engine,
-      flags: req.allowIncomplete ? ["--allow-incomplete"] : [], dataFingerprint: dataFingerprint(files),
+      flags: [...(req.allowIncomplete ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
     };
     const hash = runHash(hashInput);
 
@@ -236,6 +257,7 @@ export class Runner {
 
     const run = newRunJson({ id, hash, tier: req.tier, strategy: stratRel, from: req.from, to: req.to, params, engine, seq: this.index.nextSeq(stratRel) });
     run.auto = req.auto;
+    if (Object.keys(options).length) run.options = options as Record<string, string | number>;
     run.studioVersion = STUDIO_VERSION;
     if (req.tier === "draft" && Object.values(sources).some(usesIntrabarOrders)) {
       run.warnings.push("This strategy uses stops, targets or brackets. Draft mode approximates their fills from bars, so results can differ from Full (measured ~7% on a demo). Verify with Full before trusting the numbers.");
@@ -243,7 +265,7 @@ export class Runner {
     let resolve!: (r: RunJson) => void;
     const finished = new Promise<RunJson>((r) => { resolve = r; });
     const a: Active = {
-      run, dir, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
+      run, dir, dataRoot: this.cfg.dataRoot, wsEnv, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
       finished, resolve, request: req, stratAbs, stratSource: sources[stratRel] ?? "", cfgAbs, info: { streams },
     };
     this.active.set(id, a);
@@ -313,10 +335,11 @@ export class Runner {
 
   // ---- cancel / queue -----------------------------------------------------------------------------------------
 
-  async cancel(id: string): Promise<boolean> {
+  async cancel(id: string, opts: { purge?: boolean } = {}): Promise<boolean> {
     const a = this.active.get(id);
     if (!a) return false;
     a.cancelled = true;
+    if (opts.purge) a.purge = true;
     const qi = this.queue.indexOf(a);
     if (qi >= 0) { this.queue.splice(qi, 1); await this.finishCancelled(a); return true; }
     await a.proc?.kill();
@@ -367,9 +390,9 @@ export class Runner {
 
   private guardCancel(a: Active): void { if (a.cancelled) throw new Cancelled(); }
 
-  private env(): NodeJS.ProcessEnv {
-    // Bars ignore config data_root; QKT_DATA_HOME is the only thing they honour [probed].
-    return { ...process.env, QKT_DATA_HOME: this.cfg.dataRoot };
+  private env(a: Active): NodeJS.ProcessEnv {
+    // Bars ignore config data_root; QKT_DATA_HOME is the only thing they honour [probed]. The workspace .env feeds ${VAR} in qkt.config.yaml.
+    return childEnv(this.cfg, a.wsEnv, a.dataRoot);
   }
 
   private async execute(a: Active): Promise<void> {
@@ -378,6 +401,7 @@ export class Runner {
       await this.setStatus(a, "checking");
       await this.stepProject(a); this.guardCancel(a);
       await this.stepConfig(a); this.guardCancel(a);
+      a.dataRoot = (await prepareDataView(this.cfg, a.info.streams.map((s) => s.symbol))).root;
       await this.stepParse(a); this.guardCancel(a);
       await this.stepEngine(a); this.guardCancel(a);
       await this.stepPostprocess(a);
@@ -425,8 +449,19 @@ export class Runner {
     await this.persist(a);
     this.index.upsert(r);
     this.active.delete(r.id);
+    if (a.purge) { await fs.rm(a.dir, { recursive: true, force: true }); this.index.remove(r.id); }
     a.resolve(r);
   }
+
+  /** Stop every active or queued run and remove what they had written. Returns the ids stopped. */
+  async cancelAll(opts: { purge?: boolean } = {}): Promise<string[]> {
+    const ids = [...this.active.keys()];
+    await Promise.all(ids.map((id) => this.cancel(id, opts)));
+    await Promise.all(ids.map((id) => this.waitFor(id).catch(() => undefined)));
+    return ids;
+  }
+
+  activeIds(): string[] { return [...this.active.keys()]; }
 
   private async stepProject(a: Active): Promise<void> {
     await this.startStep(a, "project");
@@ -452,7 +487,7 @@ export class Runner {
   private async stepParse(a: Active): Promise<void> {
     const cmd = `${this.cfg.qktBin} parse ${quote(a.run.strategy)}`;
     await this.startStep(a, "parse", cmd);
-    const r = await execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(), timeoutMs: 30_000 });
+    const r = await execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 });
     this.guardCancel(a);
     if (r.code !== 0) {
       const err = normalizeError(r.stderr || r.stdout, r.code);
@@ -471,7 +506,7 @@ export class Runner {
     const args = [
       "backtest", a.stratAbs, "--config", a.cfgAbs, "--from", r.from, "--to", r.to, "--no-fetch",
       ...(r.tier === "draft" ? ["--bars"] : []), ...(req.allowIncomplete ? ["--allow-incomplete"] : []),
-      ...Object.entries(r.params).flatMap(([k, v]) => ["--param", `${k}=${v}`]), "--report-dir", engineDir,
+      ...instrumentsArgs(a.wsEnv), ...Object.entries(r.params).flatMap(([k, v]) => ["--param", `${k}=${v}`]), ...optionArgs((r.options ?? {}) as RunOptions), "--report-dir", engineDir,
     ];
     r.coverage = []; r.counts = { fills: 0, orders: 0 };
     await this.startStep(a, "coverage", `${this.cfg.qktBin} ${args.map(quote).join(" ")}`);
@@ -504,7 +539,7 @@ export class Runner {
     }, 250);
 
     const proc = spawnGroup(this.cfg.qktBin, args, {
-      cwd: this.cfg.workspace, env: this.env(), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
+      cwd: this.cfg.workspace, env: this.env(a), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
       logFiles: { out: path.join(a.dir, "logs", "stdout.log"), err: path.join(a.dir, "logs", "stderr.log") }, onLine,
     });
     a.proc = proc;
@@ -538,7 +573,7 @@ export class Runner {
   private async stepPostprocess(a: Active): Promise<void> {
     await this.setStatus(a, "postprocessing");
     await this.startStep(a, "postprocess");
-    const res = await postprocess({ runDir: a.dir, run: a.run, dataRoot: this.cfg.dataRoot });
+    const res = await postprocess({ runDir: a.dir, run: a.run, dataRoot: a.dataRoot });
     a.run.warnings.push(...res.warnings);
     const bad = res.integrity.checks.filter((c) => c.ok === false);
     if (bad.length) a.run.warnings.push(`Integrity check failed: ${bad.map((c) => c.label).join("; ")}`);
@@ -546,3 +581,5 @@ export class Runner {
     await this.startStep(a, "render");
   }
 }
+
+const runHashText = (t: string) => createHash("sha256").update(t).digest("hex").slice(0, 16);
