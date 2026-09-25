@@ -6,3 +6,4 @@ export * from "./runjson.js";
 export * from "./outputs.js";
 export * from "./lint.js";
 export * from "./montecarlo.js";
+export * from "./strategy.js";

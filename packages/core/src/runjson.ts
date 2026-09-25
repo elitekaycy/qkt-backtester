@@ -1,4 +1,5 @@
 import type { Tier } from "./runid.js";
+import type { HoleDay } from "./outputs.js";
 
 export type RunStatus = "queued" | "checking" | "running" | "postprocessing" | "done" | "failed" | "cancelled" | "interrupted";
 
@@ -61,6 +62,16 @@ export interface RunJson {
   seq: number;
   /** Provenance for derived data: which studio build produced `derived/`. */
   studioVersion?: string;
+  /** True when a newer save of the same strategy may cancel this run (auto-run on save). */
+  auto?: boolean;
+  /** Engine coverage lines and the per-day holes qkt reported (empty when data was complete). */
+  coverage?: Array<{ source: "tick" | "bar"; symbol: string; covered: number; requested: number; tf?: string }>;
+  holes?: HoleDay[];
+  /** qkt's own remedy for missing bars, e.g. `qkt data build-bars XAUUSD --tf 15m --from ... --to ...`. */
+  buildBarsHint?: string;
+  /** Live counters from the engine's log stream. */
+  counts?: { fills: number; orders: number };
+  durationMs?: number;
 }
 
 export function newRunJson(p: Pick<RunJson, "id" | "hash" | "tier" | "strategy" | "from" | "to" | "params" | "engine" | "seq"> & { now?: Date }): RunJson {

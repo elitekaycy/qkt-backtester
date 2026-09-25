@@ -18,7 +18,7 @@ const STREAM_FIELDS = new Set([
 ]);
 
 /** Blank out string literals and `--` comments while preserving column positions. */
-function scrub(line: string): string {
+export function scrub(line: string): string {
   let out = "", i = 0;
   while (i < line.length) {
     const c = line[i]!;

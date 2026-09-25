@@ -1,0 +1,545 @@
+import { promises as fs, mkdirSync } from "node:fs";
+import path from "node:path";
+import {
+  checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
+  parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, transition, uniqueStreams,
+  type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
+} from "@qkt-studio/core";
+import type { ServerConfig } from "./config.js";
+import { RunIndex, type IndexRow } from "./index-db.js";
+import { JailError, resolveInJail, toRel } from "./jail.js";
+import { postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
+import { execQkt, spawnGroup, type ProcHandle } from "./proc.js";
+
+export interface RunRequest {
+  strategy: string;
+  from: string;
+  to: string;
+  tier: Tier;
+  params?: Record<string, string>;
+  /** Pass --allow-incomplete (waive the holes qkt reports). */
+  allowIncomplete?: boolean;
+  /** Force a fresh run even when an identical finished one exists. */
+  force?: boolean;
+  /** Auto-run on save: a newer auto run of the same strategy cancels this one. */
+  auto?: boolean;
+}
+
+export class RunRequestError extends Error {
+  constructor(message: string, public readonly status = 400) { super(message); }
+}
+
+export type RunEvent = { id: number } & (
+  | { t: "run"; run: RunJson }
+  | { t: "progress"; phase: string; fills: number; orders: number; elapsedMs: number; etaMs: number | null }
+  | { t: "log"; level: "info" | "warn" | "error"; message: string }
+);
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+class StepFailure extends Error {
+  constructor(public readonly step: StepId, public readonly error: RunError) { super(error.message); }
+}
+class Cancelled extends Error {}
+
+interface Active {
+  run: RunJson;
+  dir: string;
+  cancelled: boolean;
+  proc?: ProcHandle;
+  events: RunEvent[];
+  nextId: number;
+  listeners: Set<(e: RunEvent) => void>;
+  startedMs: number;
+  phase: string;
+  logCount: number;
+  finished: Promise<RunJson>;
+  resolve: (r: RunJson) => void;
+  request: RunRequest;
+  stratAbs: string;
+  stratSource: string;
+  cfgAbs: string;
+  info: { streams: StreamDecl[] };
+}
+
+const RUN_ID = /^[0-9A-Za-z][0-9A-Za-z_.-]{0,120}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+const MAX_RANGE_DAYS = 3660;
+const MAX_LOG_EVENTS = 300;
+
+const quote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : JSON.stringify(s));
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+export class Runner {
+  readonly index: RunIndex;
+  private active = new Map<string, Active>();
+  private queue: Active[] = [];
+  private running = 0;
+  private engine: { version: string; gitSha?: string } | null = null;
+
+  constructor(private cfg: ServerConfig) {
+    mkdirSync(path.join(cfg.workspace, ".qkt-studio"), { recursive: true });
+    this.index = new RunIndex(path.join(cfg.workspace, ".qkt-studio", "index.sqlite"));
+  }
+
+  get runsDir() { return path.join(this.cfg.workspace, "runs"); }
+  get workspace() { return this.cfg.workspace; }
+
+  runDir(id: string): string {
+    if (!RUN_ID.test(id)) throw new RunRequestError("invalid run id", 400);
+    return path.join(this.runsDir, id);
+  }
+
+  /** Boot: ensure dirs, mark orphaned runs interrupted, rebuild the index from disk. */
+  async init(): Promise<void> {
+    await fs.mkdir(this.runsDir, { recursive: true });
+    await fs.mkdir(path.join(this.cfg.workspace, ".qkt-studio"), { recursive: true });
+    for (const d of await fs.readdir(this.runsDir).catch(() => [] as string[])) {
+      const file = path.join(this.runsDir, d, "run.json");
+      try {
+        const run = JSON.parse(await fs.readFile(file, "utf8")) as RunJson;
+        if (!isTerminal(run.status)) {
+          run.status = transition(run.status, "interrupted");
+          run.finishedAt = new Date().toISOString();
+          run.error = { kind: "internal", message: "The studio stopped while this run was in progress." };
+          run.steps = run.steps.map((s) => (s.status === "running" ? { ...s, status: "failed" as const } : s));
+          await fs.writeFile(file, JSON.stringify(run, null, 2));
+          await fs.rm(path.join(this.runsDir, d, "engine"), { recursive: true, force: true });
+        }
+      } catch { /* not a run directory */ }
+    }
+    await this.index.reindex(this.runsDir);
+  }
+
+  async close(): Promise<void> {
+    for (const a of this.active.values()) { a.cancelled = true; await a.proc?.kill(500); }
+    this.index.close();
+  }
+
+  private async engineInfo(): Promise<{ version: string; gitSha?: string }> {
+    if (this.engine) return this.engine;
+    const r = await execQkt(this.cfg.qktBin, ["--version"], { cwd: this.cfg.workspace, timeoutMs: 20_000 });
+    const m = /^qkt (\S+)(?: \(([0-9a-f]+)\))?/.exec(r.stdout.trim());
+    if (r.code !== 0 || !m) throw new RunRequestError(`Cannot run qkt ('${this.cfg.qktBin}'): ${r.stderr.trim().slice(0, 200) || "no output"}`, 503);
+    this.engine = { version: m[1]!, gitSha: m[2] };
+    return this.engine;
+  }
+
+  // ---- submit -------------------------------------------------------------------------------------------------
+
+  private validate(req: RunRequest): void {
+    if (!req || typeof req.strategy !== "string" || !req.strategy.endsWith(".qkt")) throw new RunRequestError("strategy must be a .qkt file");
+    if (!DATE.test(req.from) || !DATE.test(req.to) || Number.isNaN(Date.parse(req.from)) || Number.isNaN(Date.parse(req.to))) throw new RunRequestError("from/to must be YYYY-MM-DD dates");
+    const span = (Date.parse(req.to) - Date.parse(req.from)) / DAY_MS;
+    if (span <= 0) throw new RunRequestError("'to' must be after 'from' (the upper bound is exclusive)");
+    if (span > MAX_RANGE_DAYS) throw new RunRequestError(`range is longer than ${MAX_RANGE_DAYS} days`);
+    if (req.tier !== "draft" && req.tier !== "full") throw new RunRequestError("tier must be 'draft' or 'full'");
+    for (const [k, v] of Object.entries(req.params ?? {})) {
+      if (!/^[A-Za-z_]\w*$/.test(k)) throw new RunRequestError(`invalid param name '${k}'`);
+      if (typeof v !== "string" || v.length > 200 || /[\n\r\0]/.test(v)) throw new RunRequestError(`invalid value for param '${k}'`);
+    }
+  }
+
+  /** The strategy file plus everything it IMPORTs, keyed by workspace-relative path. */
+  private async loadSources(stratAbs: string): Promise<{ sources: Record<string, string>; streams: StreamDecl[] }> {
+    const ws = await fs.realpath(this.cfg.workspace);
+    const sources: Record<string, string> = {};
+    const streams: StreamDecl[] = [];
+    const visit = async (abs: string, depth: number): Promise<void> => {
+      const rel = toRel(ws, abs);
+      if (sources[rel] !== undefined) return;
+      if (depth > 6 || Object.keys(sources).length > 50) throw new RunRequestError("too many nested imports");
+      let text: string;
+      try { text = await fs.readFile(abs, "utf8"); }
+      catch { throw new RunRequestError(depth === 0 ? `strategy not found: ${rel}` : `imported file not found: ${rel}`, 404); }
+      sources[rel] = text;
+      const info = parseStrategyInfo(text);
+      streams.push(...info.streams);
+      for (const imp of info.imports) {
+        let child: string;
+        try { child = await resolveInJail(ws, path.relative(ws, path.resolve(path.dirname(abs), imp.path))); }
+        catch (e) { if (e instanceof JailError) throw new RunRequestError(`import '${imp.path}' escapes the workspace`, 403); throw e; }
+        await visit(child, depth + 1);
+      }
+    };
+    await visit(stratAbs, 0);
+    return { sources, streams: uniqueStreams(streams) };
+  }
+
+  private async dataFiles(streams: StreamDecl[], tier: Tier, from: string, to: string): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
+    const start = Date.parse(from) - 14 * DAY_MS, end = Date.parse(to);
+    const days: string[] = [];
+    for (let d = start; d < end; d += DAY_MS) days.push(isoDay(d));
+    const paths: string[] = [];
+    if (tier === "draft") for (const s of streams) for (const d of days) paths.push(path.join(this.cfg.dataRoot, "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
+    else for (const sym of new Set(streams.map((s) => s.symbol))) for (const d of days) paths.push(path.join(this.cfg.dataRoot, "symbols", sym, `${d}.csv.gz`));
+    const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
+    for (let i = 0; i < paths.length; i += 256) {
+      const stats = await Promise.all(paths.slice(i, i + 256).map((p) => fs.stat(p).then((s) => ({ path: p, size: s.size, mtimeMs: s.mtimeMs }), () => null)));
+      for (const s of stats) if (s) out.push(s);
+    }
+    return out;
+  }
+
+  private submitLock: Promise<unknown> = Promise.resolve();
+
+  /** Serialised so two identical submits can never both miss the in-flight lookup. */
+  submit(req: RunRequest): Promise<{ runId: string; cached: boolean; joined: boolean }> {
+    const next = this.submitLock.then(() => this.submitInner(req), () => this.submitInner(req));
+    this.submitLock = next.catch(() => undefined);
+    return next;
+  }
+
+  private async submitInner(req: RunRequest): Promise<{ runId: string; cached: boolean; joined: boolean }> {
+    this.validate(req);
+    let stratAbs: string;
+    try { stratAbs = await resolveInJail(this.cfg.workspace, req.strategy); }
+    catch (e) { if (e instanceof JailError) throw new RunRequestError(e.message, e.status); throw e; }
+    const ws = await fs.realpath(this.cfg.workspace);
+    const stratRel = toRel(ws, stratAbs);
+    const { sources, streams } = await this.loadSources(stratAbs);
+    const engine = await this.engineInfo();
+
+    const cfgAbs = path.join(ws, "qkt.config.yaml");
+    const configText = await fs.readFile(cfgAbs, "utf8").catch(() => "");
+    const files = await this.dataFiles(streams, req.tier, req.from, req.to);
+    const params = Object.fromEntries(Object.entries(req.params ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+    const hashInput: RunHashInput = {
+      strategySources: sources, config: configText, params, from: req.from, to: req.to, tier: req.tier, engine,
+      flags: req.allowIncomplete ? ["--allow-incomplete"] : [], dataFingerprint: dataFingerprint(files),
+    };
+    const hash = runHash(hashInput);
+
+    if (!req.force) {
+      const done = this.index.findDone(hash);
+      if (done && (await fs.stat(path.join(this.runDir(done.id), "derived", "summary.json")).then(() => true, () => false))) {
+        return { runId: done.id, cached: true, joined: false };
+      }
+      const live = this.index.findActive(hash);
+      if (live && this.active.has(live.id)) return { runId: live.id, cached: false, joined: true };
+    }
+
+    if (req.auto) for (const a of this.active.values()) if (a.run.strategy === stratRel && a.request.auto) void this.cancel(a.run.id);
+
+    let id = makeRunId(new Date(), stratRel, hash);
+    for (let n = 2; await fs.stat(this.runDir(id)).then(() => true, () => false); n++) id = `${makeRunId(new Date(), stratRel, hash)}-${n}`;
+    const dir = this.runDir(id);
+    await fs.mkdir(path.join(dir, "source"), { recursive: true });
+    await fs.mkdir(path.join(dir, "logs"), { recursive: true });
+    for (const [rel, text] of Object.entries(sources)) {
+      const dest = path.join(dir, "source", rel);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.writeFile(dest, text);
+    }
+    if (configText) await fs.writeFile(path.join(dir, "source", "qkt.config.yaml"), redactConfig(configText));
+
+    const run = newRunJson({ id, hash, tier: req.tier, strategy: stratRel, from: req.from, to: req.to, params, engine, seq: this.index.nextSeq(stratRel) });
+    run.auto = req.auto;
+    run.studioVersion = STUDIO_VERSION;
+    let resolve!: (r: RunJson) => void;
+    const finished = new Promise<RunJson>((r) => { resolve = r; });
+    const a: Active = {
+      run, dir, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
+      finished, resolve, request: req, stratAbs, stratSource: sources[stratRel] ?? "", cfgAbs, info: { streams },
+    };
+    this.active.set(id, a);
+    await this.persist(a);
+    this.index.upsert(run);
+    this.queue.push(a);
+    void this.pump();
+    return { runId: id, cached: false, joined: false };
+  }
+
+  // ---- events -------------------------------------------------------------------------------------------------
+
+  private emit(a: Active, e: DistributiveOmit<RunEvent, "id">): void {
+    const ev = { ...e, id: a.nextId++ } as RunEvent;
+    if (ev.t !== "progress") {
+      a.events.push(ev);
+      if (a.events.length > MAX_LOG_EVENTS + 50) a.events.splice(0, a.events.length - MAX_LOG_EVENTS);
+      void fs.appendFile(path.join(a.dir, "logs", "events.ndjson"), JSON.stringify(ev) + "\n").catch(() => {});
+    }
+    for (const l of a.listeners) l(ev);
+  }
+
+  private log(a: Active, level: "info" | "warn" | "error", message: string): void {
+    if (a.logCount++ >= MAX_LOG_EVENTS) return;
+    this.emit(a, { t: "log", level, message: message.slice(0, 500) });
+  }
+
+  /** Replay history then stream live. `afterId` is the SSE Last-Event-ID. */
+  async subscribe(id: string, cb: (e: RunEvent) => void, afterId = 0): Promise<() => void> {
+    const a = this.active.get(id);
+    if (a) {
+      for (const e of a.events) if (e.id > afterId) cb(e);
+      a.listeners.add(cb);
+      return () => a.listeners.delete(cb);
+    }
+    const run = await this.getRun(id);
+    if (!run) throw new RunRequestError("run not found", 404);
+    let n = afterId;
+    try {
+      for (const line of (await fs.readFile(path.join(this.runDir(id), "logs", "events.ndjson"), "utf8")).split("\n")) {
+        if (!line) continue;
+        const ev = JSON.parse(line) as RunEvent;
+        if (ev.id > n && ev.t !== "run") { cb(ev); n = ev.id; }
+      }
+    } catch { /* no events file */ }
+    cb({ id: n + 1, t: "run", run });
+    return () => {};
+  }
+
+  async getRun(id: string): Promise<RunJson | null> {
+    const a = this.active.get(id);
+    if (a) return a.run;
+    try { return JSON.parse(await fs.readFile(path.join(this.runDir(id), "run.json"), "utf8")) as RunJson; }
+    catch { return null; }
+  }
+
+  list(strategy?: string, limit?: number): IndexRow[] { return this.index.list({ strategy, limit }); }
+
+  /** Resolves when the run reaches a terminal state (tests and job chaining). */
+  async waitFor(id: string): Promise<RunJson> {
+    const a = this.active.get(id);
+    if (a) return a.finished;
+    const r = await this.getRun(id);
+    if (!r) throw new RunRequestError("run not found", 404);
+    return r;
+  }
+
+  // ---- cancel / queue -----------------------------------------------------------------------------------------
+
+  async cancel(id: string): Promise<boolean> {
+    const a = this.active.get(id);
+    if (!a) return false;
+    a.cancelled = true;
+    const qi = this.queue.indexOf(a);
+    if (qi >= 0) { this.queue.splice(qi, 1); await this.finishCancelled(a); return true; }
+    await a.proc?.kill();
+    return true;
+  }
+
+  private async pump(): Promise<void> {
+    while (this.running < this.cfg.maxParallel && this.queue.length) {
+      const a = this.queue.shift()!;
+      this.running++;
+      void this.execute(a).finally(() => { this.running--; void this.pump(); });
+    }
+  }
+
+  // ---- pipeline -----------------------------------------------------------------------------------------------
+
+  private async persist(a: Active): Promise<void> {
+    const file = path.join(a.dir, "run.json");
+    const tmp = `${file}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(a.run, null, 2));
+    await fs.rename(tmp, file);
+    // Snapshot, not a reference: history and slow SSE writers must see the state as of this event.
+    this.emit(a, { t: "run", run: structuredClone(a.run) });
+  }
+
+  private step(a: Active, id: StepId): StepRecord { return a.run.steps.find((s) => s.id === id)!; }
+
+  private async setStatus(a: Active, to: RunStatus): Promise<void> {
+    a.run.status = transition(a.run.status, to);
+    await this.persist(a);
+    this.index.upsert(a.run);
+  }
+
+  private async startStep(a: Active, id: StepId, command?: string): Promise<void> {
+    const s = this.step(a, id);
+    s.status = "running"; s.startedAt = new Date().toISOString(); if (command) s.command = command;
+    a.phase = id;
+    await this.persist(a);
+  }
+
+  private async endStep(a: Active, id: StepId, status: "ok" | "warn" | "failed" | "skipped", message?: string): Promise<void> {
+    const s = this.step(a, id);
+    s.status = status;
+    if (s.startedAt) s.ms = Date.now() - Date.parse(s.startedAt);
+    if (message) s.message = message;
+    await this.persist(a);
+  }
+
+  private guardCancel(a: Active): void { if (a.cancelled) throw new Cancelled(); }
+
+  private env(): NodeJS.ProcessEnv {
+    // Bars ignore config data_root; QKT_DATA_HOME is the only thing they honour [probed].
+    return { ...process.env, QKT_DATA_HOME: this.cfg.dataRoot };
+  }
+
+  private async execute(a: Active): Promise<void> {
+    const r = a.run;
+    try {
+      await this.setStatus(a, "checking");
+      await this.stepProject(a); this.guardCancel(a);
+      await this.stepConfig(a); this.guardCancel(a);
+      await this.stepParse(a); this.guardCancel(a);
+      await this.stepEngine(a); this.guardCancel(a);
+      await this.stepPostprocess(a);
+      r.status = transition(r.status, "done");
+      r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
+      await this.endStep(a, "render", "ok");
+      await this.persist(a);
+      const summary = await fs.readFile(path.join(a.dir, "derived", "summary.json"), "utf8").then((t) => JSON.parse(t) as { totalPnl: number; sharpe: number; trades: number; winRate: number }, () => undefined);
+      this.index.upsert(r, summary);
+    } catch (e) {
+      if (e instanceof Cancelled || a.cancelled) { await this.finishCancelled(a); return; }
+      const failure = e instanceof StepFailure ? e : e instanceof PostprocessError
+        ? new StepFailure("postprocess", { kind: "internal", message: e.message })
+        : new StepFailure(this.currentStep(a), this.unexpected(e));
+      const st = this.step(a, failure.step);
+      if (st.status !== "failed") await this.endStep(a, failure.step, "failed", failure.error.message);
+      for (const s of r.steps) if (s.status === "pending") s.status = "skipped";
+      r.error = failure.error;
+      try { r.status = transition(r.status, "failed"); } catch { r.status = "failed"; }
+      r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
+      await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true });
+      await this.persist(a);
+      this.index.upsert(r);
+    } finally {
+      this.active.delete(r.id);
+      a.resolve(r);
+    }
+  }
+
+  private currentStep(a: Active): StepId { return a.run.steps.find((s) => s.status === "running")?.id ?? "postprocess"; }
+
+  private unexpected(e: unknown): RunError {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/unsupported result/i.test(msg)) return { kind: "unsupported_result", message: msg };
+    return { kind: "internal", message: msg.slice(0, 400) };
+  }
+
+  private async finishCancelled(a: Active): Promise<void> {
+    const r = a.run;
+    for (const s of r.steps) if (s.status === "running" || s.status === "pending") s.status = s.status === "running" ? "failed" : "skipped";
+    r.error = { kind: "cancelled", message: "Cancelled" };
+    try { r.status = transition(r.status, "cancelled"); } catch { r.status = "cancelled"; }
+    r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
+    await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true });
+    await this.persist(a);
+    this.index.upsert(r);
+    this.active.delete(r.id);
+    a.resolve(r);
+  }
+
+  private async stepProject(a: Active): Promise<void> {
+    await this.startStep(a, "project");
+    const cwd = this.cfg.workspace;
+    await fs.access(a.stratAbs).catch(() => { throw new StepFailure("project", { kind: "file_not_found", message: `Strategy not found: ${a.run.strategy}`, file: a.run.strategy }); });
+    await this.endStep(a, "project", "ok", `workspace ${cwd}; strategy ${a.run.strategy}; ${a.run.tier === "draft" ? "Draft (--bars)" : "Full (ticks)"}`);
+  }
+
+  private async stepConfig(a: Active): Promise<void> {
+    await this.startStep(a, "config");
+    const text = await fs.readFile(a.cfgAbs, "utf8").catch(() => null);
+    const findings = checkConfig(text, text !== null, { QKT_DATA_HOME: this.cfg.dataRoot });
+    const errs = findings.filter((f) => f.severity === "error");
+    if (errs.length) {
+      const f = errs[0]!;
+      throw new StepFailure("config", { kind: f.code === "missing_config" ? "missing_config" : "bad_config_yaml", message: f.message, file: "qkt.config.yaml", line: f.line, col: f.col });
+    }
+    const warns = findings.filter((f) => f.severity !== "error");
+    for (const w of warns) a.run.warnings.push(w.message);
+    await this.endStep(a, "config", warns.length ? "warn" : "ok", warns.length ? `${warns.length} warning(s)` : `qkt.config.yaml OK (explicit --config)`);
+  }
+
+  private async stepParse(a: Active): Promise<void> {
+    const cmd = `${this.cfg.qktBin} parse ${quote(a.run.strategy)}`;
+    await this.startStep(a, "parse", cmd);
+    const r = await execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(), timeoutMs: 30_000 });
+    this.guardCancel(a);
+    if (r.code !== 0) {
+      const err = normalizeError(r.stderr || r.stdout, r.code);
+      if (err.kind === "unknown_indicator") { const loc = relocate(a.stratSource, err.message); if (loc) { err.line = loc.line; err.col = loc.col; } }
+      err.file = a.run.strategy;
+      throw new StepFailure("parse", err);
+    }
+    const lint = lintAliases(a.stratSource).filter((d) => d.severity === "error");
+    if (lint.length) { const d = lint[0]!; throw new StepFailure("parse", { kind: "unknown_alias", message: d.message, file: a.run.strategy, line: d.line, col: d.col }); }
+    await this.endStep(a, "parse", "ok", "syntax OK");
+  }
+
+  private async stepEngine(a: Active): Promise<void> {
+    const r = a.run, req = a.request;
+    const engineDir = path.join(a.dir, "engine");
+    const args = [
+      "backtest", a.stratAbs, "--config", a.cfgAbs, "--from", r.from, "--to", r.to, "--no-fetch",
+      ...(r.tier === "draft" ? ["--bars"] : []), ...(req.allowIncomplete ? ["--allow-incomplete"] : []),
+      ...Object.entries(r.params).flatMap(([k, v]) => ["--param", `${k}=${v}`]), "--report-dir", engineDir,
+    ];
+    r.coverage = []; r.counts = { fills: 0, orders: 0 };
+    await this.startStep(a, "coverage", `${this.cfg.qktBin} ${args.map(quote).join(" ")}`);
+    let covDone = false;
+    const onLine = (line: string) => {
+      const ev = classifyLine(line);
+      if (ev.kind === "coverage") {
+        r.coverage!.push({ source: ev.source, symbol: ev.symbol, covered: ev.covered, requested: ev.requested, tf: ev.tf });
+        if (!covDone) {
+          covDone = true;
+          const total = r.coverage!;
+          void (async () => {
+            const short = total.some((c) => c.covered < c.requested);
+            await this.endStep(a, "coverage", short ? "warn" : "ok", total.map((c) => `${c.symbol}${c.tf ? " " + c.tf : ""} ${c.covered}/${c.requested} trading days`).join("; "));
+            await this.startStep(a, "backtest");
+            if (r.status === "checking") await this.setStatus(a, "running");
+          })().catch(() => {});
+        }
+      } else if (ev.kind === "fill") r.counts!.fills++;
+      else if (ev.kind === "order") r.counts!.orders++;
+      else if (ev.kind === "warning") this.log(a, "warn", ev.message);
+      else if (ev.kind === "strategyLog") this.log(a, "info", `${ev.strategy}: ${ev.message}`);
+    };
+
+    const perDay = this.index.msPerDay(r.tier, r.strategy) ?? this.index.msPerDay(r.tier);
+    const days = Math.max(1, (Date.parse(r.to) - Date.parse(r.from)) / DAY_MS);
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - a.startedMs;
+      this.emit(a, { t: "progress", phase: a.phase, fills: r.counts!.fills, orders: r.counts!.orders, elapsedMs: elapsed, etaMs: perDay ? Math.max(0, Math.round(perDay * days - elapsed)) : null });
+    }, 250);
+
+    const proc = spawnGroup(this.cfg.qktBin, args, {
+      cwd: this.cfg.workspace, env: this.env(), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
+      logFiles: { out: path.join(a.dir, "logs", "stdout.log"), err: path.join(a.dir, "logs", "stderr.log") }, onLine,
+    });
+    a.proc = proc;
+    const exit = await proc.exited;
+    clearInterval(tick);
+    a.proc = undefined;
+    // Let the async step bookkeeping from onLine settle before we judge the outcome.
+    await new Promise((res) => setTimeout(res, 20));
+    this.guardCancel(a);
+
+    const holes: HoleDay[] = parseIncomplete(exit.stderr);
+    if (holes.length) r.holes = holes;
+    const hint = parseBuildBarsHint(exit.stderr);
+    if (hint) r.buildBarsHint = hint;
+    if (req.allowIncomplete && holes.length) r.warnings.push(`Ran with ${holes.length} incomplete/missing day(s) waived: ${holes.slice(0, 5).map((h) => h.day).join(", ")}${holes.length > 5 ? "…" : ""}`);
+
+    if (exit.timedOut) throw new StepFailure(covDone ? "backtest" : "coverage", { kind: "engine_crash", message: "The run exceeded its time limit and was stopped." });
+    if (exit.code !== 0) {
+      const err = normalizeError(exit.stderr, exit.code);
+      const step: StepId = err.kind === "missing_data" || err.kind === "incomplete_data" ? "coverage"
+        : err.kind === "parse" || err.kind === "unknown_indicator" ? "parse"
+        : err.kind === "bad_config_yaml" || err.kind === "bad_config_key" || err.kind === "missing_config" ? "config"
+        : covDone ? "backtest" : "coverage";
+      if (err.kind === "unknown_indicator") { const loc = relocate(a.stratSource, err.message); if (loc) { err.line = loc.line; err.col = loc.col; } err.file = r.strategy; }
+      throw new StepFailure(step, err);
+    }
+    if (!covDone) { await this.endStep(a, "coverage", "ok", "no coverage report from qkt"); await this.startStep(a, "backtest"); }
+    await this.endStep(a, "backtest", "ok", `${r.counts!.fills} fills`);
+  }
+
+  private async stepPostprocess(a: Active): Promise<void> {
+    await this.setStatus(a, "postprocessing");
+    await this.startStep(a, "postprocess");
+    const res = await postprocess({ runDir: a.dir, run: a.run, dataRoot: this.cfg.dataRoot });
+    a.run.warnings.push(...res.warnings);
+    const bad = res.integrity.checks.filter((c) => c.ok === false);
+    if (bad.length) a.run.warnings.push(`Integrity check failed: ${bad.map((c) => c.label).join("; ")}`);
+    await this.endStep(a, "postprocess", bad.length ? "warn" : "ok", `${res.trips} trades from ${res.fills} fills; integrity ${res.integrity.ok ? "OK" : "FAILED"}`);
+    await this.startStep(a, "render");
+  }
+}
