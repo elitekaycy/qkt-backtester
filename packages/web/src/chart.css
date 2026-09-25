@@ -50,7 +50,7 @@
 .trades-tab { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-x: auto; }
 .trades-tab > .trades-scroll { min-width: 780px; }
 .trades-tab.multi > .trades-scroll { min-width: 850px; }
-.trades-tab > .trades-filters { position: sticky; left: 0; }
+.trades-tab > .trades-filters { position: sticky; left: 0; z-index: 30; }
 .trades-filters { display: flex; align-items: center; gap: var(--s2); padding: 6px var(--s3); border-bottom: 1px solid var(--line); flex-wrap: wrap; flex: none; }
 .trades-head, .trow { display: grid; grid-template-columns: 40px 68px minmax(112px, 1.3fr) 48px 72px repeat(3, minmax(64px, 1fr)) 84px minmax(72px, 1fr) 62px; min-width: 780px; align-items: center; gap: 8px; padding: 0 var(--s3); font-size: var(--fs-sm); }
 .trades-tab.multi .trades-head, .trades-tab.multi .trow { grid-template-columns: 40px 68px 64px minmax(112px, 1.3fr) 48px 72px repeat(3, minmax(64px, 1fr)) 84px minmax(72px, 1fr) 62px; min-width: 850px; }
@@ -81,3 +81,7 @@
 .trade-strip .entries td { padding: 2px 6px; border-bottom: 1px solid var(--line); }
 .trade-strip .entries .r { text-align: right; }
 .trade-strip { max-height: 42%; overflow: auto; }
+
+/* the suggestions must sit clearly above the trade list: solid, own surface, contained width */
+.trades-tab .fsug { left: 0; right: 0; max-height: 260px; }
+.trades-tab .fsug li[role="option"] { grid-template-columns: minmax(84px, 130px) 1fr auto; padding: 5px var(--s2); }
