@@ -1,3 +1,0 @@
-# qkt.config.yaml: read by every run from the workspace directory (the studio always passes --config explicitly).
-# Docs: qkt/docs/reference/config-schema.md
-starting_balance: 10000

@@ -33,8 +33,8 @@ describe("parseStrategyInfo", () => {
     const s = { alias: "a", broker: "B", symbol: "X", tf: "1m" };
     expect(uniqueStreams([s, { ...s, alias: "b" }, { ...s, tf: "5m" }]).length).toBe(2);
   });
-  const real = "/home/elitekaycy/Desktop/qkt/qkt-quant-live/strategies/s01_gold_ema_pullback.qkt";
-  it.skipIf(!existsSync(real))("parses a real live strategy from the workspace", () => {
+  const real = process.env.QKT_REAL_STRATEGY ?? ""; // optional: path to a real .qkt file to parse
+  it.skipIf(!real || !existsSync(real))("parses a real live strategy from the workspace", () => {
     const i = parseStrategyInfo(readFileSync(real, "utf8"));
     expect(i.kind).toBe("strategy");
     expect(i.streams.length).toBeGreaterThan(0);
