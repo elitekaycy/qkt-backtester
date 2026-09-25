@@ -1,0 +1,16 @@
+# docker compose up --build        then open http://localhost:8080
+# Your strategies live in ./workspace (created on first run); your qkt data store is mounted at /data.
+services:
+  studio:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    image: qkt-backtester:local
+    # Run as the owner of the mounted folders so files you edit here stay yours. `export UID GID` first on bash.
+    user: "${UID:-1000}:${GID:-1000}"
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - ./workspace:/workspace
+      - ${QKT_DATA:-./qkt-data}:/data
+    environment:
+      STUDIO_TOKEN: ${STUDIO_TOKEN:-}     # set to require a token and enable the full-shell terminal when exposed beyond localhost
+      QKT_DEMO: ${QKT_DEMO:-1}            # 0 disables the synthetic demo data seeding
+    restart: unless-stopped

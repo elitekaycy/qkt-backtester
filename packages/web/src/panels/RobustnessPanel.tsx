@@ -4,7 +4,7 @@ import { api, type Job } from "../api/client.js";
 import type { McMethod, McResult } from "../api/types.js";
 import { baseOption, EChart, tok } from "../charts/EChart.js";
 import { useStore } from "../state/store.js";
-import { DASH, fmtMoney, fmtNum, fmtPct, fmtRatio } from "../util/format.js";
+import { DASH, daysBetween, fmtMoney, fmtNum, fmtPct, fmtRatio } from "../util/format.js";
 
 type Tab = "mc" | "grid" | "wf";
 
@@ -97,8 +97,8 @@ function McView({ r }: { r: McResult }) {
   return (
     <>
       <div className="kpis">
-        <div className="kpi"><div className="l">Final equity (5 · 50 · 95%)</div><div className="v" style={{ fontSize: 13 }}>{q(r.finalEquity, (v) => fmtNum(v, 0))}</div><div className="s">actual {fmtNum(r.observed.finalEquity, 0)}</div></div>
-        <div className="kpi"><div className="l">Max drawdown (5 · 50 · 95%)</div><div className="v loss" style={{ fontSize: 13 }}>{q(r.maxDrawdown, (v) => fmtPct(v, 1))}</div><div className="s">actual {fmtPct(r.observed.maxDrawdown, 1)}</div></div>
+        <div className="kpi"><div className="l">Final equity 5·50·95%</div><div className="v" style={{ fontSize: 13 }}>{q(r.finalEquity, (v) => fmtNum(v, 0))}</div><div className="s">actual {fmtNum(r.observed.finalEquity, 0)}</div></div>
+        <div className="kpi"><div className="l">Max DD 5·50·95%</div><div className="v loss" style={{ fontSize: 13 }}>{q(r.maxDrawdown, (v) => fmtPct(v, 1))}</div><div className="s">actual {fmtPct(r.observed.maxDrawdown, 1)}</div></div>
         <div className="kpi"><div className="l">P(final &lt; start)</div><div className="v">{fmtPct(r.probNegative, 1)}</div></div>
         <div className="kpi"><div className="l">P(ruin: DD ≥ {fmtPct(r.ruinDrawdown, 0)})</div><div className="v">{fmtPct(r.probRuin, 1)}</div></div>
       </div>
@@ -202,6 +202,8 @@ function WalkForward() {
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const running = job?.status === "running";
+  const span = cfg.from && cfg.to ? daysBetween(cfg.from, cfg.to) : 0;
+  const tooShort = span < train + test;
   const start = async () => {
     setErr(null); setJob(null);
     try {
@@ -222,8 +224,9 @@ function WalkForward() {
         <label className="field">rank <select className="input" value={rank} onChange={(e) => setRank(e.target.value)}>{["sharpe", "calmar", "profitFactor", "totalPnL", "winRate"].map((c) => <option key={c}>{c}</option>)}</select></label>
         <span style={{ flex: 1 }} />
         {running ? <button className="btn danger" onClick={() => job && void api.cancelJob(job.id)}>Cancel</button>
-          : <button className="btn primary" disabled={!ax.strategy || ax.combos === 0} onClick={() => void start()}>Run walk-forward</button>}
+          : <button className="btn primary" disabled={!ax.strategy || ax.combos === 0 || tooShort} onClick={() => void start()}>Run walk-forward</button>}
       </div>
+      {tooShort && <div className="banner warn">The run window is {span} days but one fold needs train + test = {train + test} days. Widen from/to in the top bar or shorten train/test.</div>}
       <div className="muted" style={{ padding: "0 10px 6px" }}>Each fold picks the best parameters on its training window, then is scored once on the unseen test window that follows.</div>
       {err && <div className="banner bad">{err}</div>}
       {job && !res && <div className="muted" style={{ padding: "4px 10px" }}>{job.status}{job.error ? `: ${job.error.message}` : ""}</div>}
@@ -258,7 +261,7 @@ export function RobustnessPanel() {
       <div className="panel-head">
         <span className="title">Robustness</span>
         <div className="seg" role="tablist">
-          {([["mc", "Monte Carlo"], ["grid", "Parameter grid"], ["wf", "Walk-forward (IS/OOS)"]] as Array<[Tab, string]>).map(([k, l]) => <button key={k} role="tab" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
+          {([["mc", "Monte Carlo"], ["grid", "Grid"], ["wf", "Walk-forward"]] as Array<[Tab, string]>).map(([k, l]) => <button key={k} role="tab" aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
         </div>
       </div>
       <div className="panel-scroll">{tab === "mc" ? <MonteCarlo /> : tab === "grid" ? <Grid /> : <WalkForward />}</div>

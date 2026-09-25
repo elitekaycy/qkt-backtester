@@ -51,7 +51,7 @@ function buildDefault(api: DockviewApi): void {
 /** Sizes are applied after the grid has laid out; dockview ignores `initialWidth` when panels are added in a chain. */
 function applySizes(api: DockviewApi): void {
   const total = api.width || window.innerWidth;
-  const left = 210, editorW = Math.round(Math.min(560, Math.max(380, total * 0.27))), right = Math.round(Math.min(460, Math.max(360, total * 0.25)));
+  const left = 200, editorW = Math.round(Math.min(520, Math.max(360, total * 0.24))), right = Math.round(Math.min(560, Math.max(400, total * 0.29)));
   const set = () => {
     api.getPanel("explorer")?.group.api.setSize({ width: left });
     api.getPanel("editor")?.group.api.setSize({ width: editorW });

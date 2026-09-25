@@ -55,7 +55,7 @@ export function RunBar({ toggles }: { toggles: Array<{ id: string; label: string
       {running && <span className="ink2 nowrap">{progress ? `${progress.phase} · ${fmtDur(progress.elapsedMs)}${progress.etaMs ? ` · ~${fmtDur(progress.etaMs)} left` : ""}` : "starting…"}</span>}
       {!running && run && <span className={`badge ${run.status === "done" ? "ok" : run.status === "failed" ? "bad" : ""}`}>{run.status}</span>}
       <span style={{ flex: 1 }} />
-      <div className="seg" role="group" aria-label="Panels">
+      <div className="seg subtle" role="group" aria-label="Panels">
         {toggles.map((t) => <button key={t.id} aria-pressed={t.on} onClick={t.toggle} title={`Show or hide ${t.label}`}>{t.label}</button>)}
       </div>
       <button className="btn ghost sm" onClick={() => store().setTheme(theme === "dark" ? "light" : "dark")} title="Toggle theme">{theme === "dark" ? "☾" : "☀"}</button>

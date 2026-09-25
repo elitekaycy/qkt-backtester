@@ -1,0 +1,19 @@
+-- Two timeframes of the same symbol: the 1h trend filters the 15m entries.
+-- The Charts panel shows one chart per timeframe, time-synced, with the same trades on both.
+STRATEGY demo_two_timeframes VERSION 1
+
+SYMBOLS
+    px = BACKTEST:DEMOUSD EVERY 15m
+    hr = BACKTEST:DEMOUSD EVERY 1h
+
+PARAM trend = 20
+
+RULES
+    WHEN ema(px.close, 9) CROSSES ABOVE ema(px.close, 21)
+     AND px.close > ema(hr.close, trend)
+     AND POSITION.px = 0
+    THEN BUY px SIZING 10 ; LOG "long with the 1h trend"
+
+    WHEN ema(px.close, 9) CROSSES BELOW ema(px.close, 21)
+     AND POSITION.px > 0
+    THEN CLOSE px

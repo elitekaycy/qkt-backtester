@@ -1,0 +1,26 @@
+-- Demo strategy on SYNTHETIC data (DEMOUSD is a seeded random walk, not a market).
+-- Edit anything, press Ctrl+S, then Ctrl+Enter to run it. Errors show up as you type.
+STRATEGY demo_ema_cross VERSION 1
+
+SYMBOLS
+    px = BACKTEST:DEMOUSD EVERY 15m
+
+PARAM fast = 9
+PARAM slow = 21
+
+RULES
+    WHEN ema(px.close, fast) CROSSES ABOVE ema(px.close, slow)
+     AND POSITION.px = 0
+    THEN BUY px SIZING 10
+        BRACKET {
+          STOP_LOSS BY 1.0 PCT,
+          TAKE_PROFIT BY 2.0 PCT
+        }
+
+    WHEN ema(px.close, fast) CROSSES BELOW ema(px.close, slow)
+     AND POSITION.px = 0
+    THEN SELL px SIZING 10
+        BRACKET {
+          STOP_LOSS BY 1.0 PCT,
+          TAKE_PROFIT BY 2.0 PCT
+        }
