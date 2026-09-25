@@ -1,8 +1,10 @@
+import { spawnEnv } from "./workspace-env.js";
 import type { FastifyInstance } from "fastify";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import type { ServerConfig } from "./config.js";
 import { spawnGroup } from "./proc.js";
+import { BUILTINS, runBuiltin, type TermSession } from "./term-builtins.js";
 
 /** Split a command line into words (single/double quotes). Returns null on shell metacharacters or bad quoting. */
 export function tokenize(line: string): string[] | null {
@@ -24,7 +26,7 @@ export const ALLOWED_SUBCOMMANDS = new Set(["parse", "backtest", "sweep", "walkf
 
 /** Restricted terminal policy: `qkt <allowed-subcommand> ...`, no path escapes. */
 export function checkRestricted(words: string[], workspace: string, dataRoot: string): string | null {
-  if (words[0] !== "qkt") return "Only qkt commands are available in this terminal (start with 'qkt').";
+  if (words[0] !== "qkt") return `${words[0]}: command not found. This terminal runs qkt commands and a few file helpers; type 'help'.`;
   if (!words[1] || !ALLOWED_SUBCOMMANDS.has(words[1])) return `Not allowed: ${words[1] ?? "(none)"}. Allowed: ${[...ALLOWED_SUBCOMMANDS].join(", ")}`;
   for (const a of words.slice(2)) {
     if (a.split("/").includes("..")) return "Paths with '..' are not allowed.";
@@ -44,7 +46,7 @@ export function registerTerminal(app: FastifyInstance, cfg: ServerConfig): void 
   app.get("/ws/term", { websocket: true }, (socket) => {
     const send = (o: unknown) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(o)); };
     send({ t: "hello", mode: cfg.terminal, cwd: cfg.workspace });
-    const env = { ...process.env, QKT_DATA_HOME: cfg.dataRoot, TERM: "xterm-256color" };
+    const env = spawnEnv(cfg, { TERM: "xterm-256color" });
     let cleanup = () => {};
 
     if (cfg.terminal === "shell") {
@@ -62,6 +64,7 @@ export function registerTerminal(app: FastifyInstance, cfg: ServerConfig): void 
       });
     } else {
       let running: ReturnType<typeof spawnGroup> | null = null;
+      const sess: TermSession = { cwd: "" };
       cleanup = () => { void running?.kill(500); };
       socket.on("message", (data: Buffer | string) => {
         let m: ClientMsg;
@@ -72,9 +75,13 @@ export function registerTerminal(app: FastifyInstance, cfg: ServerConfig): void 
         const words = tokenize(m.line.trim());
         if (words === null) { send({ t: "out", d: "Shell operators and quoting errors are not supported here.\r\n" }); send({ t: "exit", code: 2 }); return; }
         if (words.length === 0) { send({ t: "exit", code: 0 }); return; }
+        if (BUILTINS.has(words[0]!)) {
+          void runBuiltin(words, cfg.workspace, sess).then((r) => { if (r.out) send({ t: "out", d: r.out + "\r\n" }); send({ t: "exit", code: r.code }); });
+          return;
+        }
         const denied = checkRestricted(words, cfg.workspace, cfg.dataRoot);
         if (denied) { send({ t: "out", d: denied + "\r\n" }); send({ t: "exit", code: 2 }); return; }
-        running = spawnGroup(cfg.qktBin, words.slice(1), { cwd: cfg.workspace, env, timeoutMs: 60 * 60_000, onLine: (l) => send({ t: "out", d: l + "\r\n" }) });
+        running = spawnGroup(cfg.qktBin, words.slice(1), { cwd: path.join(cfg.workspace, sess.cwd), env: spawnEnv(cfg, { TERM: "xterm-256color" }), timeoutMs: 60 * 60_000, onLine: (l) => send({ t: "out", d: l + "\r\n" }) });
         void running.exited.then((e) => { running = null; send({ t: "exit", code: e.code }); });
       });
     }
