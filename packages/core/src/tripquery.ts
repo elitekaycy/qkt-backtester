@@ -8,6 +8,8 @@ export interface TripQuery {
   outcome?: "win" | "loss" | "breakeven" | "open" | "closed";
   symbol?: string;
   strategy?: string;
+  /** Any-of by strategy id: lets a chart hide some strategies of a portfolio. */
+  strategies?: string[];
   /** Entry time window, epoch ms, [fromTs, toTs). */
   fromTs?: number;
   toTs?: number;
@@ -44,6 +46,7 @@ export function matches(t: RoundTrip, q: TripQuery): boolean {
   if (q.side && t.side !== q.side) return false;
   if (q.symbol && t.symbol !== q.symbol) return false;
   if (q.strategy && t.strategy !== q.strategy) return false;
+  if (q.strategies && !q.strategies.includes(t.strategy)) return false;
   if (q.fromTs !== undefined && t.entryTs < q.fromTs) return false;
   if (q.toTs !== undefined && t.entryTs >= q.toTs) return false;
   if (q.exitFromTs !== undefined && (t.exitTs === null || t.exitTs < q.exitFromTs)) return false;

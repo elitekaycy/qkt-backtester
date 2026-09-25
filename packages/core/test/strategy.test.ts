@@ -1,6 +1,25 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
-import { parseStrategyInfo, uniqueStreams, usesIntrabarOrders } from "../src/strategy.js";
+import { parseStrategyInfo, portfolioRuns, strategyAlias, uniqueStreams, usesIntrabarOrders } from "../src/strategy.js";
+
+describe("portfolio files", () => {
+  const src = readFileSync(new URL("./fixtures/portfolio-book.qkt", import.meta.url), "utf8");
+  it("reads the kind, the imports and their aliases", () => {
+    const i = parseStrategyInfo(src);
+    expect(i.kind).toBe("portfolio");
+    expect(i.name).toBe("book");
+    expect(i.imports).toEqual([{ path: "xau_trend.qkt", alias: "trend" }, { path: "xau_fade.qkt", alias: "fade" }, { path: "btc_trend.qkt", alias: "btc" }]);
+  });
+  it("reads HOLD and the RUN targets", () => {
+    const s = "PORTFOLIO p VERSION 1\n\nIMPORT 'a.qkt' AS a HOLD\nIMPORT 'b.qkt' AS b\n\nRULES\n    WHEN x > 1 RUN a\n    RUN b\n";
+    expect(parseStrategyInfo(s).imports).toEqual([{ path: "a.qkt", alias: "a", hold: true }, { path: "b.qkt", alias: "b" }]);
+    expect(portfolioRuns(s)).toEqual(["a", "b"]);
+  });
+  it("strategyAlias strips the portfolio prefix", () => {
+    expect(strategyAlias("book:trend")).toBe("trend");
+    expect(strategyAlias("solo")).toBe("solo");
+  });
+});
 
 describe("parseStrategyInfo", () => {
   it("reads a plain strategy", () => {
@@ -18,7 +37,7 @@ describe("parseStrategyInfo", () => {
   it("reads a portfolio and its imports (path from the raw line)", () => {
     const i = parseStrategyInfo("PORTFOLIO book\n\nIMPORT 'trend.qkt'     AS trend\nIMPORT \"sub/meanrev.qkt\" AS meanrev HOLD\n");
     expect(i.kind).toBe("portfolio");
-    expect(i.imports).toEqual([{ path: "trend.qkt", alias: "trend" }, { path: "sub/meanrev.qkt", alias: "meanrev" }]);
+    expect(i.imports).toEqual([{ path: "trend.qkt", alias: "trend" }, { path: "sub/meanrev.qkt", alias: "meanrev", hold: true }]);
   });
   it("ignores commented-out declarations", () => {
     const i = parseStrategyInfo("STRATEGY s VERSION 1\nSYMBOLS\n  -- old = BACKTEST:X EVERY 1m\n  a = BACKTEST:Y EVERY 5m\n-- PARAM z = 1\n");
