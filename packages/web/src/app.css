@@ -49,7 +49,7 @@
 .list-row[aria-selected="true"] { background: var(--accent-soft); color: var(--ink); }
 
 /* ---------- main column ---------- */
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
 .topbar { height: var(--top-h); flex: none; display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3); background: var(--bg); min-width: 0; }
 .topbar .crumb { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-3); font-size: var(--fs-md); flex: 1 1 120px; overflow: hidden; }
 .topbar .crumb b { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

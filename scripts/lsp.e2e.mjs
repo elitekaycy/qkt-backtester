@@ -16,6 +16,9 @@ await p.keyboard.down("Control"); await p.keyboard.press("End"); await p.keyboar
 const rows = () => p.evaluate(() => [...document.querySelectorAll(".suggest-widget .monaco-list-row")].map((r) => r.textContent));
 await p.keyboard.type("\n    THEN BU", { delay: 30 }); await sleep(1500);
 ok("keyword completion", (await rows()).some((r) => r.startsWith("BUY")), JSON.stringify(await rows()));
+// the label must be VISIBLE: it once collided with an app CSS class and rendered as icons only
+const vis = await p.evaluate(() => { const l = document.querySelector(".suggest-widget .monaco-list-row .label-name"); if (!l) return false; const r = l.getBoundingClientRect(); const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return r.width > 4 && r.height > 4 && (l === at || l.contains(at) || at?.closest(".monaco-icon-label") !== null); });
+ok("suggestion labels are visible (not just icons)", vis);
 await p.keyboard.press("Escape"); await p.keyboard.press("Escape");
 await p.keyboard.type("\n    WHEN ema(gold.cl", { delay: 30 }); await sleep(1500);
 ok("member completion right after typing (the server saw the latest text)", (await rows()).includes("close"), JSON.stringify(await rows()));

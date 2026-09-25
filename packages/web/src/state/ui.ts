@@ -63,7 +63,8 @@ export const useUi = create<Ui>((set, get) => ({
   },
   openJournal(section) { get().set({ journalOpen: true, ...(section ? { journalSection: section } : {}) }); },
   toggleSection(s) { get().set({ section: get().section === s ? null : s }); },
-  reset() { get().set({ ...DEFAULTS, journalOpen: false, maxed: null }); },
+  // "Reset layout" restores panes and sizes only: editor preferences (vim, auto-save, font size) are the user's, not layout
+  reset() { const { vim, autosave, fontSize } = get(); get().set({ ...DEFAULTS, vim, autosave, fontSize, journalOpen: false, maxed: null }); },
 }));
 
 export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));

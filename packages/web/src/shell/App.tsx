@@ -136,7 +136,7 @@ function Shell() {
             )}
           </>
         )}
-        <main className="main" ref={mainRef} style={hide(!showMain)}>
+        <main className="app-main" ref={mainRef} style={hide(!showMain)}>
           <TopBar />
           <div className="workbench" data-layout={ui.layout}>
             <div className="editor-col" style={hide(!editorCol || (!!maxed && maxed !== "editor" && maxed !== "dock"))}>
