@@ -36,7 +36,7 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
       </div>
       {s && (
         <div className={`preview-kpis${stale ? " dim" : ""}`}>
-          <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}` : undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} onClick={() => open()} />
+          <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}` : "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} onClick={() => open()} />
           <Kpi l="Win rate" v={fmtPct(s.winRate, 1)} s={`${s.wins}W · ${s.losses}L`} onClick={() => open("trades")} />
           <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} s={`Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
           <Kpi l="Trades" v={String(s.trades)} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />
