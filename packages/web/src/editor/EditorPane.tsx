@@ -40,6 +40,7 @@ export function EditorPane() {
         scrollBeyondLastLine: false, renderWhitespace: "selection", fixedOverflowWidgets: true, padding: { top: 12, bottom: 12 }, lineHeight: 0,
         fontFamily: "'JetBrains Mono Variable', ui-monospace, Menlo, Consolas, monospace", fontLigatures: true, lineNumbersMinChars: 3, smoothScrolling: true,
         cursorSmoothCaretAnimation: "on", roundedSelection: true, guides: { indentation: true, bracketPairs: false }, overviewRulerBorder: false, renderLineHighlight: "line",
+        ariaLabel: "Strategy editor. Tab indents; press Ctrl+M to make Tab move focus out of the editor instead.",
       });
       const lsp = new LspClient(m, info.workspace, (uri, diags) => {
         const prefix = `file://${info.workspace}/`;
@@ -64,6 +65,13 @@ export function EditorPane() {
       ed.addCommand(C | K.Comma, () => ui().set({ runSettings: !ui().runSettings }));
       ed.addCommand(C | K.Period, () => void store.getState().killAll());
       ed.addCommand(C | K.Backquote, () => ui().set({ dockOpen: !ui().dockOpen }));
+      // Tab indents, so a keyboard user needs a way out: Ctrl+M flips Tab to moving focus (Monaco's own chord, also in vim mode)
+      let tabMoves = false;
+      ed.addCommand(C | K.KeyM, () => {
+        ed.trigger("keyboard", "editor.action.toggleTabFocusMode", null);
+        const on = (tabMoves = !tabMoves);
+        store.setState({ announce: on ? "Tab now moves focus out of the editor. Ctrl+M to indent with Tab again." : "Tab indents again. Ctrl+M to move focus with Tab." });
+      });
       ([K.Digit1, K.Digit2, K.Digit3] as const).forEach((k, i) => ed.addCommand(C | k, () => ui().set({ section: (["files", "data", "runs"] as const)[i]! })));
       // Esc with a completion popup open: in vim mode it closes the popup AND leaves insert mode in the same press (one Esc is all a
       // vim user should ever need); without vim it only closes the popup, as in any Monaco editor.
@@ -221,7 +229,7 @@ export function EditorPane() {
           <button className="btn primary" onClick={() => newStrategy()}><Plus size={15} />New strategy</button></div>
       )}
       <div ref={host} id="editor" className="monaco-host" style={{ display: active ? "block" : "none" }} />
-      <div className="editor-status" role="status">
+      <div className="editor-status">
         <span className="vim-status" ref={vimStatus} aria-label="Vim mode" />
         <span>{active ? `Ln ${cursor.line}, Col ${cursor.col}` : ""}</span>
         <span>{active ? (active.path.endsWith(".qkt") ? "qkt" : "YAML") : ""}</span>

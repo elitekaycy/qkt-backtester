@@ -1,6 +1,6 @@
 import { binRange } from "@qkt-studio/core/analytics";
 import { useStore } from "../state/store.js";
-import { fmtMoney, fmtNum, fmtPct, glyph } from "../util/format.js";
+import { fmtMoney, fmtR, fmtNum, fmtPct, glyph } from "../util/format.js";
 import { Clock, Scale } from "../ui/icons.js";
 import { useAnalytics } from "./useAnalytics.js";
 import { Chart, chartBase, SignedBars, Stat, tipHtml, Widget, tok } from "./widgets.js";
@@ -36,7 +36,7 @@ export function TimeRisk() {
         <Widget title="R multiples" icon={<Scale size={15} />} className="span-2" right={<span className="muted" style={{ fontSize: "var(--fs-xs)" }}>P&L ÷ the risk on the entry · click a bar to filter</span>}>
           {R ? (
             <Chart height={220} label="Distribution of R multiples" deps={[R, filters.minR, filters.maxR]} onClick={(p) => { const { min: lo, max: hi } = binRange(R, p.dataIndex); setFilters(filters.minR === lo && filters.maxR === hi ? { minR: undefined, maxR: undefined } : { minR: lo, maxR: hi }); }} build={() => chartBase({
-              xAxis: { ...(chartBase().xAxis as object), type: "category", data: R.counts.map((_, i) => `${rmid(i) >= 0 ? "+" : "−"}${Math.abs(rmid(i)).toFixed(1)}R`), axisLabel: { color: tok("--ink-3"), fontSize: 10, interval: Math.max(0, Math.floor(R.counts.length / 6)) } },
+              xAxis: { ...(chartBase().xAxis as object), type: "category", data: R.counts.map((_, i) => fmtR(rmid(i), 1)), axisLabel: { color: tok("--ink-3"), fontSize: 10, interval: Math.max(0, Math.floor(R.counts.length / 6)) } },
               series: [{ type: "bar", barCategoryGap: "12%", cursor: "pointer", data: R.counts.map((v, i) => ({ value: v, itemStyle: { color: rmid(i) >= 0 ? gain : loss, borderRadius: [3, 3, 0, 0], opacity: filters.minR === undefined || filters.minR === R.edges[i] ? 1 : 0.35 } })) }],
               tooltip: { ...(chartBase().tooltip as object), axisPointer: { type: "shadow", shadowStyle: { color: tok("--hover") } }, formatter: (p: Array<{ dataIndex: number; value: number }>) => { const i = p[0]!.dataIndex; return tipHtml(`${R.edges[i]!.toFixed(2)}R to ${R.edges[i + 1]!.toFixed(2)}R`, null, [["Trades", String(p[0]!.value)], ["Share", fmtPct(p[0]!.value / Math.max(1, a.rTrades), 0)]], "Click to filter to this range"); } },
             })} />
@@ -44,8 +44,8 @@ export function TimeRisk() {
         </Widget>
         <Widget title="Risk">
           <Stat label="Trades with risk" value={`${a.rTrades} of ${a.closed}`} />
-          <Stat label="Average R" value={a.avgR === null ? "no stop" : `${a.avgR >= 0 ? "+" : "−"}${Math.abs(a.avgR).toFixed(2)}R`} tone={a.avgR === null ? undefined : a.avgR >= 0 ? "gain" : "loss"} />
-          <Stat label="Total R" value={a.totalR === null ? "no stop" : `${a.totalR >= 0 ? "+" : "−"}${Math.abs(a.totalR).toFixed(1)}R`} tone={a.totalR === null ? undefined : a.totalR >= 0 ? "gain" : "loss"} />
+          <Stat label="Average R" value={a.avgR === null ? "no stop" : fmtR(a.avgR)} tone={a.avgR === null ? undefined : a.avgR >= 0 ? "gain" : "loss"} />
+          <Stat label="Total R" value={a.totalR === null ? "no stop" : fmtR(a.totalR, 1)} tone={a.totalR === null ? undefined : a.totalR >= 0 ? "gain" : "loss"} />
           <Stat label="Payoff ratio" value={a.payoff === null ? "-" : fmtNum(a.payoff)} />
           <div className="hint muted" style={{ fontSize: "var(--fs-xs)", marginTop: 4 }}>On bars a stop can fill worse than its level, so losses beyond −1R are expected there.</div>
         </Widget>

@@ -94,3 +94,11 @@ table.tbl.heat th { font-size: 10px; letter-spacing: 0.02em; text-align: center;
 /* days outside the shown month are inactive: quieter, not faded to nothing */
 .cal-cell.out { opacity: 1; }
 .cal-cell.out .d { color: var(--ink-4); }
+
+/* portfolio: the table of strategies that compose the book */
+table.strat-table tbody tr { cursor: pointer; }
+table.strat-table tbody tr:hover { background: var(--card-2); }
+table.strat-table tbody tr.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-hi); }
+table.strat-table td:first-child, table.strat-table th:first-child { width: 22px; padding-right: 0; }
+.swatch.sm { width: 10px; height: 10px; border-radius: 3px; }
+@media (forced-colors: active) { table.strat-table tbody tr.on { outline: 2px solid Highlight; outline-offset: -2px; } .swatch { forced-color-adjust: none; } }

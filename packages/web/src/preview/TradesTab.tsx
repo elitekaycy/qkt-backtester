@@ -3,14 +3,15 @@ import { strategyAlias } from "@qkt-studio/core/strategy";
 import type { ExitReason, RoundTrip } from "../api/types.js";
 import { FilterBar } from "../journal/FilterBar.js";
 import { useStore } from "../state/store.js";
-import { fmtDur, fmtMoney, fmtNum, fmtPrice, fmtTs } from "../util/format.js";
+import { fmtDur, fmtR, fmtMoney, fmtNum, fmtPrice, fmtTs } from "../util/format.js";
 import { strategyColor } from "../util/strategyColor.js";
 
 const ROW = 27;
 const EXIT_GLYPH: Record<ExitReason, string> = { target: "◆", stop: "✕", signal: "●", open: "○" };
 
 /** Compact, windowed list of the run's trades. Uses the same filters as the charts and the Journal, so all three agree. */
-export function TradesTab({ rows, selectedId, onSelect, truncated, total }: { rows: RoundTrip[]; selectedId: number | null; onSelect(t: RoundTrip): void; truncated: boolean; total: number }) {
+/** `all`: every trade of the run (the "of N"); `matched`: how many pass the filters when the list was capped below that. */
+export function TradesTab({ rows, selectedId, onSelect, all, matched }: { rows: RoundTrip[]; selectedId: number | null; onSelect(t: RoundTrip): void; all: number; matched: number | null }) {
   const filters = useStore((s) => s.filters), setFilters = useStore((s) => s.setFilters), clear = useStore((s) => s.clearFilters);
   const host = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0), [h, setH] = useState(300);
@@ -43,7 +44,7 @@ export function TradesTab({ rows, selectedId, onSelect, truncated, total }: { ro
   return (
     <div className={`trades-tab${multi ? " multi" : ""}${strat ? " strat" : ""}`}>
       <div className="trades-filters">
-        <FilterBar compact count={{ shown: rows.length, total: truncated ? total : rows.length }} />
+        <FilterBar compact count={{ shown: rows.length, total: all, capped: matched }} />
       </div>
       <div className="trades-head" role="row">
         <span>#</span><span>Side</span>{multi && <span>Symbol</span>}{strat && <span>Strategy</span>}<span>Entry (UTC)</span><span className="r" title="Position size in lots">Size</span><span className="r" title="Money at stake at entry: distance to the stop × size">Risk</span><span className="r">Entry px</span><span className="r">Exit px</span><span className="r">Held</span><span>Exit</span><span className="r">P&amp;L</span><span className="r">R</span>
@@ -67,7 +68,7 @@ export function TradesTab({ rows, selectedId, onSelect, truncated, total }: { ro
                   <span className="r num">{t.open ? "open" : fmtDur(t.holdMs)}</span>
                   <span title={t.exit}><span aria-hidden="true">{EXIT_GLYPH[t.exit]}</span> {t.exit}</span>
                   <span className={`r num ${t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : ""}`}>{fmtMoney(t.pnl)}</span>
-                  <span className={`r num ${t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : ""}`}>{t.r === undefined ? "—" : `${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}`}</span>
+                  <span className={`r num ${t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : ""}`}>{fmtR(t.r, 2, false)}</span>
                 </div>
               );
             })}

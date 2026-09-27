@@ -14,10 +14,11 @@ const OPTIONS = JSON.parse(process.env.OPTIONS ?? '{"positionMode":"netting"}');
 // ---- the UI's formatters, verbatim (packages/web/src/util/format.ts) ----
 const DASH = "—";
 const fin = (n) => n !== null && n !== undefined && Number.isFinite(n);
-const fmtNum = (n, dp = 2) => (fin(n) ? n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp }) : DASH);
-const fmtMoney = (n, dp = 2) => { if (!fin(n)) return DASH; const s = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp }); return n > 0 ? `+${s}` : n < 0 ? `−${s}` : s; };
-const fmtPct = (f, dp = 2) => (fin(f) ? `${(f * 100).toFixed(dp)}%` : DASH);
-const fmtRatio = (n, dp = 2) => (fin(n) ? n.toFixed(dp) : DASH);
+const minus = (s) => (/^-0(\.0*)?$/.test(s) ? s.slice(1) : s.replace(/^-/, "−"));
+const fmtNum = (n, dp = 2) => (fin(n) ? minus(n.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp })) : DASH);
+const fmtMoney = (n, dp = 2) => { if (!fin(n)) return DASH; const s = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp }); if (/^[0.,]*$/.test(s)) return s; return n > 0 ? `+${s}` : `−${s}`; };
+const fmtPct = (f, dp = 2) => (fin(f) ? `${minus((f * 100).toFixed(dp))}%` : DASH);
+const fmtRatio = (n, dp = 2) => (fin(n) ? minus(n.toFixed(dp)) : DASH);
 const glyph = (n) => (!fin(n) || n === 0 ? "" : n > 0 ? "▲" : "▼");
 const fmtDur = (ms) => {
   if (!fin(ms)) return DASH;
@@ -61,6 +62,9 @@ const has = (name, hay, needle) => ok(name, hay.includes(needle), `expected ${JS
 // chart-pane KPIs: whole run, engine net P&L
 const kpis = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".preview-kpis .pkpi")].map((k) => [k.querySelector(".l")?.textContent, { v: k.querySelector(".v")?.textContent, s: k.querySelector(".s")?.textContent ?? "" }])));
 ok("KPI Net P&L", kpis["Net P&L"]?.v === `${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`, JSON.stringify(kpis["Net P&L"]));
+const runMeta = await api(`/api/runs/${runId}/derived/meta`);
+ok("run records its account currency", typeof runMeta.currency === "string" && /^[A-Z]{3}$/.test(runMeta.currency), JSON.stringify(runMeta.currency));
+has("KPI Net P&L names the currency", kpis["Net P&L"]?.s ?? "", `on ${fmtNum(start, 0)} ${runMeta.currency}`);
 if (s.unrealized !== 0) has("KPI Net P&L shows the open part", kpis["Net P&L"]?.s ?? "", `incl. ${fmtMoney(s.unrealized)} open`);
 ok("KPI Win rate", kpis["Win rate"]?.v === fmtPct(s.winRate, 1) && kpis["Win rate"].s === `${s.wins}W · ${s.losses}L`, JSON.stringify(kpis["Win rate"]));
 ok("KPI Profit factor", kpis["Profit factor"]?.v === (s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)) && kpis["Profit factor"].s === `Sharpe ${fmtRatio(s.sharpe)}`, JSON.stringify(kpis["Profit factor"]));
@@ -110,8 +114,7 @@ for (const t of trades.rows.slice(0, 8)) {
 }
 
 // charts: the visible stream's candles are read from the folder qkt read (meta.streams[].base), and are not empty
-const meta = await api(`/api/runs/${runId}/derived/meta`);
-for (const st of meta.streams) {
+for (const st of runMeta.streams) {
   const seen = barsSeen.filter((x) => x.q.symbol === st.symbol && x.q.tf === st.tf && x.q.broker === st.broker);
   if (!seen.length) continue; // a stream in a background tab loads only when shown
   ok(`chart ${st.key} reads ${st.base}`, seen.every((x) => (x.q.base ?? x.q.tf) === st.base), JSON.stringify(seen.map((x) => x.q.base)));

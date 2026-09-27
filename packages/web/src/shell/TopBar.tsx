@@ -35,7 +35,7 @@ function RunControls({ openSettings }: { openSettings(): void }) {
   if (busy) {
     return (
       <div className="row">
-        <span className="ink2 nowrap hide-md row" style={{ gap: 6 }} aria-live="polite">
+        <span className="ink2 nowrap hide-md row" style={{ gap: 6 }}>
           <span className="spin" />
           {running ? (progress ? `${progress.phase} · ${fmtDur(progress.elapsedMs)}${progress.etaMs ? ` · ~${fmtDur(progress.etaMs)} left` : ""}` : "starting…") : `${jobsRunning} data job${jobsRunning > 1 ? "s" : ""}`}
         </span>

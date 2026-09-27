@@ -27,6 +27,8 @@ export interface QktResult {
   };
   bookRisk?: { bookVol?: string; maxGrossExposure?: string; maxNetExposure?: string; samples?: number; events?: number };
   artifacts?: Record<string, unknown>;
+  /** The currency every money figure is in (config `account.currency`, default USD). */
+  accounting?: { accountCurrency?: string };
 }
 
 export interface PerfReport {

@@ -4,7 +4,7 @@ import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import { api, ApiError, openRunEvents, type Equity, type Info, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
 import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJson, RunOptions, ScanReport, Summary, Tier, TripQuery } from "../api/types.js";
-import { addDays } from "../util/format.js";
+import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
 import type { SymbolReport } from "../api/types.js";
 
@@ -53,6 +53,8 @@ interface State {
   openSymbol(symbol: string | null): void;
   /** The server's last message when a run was refused (e.g. window outside a symbol's range); shown in Run settings. */
   submitError: string | null;
+  /** One sentence for screen readers when a run starts, finishes or fails (read by a polite live region). */
+  announce: string;
   setSymbolPref(symbol: string, pref: { source?: string | null; from?: string | null; to?: string | null }): Promise<void>;
   resetSymbolPrefs(): Promise<void>;
   autoFindSources(): Promise<Array<{ symbol: string; source: string; days: number }>>;
@@ -134,7 +136,7 @@ export const useStore = create<State>((set, get) => ({
   toasts: [],
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
   cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun === true, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
-  settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, scanning: false, jobs: [], compare: [],
+  settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
   runId: null, run: null, progress: null, logs: [], running: false, runs: [],
   results: null, resultsStale: false,
   filters: {}, selectedTrip: null, focus: null,
@@ -319,7 +321,7 @@ export const useStore = create<State>((set, get) => ({
     const declared = new Map((f ? parseStrategyInfo(f.content).params : []).map((p) => [p.name, p.default]));
     const overrides = Object.fromEntries(Object.entries(cfg.paramsByStrategy[strategy] ?? {}).filter(([k, v]) => declared.has(k) && v !== "" && v !== declared.get(k)));
     closeEvents?.();
-    set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null }));
+    set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null, announce: `Running ${strategy.split("/").pop()}…` }));
     try {
       const tier = opts.tier ?? cfg.tier;
       const { broker, execution, slippage, ...common } = cfg.options;
@@ -337,8 +339,11 @@ export const useStore = create<State>((set, get) => ({
           if (get().runId !== runId) return;
           const run = await api.run(runId).catch(() => null);
           set({ running: false, run: run ?? get().run });
-          if (run?.status === "done") await get().loadResults(runId);
-          else set({ resultsStale: false });
+          if (run?.status === "done") {
+            await get().loadResults(runId);
+            const sm = get().results?.summary;
+            set({ announce: sm ? `Run finished: ${sm.trades} closed trade${sm.trades === 1 ? "" : "s"}, net P&L ${fmtMoney(sm.totalPnl)}.` : "Run finished." });
+          } else set({ resultsStale: false, announce: run?.status === "failed" ? `Run failed: ${run.error?.message ?? "see the pipeline"}` : "Run stopped." });
           if (run?.error && run.error.file && run.error.line) {
             const path = run.error.file === CONFIG ? CONFIG : run.error.file;
             get().setDiagnostics(path, "run", [{ severity: "error", code: run.error.kind, message: run.error.message, line: run.error.line, col: run.error.col ?? 1, endCol: (run.error.col ?? 1) + 1 }]);

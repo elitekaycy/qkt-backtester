@@ -2,14 +2,14 @@ import { binRange } from "@qkt-studio/core/analytics";
 import { useStore } from "../state/store.js";
 import { useAnalytics } from "./useAnalytics.js";
 import { Chart, chartBase, Gauge, Ring, SignedBars, Spark, Stat, tipHtml, Widget, tok, zoomOptions } from "./widgets.js";
-import { DASH, fmtDay, fmtDur, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph } from "../util/format.js";
+import { DASH, fmtDay, fmtDur, fmtR, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph } from "../util/format.js";
 import { Activity, Gauge as GaugeIcon, Percent, Scale, Target, TrendingUp, Layers } from "../ui/icons.js";
 
 export function Overview() {
   const { a } = useAnalytics();
   const results = useStore((s) => s.results), setFilters = useStore((s) => s.setFilters), filters = useStore((s) => s.filters);
   if (!a || !results) return <div className="empty"><span className="spin" />Loading…</div>;
-  const s = results.summary, start = results.equity.equity[0] ?? 0;
+  const s = results.summary, start = results.equity.equity[0] ?? 0, cur = results.meta.currency ?? null;
   const gain = tok("--gain"), loss = tok("--loss");
   const up = a.pnl >= 0;
   const filtered = Object.values(filters).some((v) => v !== undefined && !(Array.isArray(v) && v.length === 0));
@@ -23,7 +23,7 @@ export function Overview() {
             engine's realised + unrealised total, shown here too whenever an open position makes the two differ. */}
         <Widget title="Realised P&L" icon={<TrendingUp size={15} />} className="kcard">
           <div className={`big ${up ? "gain" : "loss"}`}>{glyph(a.pnl)} {fmtMoney(a.pnl)}</div>
-          <div className="sub">{start ? `${fmtPct(a.pnl / start)} on ${fmtNum(start, 0)}` : `${a.closed} closed trades`}</div>
+          <div className="sub">{start ? `${fmtPct(a.pnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : `${a.closed} closed trades`}</div>
           {!filtered && s.unrealized !== 0 && <div className="sub">Net {glyph(s.totalPnl)} {fmtMoney(s.totalPnl)} incl. {fmtMoney(s.unrealized)} on {s.openTrades} open</div>}
           <Spark values={a.cumulative.pnl} color={up ? gain : loss} />
         </Widget>
@@ -43,7 +43,7 @@ export function Overview() {
         </Widget>
         <Widget title="Expectancy" icon={<Target size={15} />}>
           <div className={`big ${a.expectancy >= 0 ? "gain" : "loss"}`}>{fmtMoney(a.expectancy)}</div>
-          <div className="sub">per trade{a.avgR !== null ? ` · avg ${a.avgR >= 0 ? "+" : "−"}${Math.abs(a.avgR).toFixed(2)}R over ${a.rTrades}` : " · no stop, so no R"}</div>
+          <div className="sub">per trade{a.avgR !== null ? ` · avg ${fmtR(a.avgR)} over ${a.rTrades}` : " · no stop, so no R"}</div>
         </Widget>
       </div>
 

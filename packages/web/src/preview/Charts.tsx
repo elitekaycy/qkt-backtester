@@ -8,7 +8,7 @@ import { ordered, useChartPrefs } from "../state/chartPrefs.js";
 import { useStore } from "../state/store.js";
 import { Maximize2, Minimize2 } from "../ui/icons.js";
 import { Tip } from "../ui/Tip.js";
-import { fmtDur, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
+import { fmtDur, fmtR, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
 import { strategyAlias, tfMs } from "@qkt-studio/core/strategy";
 import { strategyColor } from "../util/strategyColor.js";
 import { ChartToolbar } from "./ChartToolbar.js";
@@ -204,7 +204,7 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
           <b>{t.side === "long" ? "▲ Long" : "▼ Short"} {t.symbol.split(":").pop()} · {t.qty} lots{stratColor && <span style={{ color: strategyColor(t.strategy) }}> · {strategyAlias(t.strategy)}</span>}</b>
           <span>{fmtTs(t.entryTs)} → {t.open ? "open" : fmtTs(t.exitTs)}</span>
           <span>{fmtPrice(t.entryPx)} → {t.exitPx === null ? "—" : fmtPrice(t.exitPx)} · {t.open ? "open" : t.exit}</span>
-          <span className={t.pnl >= 0 ? "gain" : "loss"}>{fmtMoney(t.pnl)}{t.r !== undefined ? ` · ${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}R` : ""} · held {fmtDur(t.holdMs)}</span>
+          <span className={t.pnl >= 0 ? "gain" : "loss"}>{fmtMoney(t.pnl)}{t.r !== undefined ? ` · ${fmtR(t.r)}` : ""} · held {fmtDur(t.holdMs)}</span>
           <span className="muted">{t.risk !== undefined ? `risk ${fmtMoney(t.risk).replace("+", "")}` : "no stop set"}{t.sl !== undefined ? ` · SL ${fmtPrice(t.sl)}` : ""}{t.tp !== undefined ? ` · TP ${fmtPrice(t.tp)}` : ""}</span>
           <em>click to inspect</em>
         </div>
@@ -251,6 +251,9 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
   }, [meta?.runId]);
 
   const rows = trips.rows;
+  // the charts show every symbol's trades on its own chart; the list honours the symbol filter too
+  const symFilter = useStore((s) => s.filters.symbol);
+  const listRows = useMemo(() => (symFilter ? rows.filter((t) => t.symbol === symFilter) : rows), [rows, symFilter]);
   const idx = selected ? rows.findIndex((t) => t.id === selected.id) : -1;
   const step = (d: 1 | -1) => {
     if (!rows.length) return;
@@ -309,7 +312,8 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
             onHide={() => { if (maxed === keyOf(s)) setMaxed(null); prefs.toggle(keyOf(s)); }} onSelect={(t) => pick(t, true)} />
         ))}
       </div>
-      {!inChartTab && <TradesTab rows={rows} selectedId={selected?.id ?? null} onSelect={(t) => pick(t, false)} truncated={trips.truncated} total={trips.total} />}
+      {!inChartTab && <TradesTab rows={listRows} selectedId={selected?.id ?? null} onSelect={(t) => pick(t, false)}
+        all={results.summary.trades + results.summary.openTrades} matched={trips.truncated && !symFilter ? trips.total : null} />}
       <TradeStrip trip={selected} index={idx} count={rows.length} startBalance={results.equity.equity[0] ?? 0} multi={meta.strategies.length > 1} onPrev={() => step(-1)} onNext={() => step(1)} onClose={() => selectTrip(null)} />
       <span hidden>{String(!!onOpenJournal)}</span>
     </div>

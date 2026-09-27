@@ -10,9 +10,9 @@ export const STUDIO_VERSION = "0.1.0";
  * Version of everything under derived/. Derived files are a pure function of qkt's own output (kept in engine/), so a finished
  * run derived by an older version is re-derived on first access instead of serving numbers computed by old rules.
  * Bump when a derived value changes meaning (2: exit reasons read from the closing order's class; trip-based loss streak;
- * 3: each stream's bar base, so charts and checks read the bars qkt read).
+ * 3: each stream's bar base, so charts and checks read the bars qkt read; 4: the account currency money is reported in).
  */
-export const DERIVED_VERSION = 3;
+export const DERIVED_VERSION = 4;
 /** Above this many fills the round-trip file is too large to page from memory. */
 export const MAX_FILLS = 2_000_000;
 
@@ -148,6 +148,7 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
     write("meta.json", {
       runId: run.id, tier: run.tier, from: run.from, to: run.to, streams, strategies: Object.keys(result.perStrategy),
       fills: fills.length, trips: trips.length, qktVersion: result.evidence.qktVersion, studioVersion: STUDIO_VERSION,
+      currency: result.accounting?.accountCurrency ?? null,
       monteCarloEngine: result.global.monteCarlo ?? null, derivedVersion: DERIVED_VERSION,
     }),
   ]);

@@ -1,13 +1,13 @@
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { Tip } from "../ui/Tip.js";
-import { DASH, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph } from "../util/format.js";
+import { DASH, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph, fmtWindow } from "../util/format.js";
 import { ChartColumn, CircleCheck, TriangleAlert } from "../ui/icons.js";
 import { PaneControls } from "../ui/PaneControls.js";
 import { ChartsBody } from "./Charts.js";
 
 function Kpi({ l, v, s, tone, onClick }: { l: string; v: string; s?: string; tone?: "gain" | "loss"; onClick(): void }) {
-  return <button className="pkpi" onClick={onClick} title="Open in the Journal"><span className="l">{l}</span><span className={`v ${tone ?? ""}`}>{v}</span>{s && <span className="s">{s}</span>}</button>;
+  return <button className="pkpi" onClick={onClick} title="Open in the Journal"><span className="l">{l}</span><span className={`v ${tone ?? ""}`}>{v}</span>{s && <span className="s" title={s}>{s}</span>}</button>;
 }
 
 /** The chart pane: headline numbers, the charts and the trade list. Click any number to open the Journal on it. */
@@ -17,7 +17,7 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
   const s = results?.summary, meta = results?.meta;
   const failed = results?.integrity.checks.filter((c) => c.ok === false && !c.soft) ?? [];
   const soft = results?.integrity.checks.filter((c) => c.ok === false && c.soft) ?? [];
-  const start = results?.equity.equity[0] ?? 0;
+  const start = results?.equity.equity[0] ?? 0, cur = results?.meta.currency ?? undefined;
   const open = (sec: "overview" | "trades" | "monthly" = "overview") => ui.openJournal(sec);
 
   return (
@@ -28,7 +28,7 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
         {results && (failed.length ? <span className="badge bad" title={failed.map((c) => c.detail).join("\n")}><TriangleAlert size={12} />integrity</span>
           : soft.length ? <Tip label="Some fills fall outside their bar: expected on bars for stops and targets. Verify on ticks." side="bottom"><span className="badge warn"><TriangleAlert size={12} />approximate</span></Tip>
           : <span className="badge ok"><CircleCheck size={12} />matches engine</span>)}
-        {meta && <span className="muted hide-md" style={{ fontSize: "var(--fs-xs)" }}>{meta.from} → {meta.to}</span>}
+        {meta && <span className="muted hide-md nowrap" style={{ fontSize: "var(--fs-xs)" }} title={`Run window [${meta.from}, ${meta.to}) UTC`}>{fmtWindow(meta.from, meta.to)}</span>}
         {stale && <span className="badge warn">previous run</span>}
         <span className="grow" style={{ flex: 1 }} />
         <button className="btn sm" onClick={() => open()} disabled={!results}><ChartColumn size={14} />Journal</button>
@@ -36,7 +36,7 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
       </div>
       {s && (
         <div className={`preview-kpis${stale ? " dim" : ""}`}>
-          <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}` : "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} onClick={() => open()} />
+          <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : cur ?? "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} onClick={() => open()} />
           <Kpi l="Win rate" v={fmtPct(s.winRate, 1)} s={`${s.wins}W · ${s.losses}L`} onClick={() => open("trades")} />
           <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} s={`Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
           <Kpi l="Trades" v={String(s.trades)} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />

@@ -22,6 +22,12 @@ function Toasts() {
   return <div className="toasts" role="status" aria-live="polite">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`} onClick={() => useStore.getState().dismissToast(t.id)}>{t.text}</div>)}</div>;
 }
 
+/** Run started / finished / failed, for screen readers: the visual progress text updates too often to be a live region. */
+function RunAnnouncer() {
+  const text = useStore((s) => s.announce);
+  return <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{text}</div>;
+}
+
 function TokenGate({ children }: { children: React.ReactNode }) {
   const info = useStore((s) => s.info);
   const [need, setNeed] = useState(false);
@@ -172,6 +178,7 @@ function Shell() {
       <CommandPalette />
       <Shortcuts />
       <Toasts />
+      <RunAnnouncer />
     </div>
   );
 }
