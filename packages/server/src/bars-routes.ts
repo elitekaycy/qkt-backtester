@@ -2,7 +2,7 @@ import { rootFor } from "./settings.js";
 import type { FastifyInstance } from "fastify";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { availableTimeframes, barDir, lodAggregate, packBars, readBars, tfToMs } from "@qkt-studio/core";
+import { availableTimeframes, barDir, lodAggregate, packBars, readBarsVia, tfToMs } from "@qkt-studio/core";
 import { barCountOf } from "./barfile.js";
 import type { ServerConfig } from "./config.js";
 
@@ -47,6 +47,8 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
   /** The data source can be changed from the UI at runtime, so it is read on every request. */
   const rootOf = (symbol?: string) => (symbol ? rootFor(cfg, symbol) : cfg.dataRoot);
   const bad = (msg: string) => ({ error: msg });
+  /** `base`: the folder to read `tf` from (a finer timeframe that divides it, as qkt aggregates); defaults to `tf` itself. */
+  const baseOf = (tf: string, base: string | undefined): string | null => (base === undefined || base === "" || base === tf ? tf : TF.test(base) && tfToMs(tf) % tfToMs(base) === 0 ? base : null);
 
   /**
    * Inventory of the data store for the Data section: per symbol, the tick files (with the fetcher's manifest) and every
@@ -123,7 +125,9 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
     if (from === null || to === null || to <= from) return reply.code(400).send(bad("from/to required; to is exclusive and must be after from"));
     if ((to - from) / DAY_MS > MAX_BAR_DAYS) return reply.code(400).send(bad(`range longer than ${MAX_BAR_DAYS} days`));
     const max = Math.min(Math.max(Number(req.query.max ?? 5000) || 5000, 100), 20_000);
-    const r = await readBars(rootOf(symbol), broker, symbol, tf, from, to);
+    const base = baseOf(tf, req.query.base);
+    if (!base) return reply.code(400).send(bad("base must be a timeframe that divides tf"));
+    const r = await readBarsVia(rootOf(symbol), broker, symbol, tf, base, from, to);
     const cols = lodAggregate(r.cols, max);
     const body = packBars(cols);
     return reply
@@ -141,8 +145,10 @@ export function registerBarsRoutes(app: FastifyInstance, cfg: ServerConfig): voi
     const from = toMs(req.query.from), to = toMs(req.query.to);
     if (from === null || to === null || to <= from) return reply.code(400).send(bad("from/to required; to is exclusive"));
     if ((to - from) / DAY_MS > MAX_BAR_DAYS) return reply.code(400).send(bad(`range longer than ${MAX_BAR_DAYS} days`));
-    const days = await dayCoverage(rootOf(symbol), broker, symbol, tf, from, to);
+    const base = baseOf(tf, req.query.base);
+    if (!base) return reply.code(400).send(bad("base must be a timeframe that divides tf"));
+    const days = await dayCoverage(rootOf(symbol), broker, symbol, base, from, to);
     const count = (s: DayStatus) => days.filter((d) => d.status === s).length;
-    return { broker, symbol, tf, days, summary: { ok: count("ok"), thin: count("thin"), closed: count("closed"), missing: count("missing") } };
+    return { broker, symbol, tf, base, days, summary: { ok: count("ok"), thin: count("thin"), closed: count("closed"), missing: count("missing") } };
   });
 }

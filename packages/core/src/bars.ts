@@ -173,6 +173,12 @@ export function resampleTo(b: BarCols, tfMs: number): BarCols {
   return out;
 }
 
+/** Bars of `tf` built from the `base` folder (resampled on qkt's UTC-aligned windows when base is finer). */
+export async function readBarsVia(dataRoot: string, broker: string, symbol: string, tf: string, base: string, fromMs: number, toMs: number): Promise<ReadBarsResult> {
+  const r = await readBars(dataRoot, broker, symbol, base, fromMs, toMs);
+  return base === tf ? r : { ...r, cols: resampleTo(r.cols, tfToMs(tf)) };
+}
+
 /** Serialise to a compact binary payload for the browser: [n:u32][tfMs:f64] then 6 Float64 columns. */
 export function packBars(b: BarCols): Uint8Array {
   const n = b.ts.length;

@@ -6,7 +6,7 @@ import { rootFor } from "./settings.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
-  usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
+  availableTimeframes, barBases, usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
   parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, tfMs, transition, uniqueStreams, warmupBarsEstimate,
   type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
 } from "@qkt-studio/core";
@@ -194,7 +194,13 @@ export class Runner {
       return out;
     };
     const paths = new Set<string>();
-    if (tier === "draft") for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
+    if (tier === "draft") {
+      // the folder qkt reads for each symbol (a 1h stream runs on 15m bars when only those are built), not the stream's own name
+      const built = new Map<string, string[]>();
+      for (const s of streams) { const k = `${s.broker}:${s.symbol}`; if (!built.has(k)) built.set(k, await availableTimeframes(rootFor(this.cfg, s.symbol), s.broker, s.symbol)); }
+      const bases = barBases(streams, (b, sy) => built.get(`${b}:${sy}`) ?? []);
+      for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, bases.get(`${s.broker}:${s.symbol}`) ?? s.tf, `${d}.bin`));
+    }
     else for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "symbols", s.symbol, `${d}.csv.gz`));
     const list = [...paths];
     const out: Array<{ path: string; size: number; mtimeMs: number }> = [];

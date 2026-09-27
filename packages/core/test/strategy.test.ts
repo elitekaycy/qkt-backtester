@@ -91,3 +91,41 @@ describe("canonicalTf mirrors qkt's TimeWindow.canonicalSpec", () => {
     expect(i.streams.map((s) => s.tf)).toEqual(["1d", "1h"]);
   });
 });
+
+import { barBaseTf, barBases, barsPicker } from "../src/strategy.js";
+import type { SymbolReport, TfReport } from "../src/scantypes.js";
+describe("bar base: the folder qkt reads in a bars run", () => {
+  it("is the coarsest canonical built timeframe dividing the finest declared one", () => {
+    expect(barBaseTf(["1m", "15m", "4h"], "1h")).toBe("15m");
+    expect(barBaseTf(["1h", "15m"], "1h")).toBe("1h");
+    expect(barBaseTf(["60m"], "1h")).toBeNull(); // a non-canonical folder is never read
+    expect(barBaseTf(["4h"], "1h")).toBeNull();
+    expect(barBaseTf(["7m"], "15m")).toBeNull();
+    expect(barBaseTf([], "15m")).toBeNull();
+  });
+  it("is chosen per symbol from its finest stream, so coarser streams aggregate from it", () => {
+    const built: Record<string, string[]> = { "B:X": ["5m", "15m", "1h"], "B:Y": ["1h"] };
+    const m = barBases(
+      [{ broker: "B", symbol: "X", tf: "1h" }, { broker: "B", symbol: "X", tf: "15m" }, { broker: "B", symbol: "Y", tf: "4h" }, { broker: "B", symbol: "Z", tf: "1h" }],
+      (b, s) => built[`${b}:${s}`] ?? []);
+    expect(m.get("B:X")).toBe("15m");
+    expect(m.get("B:Y")).toBe("1h");
+    expect(m.get("B:Z")).toBeNull();
+  });
+  it("readiness runs a 1h stream on 15m bars and explains what is missing", () => {
+    const tf = (t: string, first: string, last: string, extra: Partial<TfReport> = {}) =>
+      ({ broker: "B", tf: t, files: 3, usable: [{ from: first, to: last }], ...extra }) as unknown as TfReport;
+    const sym = (symbol: string, bars: TfReport[], ticks = false) => ({ symbol, bars, ticks: ticks ? {} : null }) as unknown as SymbolReport;
+    const syms: Record<string, SymbolReport> = {
+      X: sym("X", [tf("15m", "2024-01-01", "2024-03-01"), tf("1h", "2020-01-01", "2020-02-01", { files: 0 })]),
+      Y: sym("Y", [tf("60m", "2024-01-01", "2024-03-01", { qktReads: "1h" })], true),
+      Z: sym("Z", [], true),
+    };
+    const streams = [{ alias: "a", broker: "B", symbol: "X", tf: "1h" }, { alias: "b", broker: "B", symbol: "Y", tf: "1h" }, { alias: "c", broker: "B", symbol: "Z", tf: "4h" }];
+    const pick = barsPicker(streams, (s) => syms[s]);
+    expect(pick(streams[0]!)).toEqual({ ranges: [{ from: "2024-01-01", to: "2024-03-01" }] });
+    expect(pick(streams[1]!)).toMatchObject({ blocked: expect.stringContaining('folder named "60m"'), fix: "build-bars" });
+    expect(pick(streams[2]!)).toEqual({ blocked: "no bars qkt can use for 4h on B: build 4h (or a finer timeframe that divides it)", fix: "build-bars" });
+    expect(pick({ alias: "d", broker: "B", symbol: "Q", tf: "1h" })).toMatchObject({ fix: "fetch" });
+  });
+});

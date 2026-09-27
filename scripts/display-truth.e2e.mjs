@@ -45,6 +45,8 @@ const trades = await api(`/api/runs/${runId}/trades?sort=entryTs&dir=desc&limit=
 const b = await puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox", "--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
 const p = await b.newPage(); await p.setViewport({ width: 1760, height: 1000 });
 const errs = []; p.on("pageerror", (e) => errs.push(e.message));
+const barsSeen = []; // every candle request the charts make: which folder they read, and whether candles came back
+p.on("response", (r) => { const u = new URL(r.url()); if (u.pathname === "/api/bars") barsSeen.push({ q: Object.fromEntries(u.searchParams), status: r.status(), n: Number(r.headers()["x-bars-count"] ?? 0) }); });
 await p.evaluateOnNewDocument((prefs) => { try { localStorage.clear(); localStorage.setItem("qkt-studio-prefs-v1", JSON.stringify(prefs)); } catch {} }, { from: FROM, to: TO, tier: "draft", theme: "dark", options: OPTIONS });
 await p.goto(BASE, { waitUntil: "domcontentloaded" }); await sleep(3500);
 const key = async (k) => { await p.keyboard.down("Control"); await p.keyboard.press(k); await p.keyboard.up("Control"); };
@@ -107,6 +109,15 @@ for (const t of trades.rows.slice(0, 8)) {
   ok(`Trades row #${t.id}`, rows.some((r) => r.includes(String(t.id)) && r.includes(needle)), `#${t.id} ${needle}`);
 }
 
+// charts: the visible stream's candles are read from the folder qkt read (meta.streams[].base), and are not empty
+const meta = await api(`/api/runs/${runId}/derived/meta`);
+for (const st of meta.streams) {
+  const seen = barsSeen.filter((x) => x.q.symbol === st.symbol && x.q.tf === st.tf && x.q.broker === st.broker);
+  if (!seen.length) continue; // a stream in a background tab loads only when shown
+  ok(`chart ${st.key} reads ${st.base}`, seen.every((x) => (x.q.base ?? x.q.tf) === st.base), JSON.stringify(seen.map((x) => x.q.base)));
+  ok(`chart ${st.key} has candles`, seen.some((x) => x.status === 200 && x.n > 0), JSON.stringify(seen));
+}
+ok("a chart loaded", barsSeen.length > 0);
 ok("no page errors", errs.length === 0, JSON.stringify(errs));
 console.log(`display-truth: ${pass} passed, ${fail} failed (run ${runId}: ${s.trades} trades, net ${s.totalPnl}, realised ${a.pnl})`);
 await b.close();

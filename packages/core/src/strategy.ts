@@ -1,4 +1,6 @@
 import { scrub } from "./lint.js";
+import type { DayRange } from "./ranges.js";
+import type { SymbolReport } from "./scantypes.js";
 
 export interface StreamDecl {
   alias: string;
@@ -52,6 +54,59 @@ export function warmupBarsEstimate(sources: string[], params: Record<string, str
   for (const s of sources) look(s.split(/\r?\n/).map((l) => (/^\s*--/.test(l) ? "" : l)).join("\n"));
   for (const v of Object.values(params)) look(v);
   return max;
+}
+
+const tfMsOr = (tf: string) => tfMs(tf) ?? Number.MAX_SAFE_INTEGER;
+
+/**
+ * The bar folder qkt reads for a symbol in a bars run (BacktestContext.resolveBarReplay): of the timeframes built for it, the
+ * coarsest one that divides the symbol's FINEST declared timeframe. Every declared stream of that symbol is aggregated from
+ * it, so a 1h stream runs on 15m bars when no 1h bars are built. Folders qkt cannot read (not its canonical name) never count.
+ */
+export function barBaseTf(built: readonly string[], finestDeclared: string): string | null {
+  const want = tfMsOr(finestDeclared);
+  let best: string | null = null;
+  for (const tf of built) {
+    if (canonicalTf(tf) !== tf) continue;
+    const ms = tfMsOr(tf);
+    if (want % ms === 0 && (best === null || ms > tfMsOr(best))) best = tf;
+  }
+  return best;
+}
+
+/** For each `broker:symbol` of these streams, the folder qkt reads in a bars run (null: nothing usable is built). */
+export function barBases(streams: ReadonlyArray<{ broker: string; symbol: string; tf: string }>, builtOf: (broker: string, symbol: string) => readonly string[]): Map<string, string | null> {
+  const finest = new Map<string, string>();
+  for (const s of streams) {
+    const k = `${s.broker}:${s.symbol}`, cur = finest.get(k);
+    if (!cur || tfMsOr(s.tf) < tfMsOr(cur)) finest.set(k, s.tf);
+  }
+  const out = new Map<string, string | null>();
+  for (const [k, tf] of finest) { const [broker, ...rest] = k.split(":"); out.set(k, barBaseTf(builtOf(broker!, rest.join(":")), tf)); }
+  return out;
+}
+
+export type StreamPick = { ranges: DayRange[] } | { blocked: string; fix: "build-bars" | "fetch" };
+
+/** Which bars each stream of `group` is run on, the way qkt resolves them in a bars run: per symbol the base folder from
+ *  [barBases] over the folders qkt can read, with the base folder's usable days, or why the stream cannot run. */
+export function barsPicker(group: readonly StreamDecl[], symOf: (symbol: string) => SymbolReport | undefined): (s: StreamDecl) => StreamPick {
+  const readable = (broker: string, symbol: string) => symOf(symbol)?.bars.filter((b) => b.broker === broker && b.files > 0 && !b.qktReads) ?? [];
+  const bases = barBases(group, (broker, symbol) => readable(broker, symbol).map((b) => b.tf));
+  const finest = new Map<string, string>();
+  for (const s of group) { const k = `${s.broker}:${s.symbol}`, cur = finest.get(k); if (!cur || tfMsOr(s.tf) < tfMsOr(cur)) finest.set(k, s.tf); }
+  return (s) => {
+    const sym = symOf(s.symbol);
+    if (!sym) return { blocked: "symbol is not in the data source", fix: "fetch" };
+    const k = `${s.broker}:${s.symbol}`, base = bases.get(k), want = finest.get(k) ?? s.tf;
+    const tf = base ? readable(s.broker, s.symbol).find((b) => b.tf === base) : undefined;
+    if (tf) return { ranges: tf.usable };
+    const misnamed = sym.bars.find((b) => b.broker === s.broker && b.qktReads === want && b.files > 0);
+    if (misnamed) return { blocked: `the ${want} bars are in a folder named "${misnamed.tf}", which qkt does not read: rename it to ${want}`, fix: "build-bars" };
+    return sym.ticks
+      ? { blocked: `no bars qkt can use for ${want} on ${s.broker}: build ${want} (or a finer timeframe that divides it)`, fix: "build-bars" }
+      : { blocked: `no bars qkt can use for ${want} on ${s.broker}`, fix: "fetch" };
+  };
 }
 
 /** Read the declarative headers of a .qkt file: what it trades, what it can be tuned by, what it imports. */

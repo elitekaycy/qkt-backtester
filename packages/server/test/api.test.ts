@@ -297,6 +297,32 @@ d("bars and coverage", () => {
     expect(Number(lod.headers["x-bars-count"])).toBeLessThanOrEqual(300);
     expect(lod.headers["x-bars-source-count"]).toBe("2021");
   });
+  it("reads a timeframe from a finer base folder, aggregated the way qkt does, and refuses a base that does not divide it", async () => {
+    const from = Date.UTC(2024, 9, 1), to = Date.UTC(2024, 9, 31);
+    const unpack = (r: { rawPayload: Buffer }) => {
+      const b = r.rawPayload, dv = new DataView(b.buffer, b.byteOffset, b.byteLength), n = dv.getUint32(0, true);
+      const col = (c: number) => Array.from({ length: n }, (_, i) => dv.getFloat64(16 + (c * n + i) * 8, true));
+      return { n, step: dv.getFloat64(8, true), ts: col(0), open: col(1), high: col(2), low: col(3), close: col(4) };
+    };
+    const m15 = unpack(await get(`/api/bars?broker=BACKTEST&symbol=XAUUSD&tf=15m&from=${from}&to=${to}&max=20000`));
+    const h1 = unpack(await get(`/api/bars?broker=BACKTEST&symbol=XAUUSD&tf=1h&base=15m&from=${from}&to=${to}&max=20000`));
+    expect(h1.step).toBe(3_600_000);
+    expect(h1.ts.every((t) => t % 3_600_000 === 0)).toBe(true);
+    // every hour is the open of its first quarter, the close of its last, the extremes of all of them
+    for (let i = 0; i < h1.n; i++) {
+      const q = m15.ts.flatMap((t, j) => (t >= h1.ts[i]! && t < h1.ts[i]! + 3_600_000 ? [j] : []));
+      expect(q.length).toBeGreaterThan(0);
+      expect(h1.open[i]).toBe(m15.open[q[0]!]);
+      expect(h1.close[i]).toBe(m15.close[q[q.length - 1]!]);
+      expect(h1.high[i]).toBe(Math.max(...q.map((j) => m15.high[j]!)));
+      expect(h1.low[i]).toBe(Math.min(...q.map((j) => m15.low[j]!)));
+    }
+    const cov = (await get("/api/bars/coverage?broker=BACKTEST&symbol=XAUUSD&tf=1h&base=15m&from=2024-10-01&to=2024-10-08")).json();
+    expect(cov.base).toBe("15m");
+    for (const q of ["tf=15m&base=1h", "tf=1h&base=7m", "tf=1h&base=zz"]) {
+      expect((await get(`/api/bars?broker=BACKTEST&symbol=XAUUSD&${q}&from=${from}&to=${to}`)).statusCode, q).toBe(400);
+    }
+  });
   it("rejects bad parameters and never lets identifiers become paths", async () => {
     for (const q of ["broker=..&symbol=X&tf=15m&from=2024-10-01&to=2024-10-02", "broker=B&symbol=..&tf=15m&from=2024-10-01&to=2024-10-02", "broker=.&symbol=X&tf=15m&from=2024-10-01&to=2024-10-02", "broker=B&symbol=../x&tf=15m&from=2024-10-01&to=2024-10-02",
       "broker=B&symbol=X&tf=zz&from=2024-10-01&to=2024-10-02", "broker=B&symbol=X&tf=15m&from=2024-10-02&to=2024-10-01", "broker=B&symbol=X&tf=15m&from=2000-01-01&to=2024-10-01", "symbol=X"]) {

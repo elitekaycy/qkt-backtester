@@ -1,5 +1,6 @@
 import { dayMs, intersectAll, isoDay, longest, rangeDays, type DayRange } from "@qkt-studio/core/ranges";
 import type { ModeReadiness, Readiness, ScanReport, SymbolReport, YearRow } from "@qkt-studio/core";
+import { barsPicker } from "@qkt-studio/core/strategy";
 import type { SymbolPref } from "../api/client.js";
 
 const DAY = 86_400_000;
@@ -73,6 +74,7 @@ export function gapDaysIn(gaps: DayRange[], from: string, to: string): number {
 export function recomputeReadiness(r: Readiness, scan: ScanReport, prefs: Record<string, SymbolPref>, bySource: Record<string, SymbolReport | undefined>): Readiness {
   const symOf = (sym: string) => bySource[sym] ?? scan.symbols.find((s) => s.symbol === sym);
   const symbols = r.streams.map((s) => s.symbol);
+  const pickBars = barsPicker(r.streams, symOf);
   const mode = (kind: "bars" | "ticks"): ModeReadiness => {
     const sets: DayRange[][] = [], blocked: ModeReadiness["blocked"] = [];
     for (const s of r.streams) {
@@ -80,9 +82,9 @@ export function recomputeReadiness(r: Readiness, scan: ScanReport, prefs: Record
       const label = `${s.broker}:${s.symbol} ${s.tf}`;
       if (!sym) { blocked.push({ stream: label, reason: "symbol is not in the data source", fix: "fetch" }); continue; }
       if (kind === "bars") {
-        const tf = sym.bars.find((b) => b.broker === s.broker && b.tf === s.tf && b.files > 0 && !b.qktReads);
-        if (tf) sets.push(tf.usable);
-        else blocked.push({ stream: label, reason: sym.ticks ? `no ${s.tf} bars built for ${s.broker}` : `no ${s.tf} bars for ${s.broker}`, fix: sym.ticks ? "build-bars" : "fetch" });
+        const pick = pickBars(s);
+        if ("ranges" in pick) sets.push(pick.ranges);
+        else blocked.push({ stream: label, reason: pick.blocked, fix: pick.fix });
       } else if (sym.ticks) sets.push(sym.ticks.usable);
       else blocked.push({ stream: label, reason: "no tick files for this symbol", fix: "fetch" });
     }

@@ -9,7 +9,7 @@ import { useStore } from "../state/store.js";
 import { Maximize2, Minimize2 } from "../ui/icons.js";
 import { Tip } from "../ui/Tip.js";
 import { fmtDur, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
-import { strategyAlias } from "@qkt-studio/core/strategy";
+import { strategyAlias, tfMs } from "@qkt-studio/core/strategy";
 import { strategyColor } from "../util/strategyColor.js";
 import { ChartToolbar } from "./ChartToolbar.js";
 import { StrategyLegend } from "./StrategyLegend.js";
@@ -36,7 +36,7 @@ function CoverageStrip({ stream, from, to, registry, id }: { stream: Stream; fro
     let live = true;
     api.coverage({ ...stream, from: new Date(from).toISOString().slice(0, 10), to: new Date(to).toISOString().slice(0, 10) }).then((c) => live && setCov(c)).catch(() => live && setCov(null));
     return () => { live = false; };
-  }, [stream.broker, stream.symbol, stream.tf, from, to]);
+  }, [stream.broker, stream.symbol, stream.tf, stream.base, from, to]);
   useEffect(() => {
     const chart = registry.charts.get(id);
     if (!chart) return;
@@ -228,7 +228,13 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
 
   const all = useMemo(() => {
     const seen = new Set<string>();
-    return [...(meta?.streams ?? []), ...extra].filter((s) => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true; });
+    // an added chart of a run's symbol reads the run's bar base when that divides it, as qkt would aggregate it
+    const baseOf = (s: Stream) => {
+      const b = meta?.streams.find((m) => m.broker === s.broker && m.symbol === s.symbol)?.base;
+      const t = tfMs(s.tf), bt = b ? tfMs(b) : null;
+      return b && t && bt && t % bt === 0 ? b : undefined;
+    };
+    return [...(meta?.streams ?? []), ...extra.map((s) => ({ ...s, base: baseOf(s) }))].filter((s) => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true; });
   }, [meta, extra]);
   const sorted = useMemo(() => ordered(all, keyOf, prefs.order), [all, prefs.order]);
   const shown = useMemo(() => sorted.filter((s) => !prefs.hidden.includes(keyOf(s))), [sorted, prefs.hidden]);
