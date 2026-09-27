@@ -37,16 +37,23 @@ export async function createStudio(cfg: ServerConfig) {
   return { app, runner, jobs };
 }
 
+/**
+ * A brand-new workspace gets the whole project: config, instruments for the symbols in the data source, .env and a sample
+ * strategy. "New" ignores what the studio itself creates (runs/, .qkt-studio/), so it must be judged before the runner starts
+ * or a restart with an empty runs/ folder; anything of the user's means it is theirs and is left alone.
+ */
+export async function seedIfEmpty(cfg: ServerConfig): Promise<string[] | null> {
+  const entries = (await readdir(cfg.workspace).catch(() => [] as string[])).filter((n) => n !== ".qkt-studio" && n !== "runs");
+  if (entries.length) return null;
+  const scan = await scanCached(cfg.dataRoot).catch(() => null);
+  return (await scaffoldWorkspace(cfg.workspace, scan)).created;
+}
+
 async function main() {
   const cfg = loadConfig();
+  const seeded = await seedIfEmpty(cfg);
+  if (seeded) console.log(`qkt-backtester: seeded an empty workspace: ${seeded.join(", ")}`);
   const { app } = await createStudio(cfg);
-  // a brand-new (empty) workspace gets the full project: config, instruments for the symbols in the data source, .env, samples
-  const entries = (await readdir(cfg.workspace).catch(() => [] as string[])).filter((n) => n !== ".qkt-studio");
-  if (entries.length === 0) {
-    const scan = await scanCached(cfg.dataRoot).catch(() => null);
-    const r = await scaffoldWorkspace(cfg.workspace, scan);
-    console.log(`qkt-backtester: seeded an empty workspace: ${r.created.join(", ")}`);
-  }
   await app.listen({ port: cfg.port, host: cfg.host });
   console.log(`qkt-backtester listening on http://${cfg.host}:${cfg.port}  workspace=${cfg.workspace}  data=${cfg.dataRoot}  terminal=${cfg.terminal}${cfg.token ? "  (token required)" : ""}`);
   const stop = () => { void app.close().then(() => process.exit(0)); };
