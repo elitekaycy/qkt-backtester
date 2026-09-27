@@ -344,3 +344,29 @@ parent render and returned focus to the opener, so palette typing went into the 
 - **Terminal (restricted):** ls/cd/cat/head/tail/tree/pwd/echo/help builtins jailed to the workspace (`term-builtins.ts`); `clear`/Ctrl+L client side.
 - **Housekeeping:** `GET /api/runs-usage`, `POST /api/runs/prune`; DELETE removes the run folder, index row and caches.
 - **Diagnostics:** qkt reports "expected X, got 'TOKEN'" at the token that failed, usually the first token of the next line; `anchorParseError` moves the marker to the end of the unfinished line above.
+
+## 17. Portfolio support (2026-09-27)
+
+- **Probed:** `qkt backtest book.qkt` on a real `PORTFOLIO` file writes one `trades.csv` with `strategy` = `<portfolio>:<alias>`,
+  per-strategy `equity_<urlencoded id>.csv`, and `result.json.perStrategy` + `bookAnalytics` (contribution/risk/drawdown
+  attribution, return correlation) + `bookRisk` (book volatility, gross/net exposure). The studio already ran a portfolio
+  end to end before this work (union streams, reconciled trips); this pass makes the UI and derived data portfolio-aware.
+- **Core:** `analyze()` gained `byStrategy`/`dailyByStrategy`/`monthlyByStrategy` (empty for one strategy); `TripQuery`
+  gained `strategies?: string[]` (any-of) alongside the exact `strategy`; `parseStrategyInfo` reads `IMPORT ... HOLD` and
+  a new `portfolio.ts` gives `strategyBreakdown()`/`bookInfo()` from a `QktResult`.
+- **Server:** `portfolio.ts` resolves `IMPORT`s transitively inside the workspace jail (`resolveStrategy`, `listPortfolios`,
+  cached by mtime); readiness for a portfolio unions its children's streams and names which child blocks a stream.
+  `postprocess.ts` writes `derived/{strategies,equity-by-strategy,book}.json` only when `perStrategy` has more than one
+  key. `/api/runs` rows carry `kind`/`members`, derived lazily from `derived/meta.json` (no index migration). `/api/portfolios`
+  lists every portfolio and which portfolios use each strategy file.
+- **Web:** Files sidebar expands a portfolio to its members; a "New portfolio" template; `RUN`/`IMPORT '` completions.
+  Chart entry markers, the trades list and the journal trades table gain a strategy colour/badge (`util/strategyColor.ts`,
+  a hash so it's stable) ONLY when a chart or list actually holds more than one strategy — a single-strategy run's
+  layout is byte-for-byte unchanged. A chart-toolbar strategy legend toggles the shared `filters.strategies`, so hiding
+  a strategy there hides it in the trades list and the journal too. Journal gains a "Strategies" nav item (shown only
+  for >1 strategy): a contribution table sourced from `derived/strategies.json` (the book's own numbers, deliberately
+  NOT the active drill filter, so a row's numbers do not change when you click it to filter the rest of the journal),
+  an equity chart per strategy plus the book total, and a book-risk card.
+- **Verified:** the whole existing regression set (`pnpm -r test`, `scripts/e2e.mjs`, shell-layout/editor/files-runs-terminal,
+  lsp, vim-ex) still passes; a scripted browser check of a single-strategy run after this change shows no strategy
+  legend, no Strategy column, and the same 8 journal nav items as before.

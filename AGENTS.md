@@ -34,6 +34,13 @@ pnpm docker:build
 - `qkt` prints nothing during the ~9 s tick coverage check, and its calendar is not holiday-aware. Draft (`--bars`) differs
   from Full for stop/target strategies (measured ~7-10%).
 - Engine log lines carry live fills (`order filled ...`); dashes come out as `?` under a container locale.
+- **Portfolio runs**: a `PORTFOLIO` file's `trades.csv` uses the engine strategy id `<portfolio>:<alias>` (e.g. `book:trend`)
+  in the `strategy` column; `result.json.perStrategy` is keyed the same way, plus `bookAnalytics`/`bookRisk` when present.
+  Per-strategy equity files on disk are `equity_<urlencoded id>.csv` (e.g. `equity_book%3Atrend.csv`). `postprocess.ts`
+  writes `derived/{strategies,equity-by-strategy,book}.json` only when a run has more than one strategy; a single-strategy
+  run never gets them, and every UI branch on `meta.strategies.length > 1` (or a 404 on those routes), never on run
+  metadata alone. Readiness for a portfolio file must resolve its `IMPORT`s (`server/src/portfolio.ts`) to get the
+  union of streams; the portfolio file's own `SYMBOLS` block is not enough.
 
 ## Conventions and traps
 
