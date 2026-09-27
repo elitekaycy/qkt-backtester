@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ApiError, getToken, setToken } from "../api/client.js";
 import { DockBar, DockBody } from "../dock/Dock.js";
 import { EditorPane } from "../editor/EditorPane.js";
-import { Journal } from "../journal/Journal.js";
+const Journal = lazy(() => import("../journal/Journal.js").then((m) => ({ default: m.Journal })));
 import { PreviewPane } from "../preview/PreviewPane.js";
 import { DataSection } from "../sections/DataSection.js";
 import { FilesSection } from "../sections/FilesSection.js";
@@ -165,7 +165,7 @@ function Shell() {
               <ChartPane maxed={maxed === "chart"} onMax={() => ui.toggleMax("chart")} />
             </div>
           </div>
-          {ui.journalOpen && <Journal containerWidth={box.w} />}
+          {ui.journalOpen && <Suspense fallback={null}><Journal containerWidth={box.w} /></Suspense>}
         </main>
       </div>
       <StatusBar />

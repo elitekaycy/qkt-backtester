@@ -3,7 +3,11 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import "monaco-editor/features/register.all.js";
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
-import { createHighlighter } from "shiki";
+import { createHighlighterCore } from "shiki/core";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import yamlLang from "shiki/langs/yaml.mjs";
+import githubDark from "shiki/themes/github-dark.mjs";
+import githubLight from "shiki/themes/github-light.mjs";
 import { shikiToMonaco } from "@shikijs/monaco";
 import qktGrammar from "./qkt.tmLanguage.json";
 
@@ -25,7 +29,7 @@ export function setupMonaco(): Promise<Monaco> {
       surroundingPairs: [{ open: "(", close: ")" }, { open: '"', close: '"' }],
       wordPattern: /[A-Za-z_][\w]*/,
     });
-    const hl = await createHighlighter({ themes: ["github-dark", "github-light"], langs: [{ ...(qktGrammar as object), name: "qkt" } as never, "yaml"] });
+    const hl = await createHighlighterCore({ engine: createJavaScriptRegexEngine(), themes: [githubDark, githubLight], langs: [{ ...(qktGrammar as object), name: "qkt" } as never, yamlLang] });
     shikiToMonaco(hl, monaco);
     return monaco;
   })();

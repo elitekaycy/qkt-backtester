@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { flattenProblems, useStore } from "../state/store.js";
 import { useUi, type DockTab } from "../state/ui.js";
 import { ListChecks, SquareTerminal, TriangleAlert } from "../ui/icons.js";
 import { PaneControls } from "../ui/PaneControls.js";
 import { PipelineTab } from "./PipelineTab.js";
 import { ProblemsTab } from "./ProblemsTab.js";
-import { TerminalTab } from "./TerminalTab.js";
+const TerminalTab = lazy(() => import("./TerminalTab.js").then((m) => ({ default: m.TerminalTab })));
 
 export function DockBar() {
   const ui = useUi();
@@ -39,7 +39,7 @@ export function DockBody() {
     <>
       {tab === "pipeline" && <div role="tabpanel" id="dock-panel-pipeline" aria-labelledby="dock-tab-pipeline" style={{ display: "contents" }}><PipelineTab /></div>}
       {tab === "problems" && <div role="tabpanel" id="dock-panel-problems" aria-labelledby="dock-tab-problems" style={{ display: "contents" }}><ProblemsTab /></div>}
-      {seen && <div role="tabpanel" id="dock-panel-terminal" aria-labelledby="dock-tab-terminal" className="dock-term" style={{ display: tab === "terminal" ? "flex" : "none" }}><TerminalTab /></div>}
+      {seen && <div role="tabpanel" id="dock-panel-terminal" aria-labelledby="dock-tab-terminal" className="dock-term" style={{ display: tab === "terminal" ? "flex" : "none" }}><Suspense fallback={null}><TerminalTab /></Suspense></div>}
     </>
   );
 }
