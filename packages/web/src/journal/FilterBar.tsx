@@ -7,7 +7,7 @@ import { parseFilters, suggest, toChips } from "./filterQuery.js";
 import { useAnalytics } from "./useAnalytics.js";
 
 const H = 3_600_000;
-const HOLDS: Array<[string, number | undefined, number | undefined]> = [["Any", undefined, undefined], ["< 1h", undefined, H], ["1–4h", H, 4 * H], ["4–24h", 4 * H, 24 * H], ["> 1d", 24 * H, undefined]];
+const HOLDS: Array<[string, number | undefined, number | undefined]> = [["Any", undefined, undefined], ["< 1h", undefined, H], ["1–4h", H, 4 * H], ["4–24h", 4 * H, 24 * H], ["≥ 1d", 24 * H, undefined]];
 const RS: Array<[string, number | undefined, number | undefined]> = [["Any", undefined, undefined], ["< 0R", undefined, -0.0001], ["≥ 1R", 1, undefined], ["≥ 2R", 2, undefined]];
 const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WD_IDX = [1, 2, 3, 4, 5, 6, 0];
