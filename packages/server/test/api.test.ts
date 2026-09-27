@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync, copyFileSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -495,5 +495,18 @@ describe("run housekeeping", () => {
     const after = (await studio.app.inject({ url: "/api/runs-usage" })).json() as { total: number };
     expect(after.total).toBeLessThan(before.total);
     expect((await studio.app.inject({ method: "POST", url: "/api/runs/prune", payload: {} })).statusCode).toBe(400);
+  });
+});
+
+describe("live check of a portfolio resolves its imports from the file's own folder", () => {
+  it("a valid portfolio buffer has no diagnostics; a missing import names the workspace path", async () => {
+    const dir = path.join(ws, "strategies");
+    writeFileSync(path.join(dir, "child_a.qkt"), "STRATEGY child_a VERSION 1\n\nSYMBOLS\n    g = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN g.close > 0\n     AND POSITION.g = 0\n    THEN BUY g SIZING 0.1\n");
+    const book = "PORTFOLIO pb VERSION 1\n\nIMPORT 'child_a.qkt' AS a\n\nRULES\n    RUN a\n";
+    const ok = (await studio.app.inject({ method: "POST", url: "/api/check", payload: { kind: "qkt", content: book, path: "strategies/pb.qkt" } })).json();
+    expect(ok.diagnostics).toEqual([]);
+    const bad = (await studio.app.inject({ method: "POST", url: "/api/check", payload: { kind: "qkt", content: book.replace("child_a.qkt", "nope.qkt"), path: "strategies/pb.qkt" } })).json();
+    expect(bad.diagnostics[0].message).toMatch(/nope\.qkt/);
+    expect(readdirSync(dir).some((n) => n.startsWith(".qkt-check-"))).toBe(false); // the check copy is always removed
   });
 });

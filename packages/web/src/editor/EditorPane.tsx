@@ -163,7 +163,7 @@ export function EditorPane() {
     const seq = ++timers.current.seq;
     timers.current.check = setTimeout(async () => {
       try {
-        const { diagnostics } = await api.check(kind, text);
+        const { diagnostics } = await api.check(kind, text, path);
         if (seq !== timers.current.seq) return;
         const s = S.current, model = s?.models.get(path);
         if (s && model) s.m.editor.setModelMarkers(model, "qkt-check", toMarkers(s.m, diagnostics));

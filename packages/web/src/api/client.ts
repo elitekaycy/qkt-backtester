@@ -64,7 +64,7 @@ export const api = {
   createFile: (path: string, content = "", type: "file" | "dir" = "file") => req<{ path: string; etag?: string }>("/api/file", { method: "POST", body: JSON.stringify({ path, content, type }) }),
   remove: (path: string) => req<void>(`/api/file${qs({ path })}`, { method: "DELETE" }),
   rename: (from: string, to: string) => req<{ from: string; to: string }>("/api/rename", { method: "POST", body: JSON.stringify({ from, to }) }),
-  check: (kind: "qkt" | "config", content: string) => req<{ diagnostics: Diagnostic[] }>("/api/check", { method: "POST", body: JSON.stringify({ kind, content }) }),
+  check: (kind: "qkt" | "config", content: string, path?: string) => req<{ diagnostics: Diagnostic[] }>("/api/check", { method: "POST", body: JSON.stringify({ kind, content, path }) }),
 
   runs: (strategy?: string, limit = 200) => req<{ runs: RunRow[] }>(`/api/runs${qs({ strategy, limit })}`),
   portfolios: () => req<{ portfolios: PortfolioListing[]; usedIn: Record<string, string[]> }>("/api/portfolios"),
