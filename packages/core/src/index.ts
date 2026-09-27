@@ -13,3 +13,4 @@ export * from "./ranges.js";
 export * from "./scantypes.js";
 export * from "./runtypes.js";
 export * from "./portfolio.js";
+export * from "./stats.js";

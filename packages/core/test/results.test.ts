@@ -127,3 +127,20 @@ describe("verifyManifest", () => {
     expect((await verifyManifest(mkdtempSync(path.join(os.tmpdir(), "man-")))).ok).toBe(false);
   });
 });
+
+describe("summarize on very large runs", () => {
+  it("does not overflow the stack and counts the losing streak per round trip", () => {
+    const res = loadResult(JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "result-both.json"), "utf8")));
+    const N = 300_000;
+    const trips = Array.from({ length: N }, (_, i) => ({
+      id: i + 1, strategy: "s", symbol: "BACKTEST:X", side: "long" as const, entryTs: i * 1000, entryPx: 1, exitTs: i * 1000 + 500, exitPx: 1,
+      qty: 1, pnl: i >= 1000 && i < 1005 ? -1 : 1, fills: 2, holdMs: 500, open: false, exit: "signal" as const,
+    }));
+    const s = summarize(res, trips);
+    expect(s.trades).toBe(N);
+    expect(s.largestWin).toBe(1);
+    expect(s.largestLoss).toBe(-1);
+    expect(s.maxConsecutiveLosses).toBe(5);
+    expect(s.engineMaxConsecutiveLosses).toBe(res.global.maxConsecutiveLosses);
+  });
+});
