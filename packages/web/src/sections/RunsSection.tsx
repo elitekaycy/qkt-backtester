@@ -3,6 +3,7 @@ import { api } from "../api/client.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { Modal } from "../ui/Modal.js";
+import { navigateList } from "../util/listNav.js";
 import { Popover } from "../ui/Popover.js";
 import { Tip } from "../ui/Tip.js";
 import { DASH, fmtMoney, fmtRatio, fmtTs } from "../util/format.js";
@@ -52,6 +53,21 @@ export function RunsSection() {
     finally { setBusy(false); setPlan(null); }
   }
 
+  const listRef = useRef<HTMLDivElement>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const rowsTabStop = runs.some((r) => r.id === focusId) ? focusId : runs.find((r) => r.id === runId)?.id ?? runs[0]?.id;
+  const onListKey = (ev: React.KeyboardEvent, i: number) => {
+    if (ev.target !== ev.currentTarget) return;
+    const act = navigateList(runs.length, i, ev.key);
+    if (act) {
+      ev.preventDefault();
+      if (act.focus !== undefined) listRef.current?.querySelectorAll<HTMLElement>("[role='option']")[act.focus]?.focus();
+      if (act.activate) selecting ? toggle(runs[i]!.id) : void store().selectRun(runs[i]!.id);
+      return;
+    }
+    if (ev.key === "Delete" && !selecting) { ev.preventDefault(); askDelete(`Delete ${runs[i]!.strategy.replace(/^strategies\//, "").replace(/\.qkt$/, "")}`, [runs[i]!.id]); }
+    else if (ev.key === " " && selecting) { ev.preventDefault(); toggle(runs[i]!.id); }
+  };
   const selected = useMemo(() => [...sel], [sel]);
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -88,13 +104,16 @@ export function RunsSection() {
 
       <div className="side-scroll">
         {runs.length === 0 && <div className="empty"><b>No runs yet.</b>Press Run (Ctrl+Enter). Every run is kept here with its charts and trades.</div>}
-        <div role="listbox" aria-label="Runs">
+        {/* role="list", not "listbox": each row carries a checkbox and a delete button, and listbox's "option" role
+            (like tablist's "tab") cannot have real focusable descendants. */}
+        <div role="list" aria-label="Runs" ref={listRef}>
           {runs.map((r) => {
             const name = r.strategy.replace(/^strategies\//, "").replace(/\.qkt$/, "");
             const dot = r.status === "done" ? "ok" : r.status === "failed" ? "bad" : r.status === "cancelled" || r.status === "interrupted" ? "warn" : "run";
             return (
-              <div key={r.id} role="option" aria-selected={r.id === runId} tabIndex={0} className="list-row" style={{ alignItems: "flex-start", padding: "var(--s2)" }}
-                onClick={() => (selecting ? toggle(r.id) : void store().selectRun(r.id))} onKeyDown={(e) => { if (e.key === "Enter") (selecting ? toggle(r.id) : void store().selectRun(r.id)); }}>
+              <div key={r.id} role="listitem" aria-label={name} aria-current={r.id === runId || undefined} tabIndex={r.id === rowsTabStop ? 0 : -1} className="list-row" style={{ alignItems: "flex-start", padding: "var(--s2)" }}
+                onFocus={(e) => { if (e.target === e.currentTarget) setFocusId(r.id); }}
+                onClick={() => (selecting ? toggle(r.id) : void store().selectRun(r.id))} onKeyDown={(e) => onListKey(e, runs.indexOf(r))}>
                 {selecting
                   ? <input type="checkbox" aria-label={`Select ${name} for deletion`} checked={sel.has(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.id)} style={{ marginTop: 4 }} />
                   : <input type="checkbox" aria-label={`Compare ${name}`} disabled={r.status !== "done"} checked={compare.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => store().toggleCompare(r.id)} style={{ marginTop: 4 }} />}

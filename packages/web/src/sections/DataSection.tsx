@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import type { Completeness, SymbolReport, TfReport, TickReport, YearRow } from "../api/types.js";
 import { api } from "../api/client.js";
 import { rangeDays } from "@qkt-studio/core/ranges";
 import { useStore } from "../state/store.js";
 import { Popover } from "../ui/Popover.js";
+import { navigateList } from "../util/listNav.js";
 import { Tip } from "../ui/Tip.js";
 import { addDays } from "../util/format.js";
 import { ChevronRight, CircleAlert, CircleCheck, CircleX, CloudDownload, Database, FileCog, Hammer, Info, Pencil, RefreshCw, RotateCcw, ScanSearch, Wand2, Zap } from "../ui/icons.js";
@@ -126,7 +127,7 @@ function FetchForm({ open, onClose, anchor }: { open: boolean; onClose(): void; 
   );
 }
 
-function SymbolRow({ s }: { s: SymbolReport }) {
+function SymbolRow({ s, tabStop, onFocus }: { s: SymbolReport; tabStop: boolean; onFocus(): void }) {
   const [open, setOpen] = useState(false);
   const pref = useStore((s2) => s2.settings?.symbolPrefs[s.symbol]);
   const trackJob = useStore((s2) => s2.trackJob);
@@ -145,9 +146,12 @@ function SymbolRow({ s }: { s: SymbolReport }) {
   const openDialog = () => useStore.getState().openSymbol(s.symbol);
   return (
     <div className="sym">
-      <div className="sym-head" role="button" tabIndex={0} aria-haspopup="dialog" aria-label={`${s.symbol}: ${LABEL[s.status]}. Open details`} onClick={openDialog} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDialog(); } }}>
+      {/* the expand toggle and the "open details" action are SIBLINGS, not one nested inside the other */}
+      <div className="sym-head" role="listitem">
         <button className="btn ghost icon sm" aria-label={open ? `Hide ${s.symbol} summary` : `Show ${s.symbol} summary`} aria-expanded={open} onClick={(e) => { e.stopPropagation(); setOpen(!open); }}>
           <ChevronRight size={14} className="muted" style={{ transform: open ? "rotate(90deg)" : undefined, transition: "transform var(--t-fast)" }} /></button>
+        <button className="sym-open" data-symbol={s.symbol} tabIndex={tabStop ? 0 : -1} aria-haspopup="dialog" aria-label={`${s.symbol}: ${LABEL[s.status]}. Open details`}
+          onFocus={(e) => { if (e.target === e.currentTarget) onFocus(); }} onClick={openDialog}>
         <span className="sym-status" title={LABEL[s.status]}><StatusIcon s={s.status} /></span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
@@ -159,6 +163,7 @@ function SymbolRow({ s }: { s: SymbolReport }) {
             {first ? `${first} → ${last}` : "no data"}{s.completeYears ? ` · ${s.completeYears} full yr` : ""}{missing ? <> · <span className="loss">{missing} missing</span></> : ""}{tickMissing ? <> · <span className={main ? "muted" : "loss"}>ticks: {tickMissing} missing</span></> : ""}{built.length ? ` · ${built.map((b) => b.tf).join(" ")}` : ""}{s.ticks ? " · ticks" : ""}
           </div>
         </div>
+        </button>
       </div>
       {open && (
         <div className="sym-body">
@@ -188,6 +193,25 @@ export function DataSection() {
   const t = scan?.totals;
   const attention = t ? t.incomplete + t.ticksOnly : 0;
   const ordered = useMemo(() => [...(scan?.symbols ?? [])].sort((a, b) => Number(a.status === "complete") - Number(b.status === "complete") || a.symbol.localeCompare(b.symbol)), [scan]);
+  const symListRef = useRef<HTMLDivElement>(null);
+  const [symFocus, setSymFocus] = useState<string | null>(null);
+  const symTabStop = ordered.some((s) => s.symbol === symFocus) ? symFocus : ordered[0]?.symbol ?? null;
+  const onSymKey = (ev: React.KeyboardEvent) => {
+    const row = ev.target as HTMLElement;
+    if (!row.dataset.symbol) return;
+    const i = ordered.findIndex((s) => s.symbol === row.dataset.symbol);
+    const act = navigateList(ordered.length, i, ev.key);
+    if (!act || act.focus === undefined) return; // Enter is the button's own native activation, not ours to intercept
+    ev.preventDefault();
+    symListRef.current?.querySelectorAll<HTMLElement>('[data-symbol]')[act.focus]?.focus();
+  };
+  const stratListRef = useRef<HTMLDivElement>(null);
+  const [stratFocus, setStratFocus] = useState<string | null>(null);
+  const onStratKey = (ev: React.KeyboardEvent, i: number, names: string[]) => {
+    if (ev.target !== ev.currentTarget) return;
+    const act = navigateList(names.length, i, ev.key);
+    if (act) { ev.preventDefault(); if (act.focus !== undefined) stratListRef.current?.querySelectorAll<HTMLElement>("[role='listitem']")[act.focus]?.focus(); return; }
+  };
 
   return (
     <>
@@ -246,19 +270,25 @@ export function DataSection() {
               <span>Choose a folder that contains <span className="mono">symbols/</span> or <span className="mono">bars/</span>, or fetch data from a broker.</span>
               <button className="btn primary" onClick={() => setDialog(true)}>Choose data source</button></div>
           )}
-          {ordered.map((s) => <SymbolRow key={s.symbol} s={s} />)}
+          <div role="list" aria-label="Symbols" ref={symListRef} onKeyDown={onSymKey}>
+            {ordered.map((s, i) => <SymbolRow key={s.symbol} s={s} tabStop={s.symbol === symTabStop} onFocus={() => setSymFocus(s.symbol)} />)}
+          </div>
         </div>
 
         {readiness.length > 0 && (
           <div className="side-group">
             <h3>Strategy coordination <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· what each can run on</span></h3>
-            {readiness.map((r) => {
+            <div role="list" aria-label="Strategy coordination" ref={stratListRef}>
+            {readiness.map((r, i) => {
               const name = r.strategy.replace(/^strategies\//, "");
               const cur = cfg.tier === "draft" ? r.bars : r.ticks;
+              const open = () => { void useStore.getState().openFile(r.strategy); if (cur.longest) setCfg({ from: cur.longest.from, to: cur.longest.to }); };
+              const tabStop = (stratFocus ?? readiness[0]?.strategy) === r.strategy;
               return (
-                <div key={r.strategy} className="list-row" role="button" tabIndex={0} aria-selected={activePath === r.strategy} style={{ alignItems: "flex-start", padding: "var(--s2)" }}
-                  onClick={() => { void useStore.getState().openFile(r.strategy); if (cur.longest) setCfg({ from: cur.longest.from, to: cur.longest.to }); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") { void useStore.getState().openFile(r.strategy); if (cur.longest) setCfg({ from: cur.longest.from, to: cur.longest.to }); } }}
+                <div key={r.strategy} role="listitem" className="list-row" tabIndex={tabStop ? 0 : -1} aria-current={activePath === r.strategy || undefined} style={{ alignItems: "flex-start", padding: "var(--s2)" }}
+                  onFocus={(e) => { if (e.target === e.currentTarget) setStratFocus(r.strategy); }}
+                  onClick={open}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); return; } onStratKey(e, i, readiness.map((x) => x.strategy)); }}
                   title="Open it and use its longest complete window">
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <b style={{ fontWeight: 600 }}>{name}</b>
@@ -275,6 +305,7 @@ export function DataSection() {
                 </div>
               );
             })}
+            </div>
           </div>
         )}
 
