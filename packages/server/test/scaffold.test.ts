@@ -70,3 +70,11 @@ describe("scaffold endpoint defaults", () => {
     await studio.app.close(); rmSync(ws, { recursive: true, force: true });
   });
 });
+
+import { checkConfig } from "@qkt-studio/core";
+import { CONFIG_TEMPLATE } from "../src/scaffold.js";
+describe("the starter config is clean", () => {
+  it("the studio's own qkt.config.yaml template raises no findings", () => {
+    expect(checkConfig(CONFIG_TEMPLATE, true, {}).filter((f) => f.severity !== "info")).toEqual([]);
+  });
+});

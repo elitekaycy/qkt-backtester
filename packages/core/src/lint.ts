@@ -138,7 +138,7 @@ export function redactConfig(yaml: string): string {
 }
 
 export const KNOWN_CONFIG_KEYS = new Set([
-  "source", "data_root", "starting_balance", "log_level", "runtime", "account", "execution", "promotion", "tv", "fetchers",
+  "source", "data_root", "starting_balance", "log_level", "runtime", "account", "fx_conversion", "execution", "promotion", "tv", "fetchers",
   "brokers", "risk", "state", "notify", "insights", "book_risk", "market_data", "hub", "bybit",
 ]);
 
