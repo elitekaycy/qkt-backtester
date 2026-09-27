@@ -10,6 +10,18 @@ import { registerFsRoutes } from "./fs-routes.js";
 import { JailError } from "./jail.js";
 import { RunRequestError } from "./runner.js";
 
+const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/** The page's own origin (same host:port), a listed origin, or, only when the studio itself is on loopback, another loopback page (the Vite dev server proxies from :5173). */
+export function originAllowed(origin: string, host: string, allowed: readonly string[]): boolean {
+  let o: URL;
+  try { o = new URL(origin); } catch { return false; }
+  if (o.host.toLowerCase() === host) return true;
+  if (allowed.includes(origin.replace(/\/$/, "").toLowerCase())) return true;
+  const hostName = host.replace(/:\d+$/, "").replace(/^\[(.*)\]$/, "$1");
+  return LOOPBACK_NAMES.has(o.hostname.replace(/^\[(.*)\]$/, "$1")) && LOOPBACK_NAMES.has(hostName);
+}
+
 function tokenOk(given: string | undefined, expected: string): boolean {
   if (!given) return false;
   const a = Buffer.from(given), b = Buffer.from(expected);
@@ -20,6 +32,24 @@ function tokenOk(given: string | undefined, expected: string): boolean {
 export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstance) => void | Promise<void>): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 12 * 1024 * 1024 });
   await app.register(fastifyWebsocket, { options: { maxPayload: 4 * 1024 * 1024 } });
+
+  // Cross-site protection, for every /api and /ws request, before the token check:
+  //  - a WebSocket handshake or state-changing request that carries an Origin must come from the studio's own page (browsers
+  //    always send Origin there, so a random web page can never open the terminal or submit a run);
+  //  - without a token, only a loopback Host (or one listed in STUDIO_ALLOWED_HOSTS) is served, so DNS rebinding cannot turn an
+  //    attacker's page into "same origin".
+  app.addHook("onRequest", async (req, reply) => {
+    const url = req.url;
+    if (!url.startsWith("/api") && !url.startsWith("/ws")) return;
+    const host = (req.headers.host ?? "").toLowerCase();
+    const hostName = host.replace(/:\d+$/, "").replace(/^\[(.*)\]$/, "$1");
+    if (!cfg.token && host && !LOOPBACK_NAMES.has(hostName) && !(cfg.allowedHosts ?? []).includes(hostName)) {
+      return reply.code(403).send({ error: `This studio has no STUDIO_TOKEN, so it only answers to localhost. Open it as http://localhost:${host.split(":").pop()} or set STUDIO_TOKEN (or STUDIO_ALLOWED_HOSTS=${hostName}).` });
+    }
+    const origin = req.headers.origin;
+    const risky = url.startsWith("/ws") || !["GET", "HEAD", "OPTIONS"].includes(req.method);
+    if (origin && risky && !originAllowed(origin, host, cfg.allowedOrigins ?? [])) return reply.code(403).send({ error: "cross-site request refused" });
+  });
 
   if (cfg.token) {
     const expected = cfg.token;

@@ -27,6 +27,13 @@ export interface ServerConfig {
   /** Built web app to serve; omitted in dev/tests. */
   webRoot?: string;
   maxParallel: number;
+  /**
+   * Host names (besides localhost) a server WITHOUT a token answers to, e.g. a LAN name. Any other Host header is refused, which
+   * is what stops a web page from reaching the studio through DNS rebinding. With a token the token is the protection instead.
+   */
+  allowedHosts: string[];
+  /** Page origins (besides the studio's own) allowed to call the API and open its WebSockets, e.g. a dev server. */
+  allowedOrigins: string[];
   /** Allow the pty terminal (real shell). Only ever true with a token or a loopback bind. */
   terminal: "shell" | "restricted";
 }
@@ -50,6 +57,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     token,
     webRoot: env.WEB_ROOT ? path.resolve(env.WEB_ROOT) : undefined,
     maxParallel: Math.max(1, Number(env.MAX_PARALLEL ?? Math.max(1, os.cpus().length - 1))),
+    allowedHosts: (env.STUDIO_ALLOWED_HOSTS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+    allowedOrigins: (env.STUDIO_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim().replace(/\/$/, "").toLowerCase()).filter(Boolean),
     terminal,
   };
 }
