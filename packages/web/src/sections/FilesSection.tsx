@@ -4,10 +4,14 @@ import type { PortfolioListing } from "../api/client.js";
 import { useStore } from "../state/store.js";
 import { CONFIG_TEMPLATE, QKT_TEMPLATE } from "../editor/monaco.js";
 import type { TreeEntry } from "../api/client.js";
+import { navigate, siblingInfo, typeahead, type NavRow } from "../util/treeNav.js";
 import { Tip } from "../ui/Tip.js";
 import { ChevronRight, EyeOff, FileCode2, FileCog, FilePlus, FileText, Folder, FolderOpen, KeyRound, Layers, Pencil, Plus, RefreshCw, SlidersHorizontal, Trash2, TriangleAlert, Wand2 } from "../ui/icons.js";
 
 interface Row { e: TreeEntry; depth: number; member?: { alias: string; hold: boolean; exists: boolean; portfolio: string } }
+
+/** Stable identity for a row: a member row shares its portfolio's key namespace so two portfolios can reuse the same alias. */
+const rowKey = (r: Row) => (r.member ? `${r.member.portfolio}#${r.member.alias}` : r.e.path);
 
 /** What the standard project files are for, shown as tooltips and in the help line. */
 const FILE_HELP: Record<string, string> = {
@@ -111,6 +115,24 @@ export function FilesSection() {
     walk("", 0);
     return out;
   }, [tree, expanded, portfolios, openPortfolios]);
+  // roving tabindex spans every visible row, including portfolio member rows: a portfolio's tree row is "isDir"-like
+  // (it opens/closes with Right/Left just as a folder does) and its member rows are ordinary leaves at depth + 1.
+  const navRows = useMemo<NavRow[]>(() => rows.map((row) => {
+    const { e, depth, member } = row;
+    const isPortfolioRow = !member && portfolios.byPath.has(e.path);
+    return {
+      path: rowKey(row),
+      depth,
+      isDir: !member && (e.type === "dir" || isPortfolioRow),
+      open: member ? false : e.type === "dir" ? !!expanded[e.path] : isPortfolioRow && openPortfolios.has(e.path),
+    };
+  }), [rows, expanded, portfolios, openPortfolios]);
+  const sib = useMemo(() => siblingInfo(navRows), [navRows]);
+  // roving tabindex: exactly one row is in the tab order (the one last focused, else the open file, else the first)
+  const [focusPath, setFocusPath] = useState<string | null>(null);
+  const activeRow = rows.find((r) => !r.member && r.e.path === activePath);
+  const tabStop = rows.some((r) => rowKey(r) === focusPath) ? focusPath : activeRow ? rowKey(activeRow) : rows[0] ? rowKey(rows[0]) : null;
+  const typing = useRef({ buf: "", at: 0 });
   const root = tree[""] ?? [];
   const [missing, setMissing] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
@@ -137,17 +159,47 @@ export function FilesSection() {
   const rename = (e: TreeEntry) => { const n = window.prompt("Rename to", e.path); if (n && n !== e.path) void store().renameEntry(e.path, n); };
   const remove = (e: TreeEntry) => { if (window.confirm(`Delete ${e.path}${e.type === "dir" ? " and everything in it" : ""}?`)) void store().removeEntry(e.path); };
 
+  const rowEls = () => listRef.current?.querySelectorAll<HTMLElement>("[role='treeitem']");
+  const focusRow = (j: number) => { const el = rowEls()?.[Math.max(0, Math.min(rows.length - 1, j))]; el?.focus(); };
+  /** Toggle a folder or a portfolio row, whichever `path` (as reported by navRows) identifies. */
+  const toggle = (path: string) => { if (portfolios.byPath.has(path)) togglePortfolio(path); else void store().toggleDir(path); };
   const onKey = (ev: React.KeyboardEvent, i: number) => {
-    const focusRow = (j: number) => listRef.current?.querySelectorAll<HTMLElement>("[role='treeitem']")[Math.max(0, Math.min(rows.length - 1, j))]?.focus();
+    if (ev.target !== ev.currentTarget) return; // keys typed on a row's own buttons are theirs
     const r = rows[i]!;
-    if (ev.key === "ArrowDown") { ev.preventDefault(); focusRow(i + 1); }
-    else if (ev.key === "ArrowUp") { ev.preventDefault(); focusRow(i - 1); }
-    else if (ev.key === "Home") { ev.preventDefault(); focusRow(0); } else if (ev.key === "End") { ev.preventDefault(); focusRow(rows.length - 1); }
-    else if (ev.key === "ArrowRight" && (r.e.type === "dir" || isPortfolio(r.e.path))) { ev.preventDefault(); const openIt = r.e.type === "dir" ? !expanded[r.e.path] : !openPortfolios.has(r.e.path); if (openIt) (r.e.type === "dir" ? store().toggleDir(r.e.path) : togglePortfolio(r.e.path)); else focusRow(i + 1); }
-    else if (ev.key === "ArrowLeft") { ev.preventDefault(); if (r.e.type === "dir" && expanded[r.e.path]) void store().toggleDir(r.e.path); else if (isPortfolio(r.e.path) && openPortfolios.has(r.e.path)) togglePortfolio(r.e.path); else { const p = r.member ? r.member.portfolio : r.e.path.includes("/") ? r.e.path.slice(0, r.e.path.lastIndexOf("/")) : ""; const j = rows.findIndex((x) => x.e.path === p); if (j >= 0) focusRow(j); } }
-    else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(r); }
-    else if (ev.key === "F2" && !r.e.path.startsWith("runs")) { ev.preventDefault(); rename(r.e); }
-    else if (ev.key === "Delete" && !r.e.path.startsWith("runs")) { ev.preventDefault(); remove(r.e); }
+    const mod = ev.ctrlKey || ev.metaKey || ev.altKey;
+    if (ev.key === "F2" && !r.e.path.startsWith("runs") && !r.member) { ev.preventDefault(); rename(r.e); return; }
+    if (ev.key === "Delete" && !r.e.path.startsWith("runs") && !r.member) { ev.preventDefault(); remove(r.e); return; }
+    if (ev.key === "ContextMenu" || (ev.key === "F10" && ev.shiftKey)) { // no popup menu: the row's own actions take the focus
+      const first = ev.currentTarget.querySelector<HTMLElement>(".acts button");
+      if (first) { ev.preventDefault(); first.focus(); }
+      return;
+    }
+    if (!mod) {
+      const act = navigate(navRows, i, ev.key);
+      if (act) {
+        ev.preventDefault();
+        if (act.focus !== undefined) focusRow(act.focus);
+        if (act.expand) toggle(act.expand);
+        if (act.collapse) toggle(act.collapse);
+        if (act.expandSiblings) for (const p of act.expandSiblings) toggle(p);
+        if (act.activate) activate(r);
+        return;
+      }
+      if (ev.key.length === 1 && ev.key !== " ") { // type-ahead
+        const t = typing.current, now = Date.now();
+        t.buf = now - t.at > 700 ? ev.key : t.buf + ev.key; t.at = now;
+        const j = typeahead(navRows, i, t.buf);
+        if (j >= 0) { ev.preventDefault(); focusRow(j); }
+      }
+    }
+  };
+  /** Left/Right move between a row's action buttons, Escape goes back to the row. */
+  const onActsKey = (ev: React.KeyboardEvent) => {
+    const btns = [...ev.currentTarget.querySelectorAll<HTMLElement>("button")];
+    const k = btns.indexOf(ev.target as HTMLElement);
+    if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); ev.currentTarget.closest<HTMLElement>("[role='treeitem']")?.focus(); }
+    else if (ev.key === "ArrowRight" && k >= 0) { ev.preventDefault(); btns[Math.min(btns.length - 1, k + 1)]?.focus(); }
+    else if (ev.key === "ArrowLeft" && k >= 0) { ev.preventDefault(); if (k === 0) ev.currentTarget.closest<HTMLElement>("[role='treeitem']")?.focus(); else btns[k - 1]?.focus(); }
   };
 
   return (
@@ -172,7 +224,8 @@ export function FilesSection() {
             <button className="btn sm" disabled={adding} onClick={() => void addMissing()}><Wand2 size={14} />{adding ? "Adding…" : "Add missing"}</button>
           </div>
         )}
-        <div className="tree" role="tree" aria-label="Workspace files" ref={listRef}>
+        <p id="tree-help" className="sr-only">Arrow keys move, Right and Left open and close folders (including a portfolio's strategies), Enter opens a file, F2 renames, Delete deletes, type a letter to jump.</p>
+        <div className="tree" role="tree" aria-label="Workspace files" aria-describedby="tree-help" ref={listRef}>
           {rows.map((row, i) => {
             const { e, depth, member } = row;
             const isRuns = e.path === "runs" || e.path.startsWith("runs/");
@@ -182,8 +235,11 @@ export function FilesSection() {
             const help = member
               ? `${e.name}: ${member.exists ? e.path : "file not found"}${member.hold ? " · HOLD (keeps its position when the portfolio deactivates it)" : ""}`
               : portfolio ? `${e.path}: portfolio of ${portfolios.byPath.get(e.path)!.members.length} strategies` : e.type === "file" && FILE_HELP[e.path] ? `${e.path}: ${FILE_HELP[e.path]}` : e.path;
+            const key = rowKey(row);
             return (
-              <div key={member ? `${member.portfolio}#${member.alias}` : e.path} role="treeitem" aria-level={depth + 1} aria-expanded={e.type === "dir" || portfolio ? !!open : undefined} aria-selected={!member && activePath === e.path} tabIndex={i === 0 ? 0 : -1}
+              <div key={key} role="treeitem" aria-label={e.name} aria-level={depth + 1} aria-setsize={sib[i]?.setsize} aria-posinset={sib[i]?.posinset}
+                aria-expanded={e.type === "dir" || portfolio ? !!open : undefined} aria-selected={!member && activePath === e.path} tabIndex={key === tabStop ? 0 : -1}
+                onFocus={(ev) => { if (ev.target === ev.currentTarget) setFocusPath(key); }}
                 className={`tree-row${member ? " member" : ""}`} style={{ paddingLeft: 6 + depth * 14 }} title={help} onClick={() => activate(row)} onKeyDown={(ev) => onKey(ev, i)}>
                 {Array.from({ length: depth }, (_, g) => <span key={g} className="tree-guide" style={{ left: 13 + g * 14 }} />)}
                 <span className={`twist${open ? " open" : ""}`} onClick={(ev) => { if (portfolio) { ev.stopPropagation(); togglePortfolio(e.path); } }}>{e.type === "dir" || portfolio ? <ChevronRight size={14} /> : null}</span>
@@ -193,10 +249,10 @@ export function FilesSection() {
                 {member && !member.exists && <Tip label="Strategy file not found" side="right"><TriangleAlert size={13} className="loss" /></Tip>}
                 {!member && usedIn.length > 0 && <Tip label={`Used in ${usedIn.length} portfolio${usedIn.length > 1 ? "s" : ""}: ${usedIn.map((p) => p.split("/").pop()).join(", ")}`} side="right"><span className="badge sm" style={{ display: "inline-flex", alignItems: "center", gap: 2 }}><Layers size={11} />{usedIn.length}</span></Tip>}
                 {!isRuns && !member && (
-                  <span className="acts" onClick={(ev) => ev.stopPropagation()}>
-                    {e.type === "dir" && <Tip label="New strategy here" side="bottom"><button className="btn ghost icon sm" aria-label={`New strategy in ${e.name}`} onClick={() => newStrategy(e.path)}><Plus size={13} /></button></Tip>}
-                    <Tip label="Rename (F2)" side="bottom"><button className="btn ghost icon sm" aria-label={`Rename ${e.name}`} onClick={() => rename(e)}><Pencil size={13} /></button></Tip>
-                    <Tip label="Delete" side="bottom"><button className="btn ghost icon sm" aria-label={`Delete ${e.name}`} onClick={() => remove(e)}><Trash2 size={13} /></button></Tip>
+                  <span className="acts" onClick={(ev) => ev.stopPropagation()} onKeyDown={onActsKey}>
+                    {e.type === "dir" && <Tip label="New strategy here" side="bottom"><button tabIndex={-1} className="btn ghost icon sm" aria-label={`New strategy in ${e.name}`} onClick={() => newStrategy(e.path)}><Plus size={13} /></button></Tip>}
+                    <Tip label="Rename (F2)" side="bottom"><button tabIndex={-1} className="btn ghost icon sm" aria-label={`Rename ${e.name}`} onClick={() => rename(e)}><Pencil size={13} /></button></Tip>
+                    <Tip label="Delete" side="bottom"><button tabIndex={-1} className="btn ghost icon sm" aria-label={`Delete ${e.name}`} onClick={() => remove(e)}><Trash2 size={13} /></button></Tip>
                   </span>
                 )}
               </div>
