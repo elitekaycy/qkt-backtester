@@ -39,12 +39,30 @@ function context(text: string, line: number, col: number): { before: string; sec
   return { before, section, block };
 }
 
-function rawCompletions(text: string, line: number, col: number, scan: ScanReport | null): LocalItem[] {
+function rawCompletions(text: string, line: number, col: number, scan: ScanReport | null, qktFiles: string[] = [], selfPath?: string): LocalItem[] {
   const { before, section, block } = context(text, line, col);
   const info = parseStrategyInfo(text);
   const aliases = [...new Set(info.streams.map((s) => s.alias))];
   const out: LocalItem[] = [];
   const add = (i: Omit<LocalItem, "sort"> & { sort?: string }) => out.push({ sort: "0", ...i });
+
+  // a portfolio's own vocabulary: IMPORT '<path>' and RUN <alias>
+  if (info.kind === "portfolio") {
+    const imp = /\bIMPORT\s+'([^']*)$/.exec(before);
+    if (imp) {
+      const q = imp[1]!.toLowerCase();
+      const dir = selfPath?.includes("/") ? selfPath.slice(0, selfPath.lastIndexOf("/") + 1) : "";
+      const rel = (p: string) => (dir && p.startsWith(dir) ? p.slice(dir.length) : p);
+      const already = new Set(info.imports.map((i) => i.path));
+      qktFiles.filter((f) => f !== selfPath && !already.has(rel(f))).forEach((f, i) => add({ label: rel(f), insert: `${rel(f)}' AS `, detail: f, kind: "symbol", sort: `0${String(i).padStart(3, "0")}` }));
+      return out;
+    }
+    const run = /\bRUN\s+(\w*)$/.exec(before);
+    if (run && !/OVERRIDE/.test(before)) {
+      info.imports.forEach((m, i) => add({ label: m.alias, insert: m.alias, detail: m.path, kind: "alias", sort: `0${i}` }));
+      return out;
+    }
+  }
 
   // alias.<field>
   const dot = /(?<![\w.])([A-Za-z_]\w*)\.(\w*)$/.exec(before);
@@ -129,7 +147,7 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
 }
 
 /** `exclusive`: the position calls for exactly these (a field, a symbol, an action...), so qkt's generic keyword dump is left out. */
-export function localCompletions(text: string, line: number, col: number, scan: ScanReport | null): { items: LocalItem[]; exclusive: boolean } {
-  const items = rawCompletions(text, line, col, scan);
+export function localCompletions(text: string, line: number, col: number, scan: ScanReport | null, qktFiles: string[] = [], selfPath?: string): { items: LocalItem[]; exclusive: boolean } {
+  const items = rawCompletions(text, line, col, scan, qktFiles, selfPath);
   return { items, exclusive: items.length > 0 && !items.some((i) => i.label === "POSITION") };
 }

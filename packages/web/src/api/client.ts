@@ -1,4 +1,4 @@
-import type { BarCols } from "@qkt-studio/core";
+import type { BarCols, StrategyRow, BookInfo } from "@qkt-studio/core";
 import type { RunJson, Summary, RoundTrip, IntegrityReport, McResult, MonthRow, Diagnostic, TripQuery, RunRequest, Analytics, ScanReport, Readiness , SymbolReport } from "./types.js";
 
 export class ApiError extends Error {
@@ -41,7 +41,9 @@ const qs = (o: Record<string, unknown>) => {
 
 export interface TreeEntry { name: string; path: string; type: "file" | "dir"; size: number; mtimeMs: number }
 export interface Info { workspace: string; dataRoot: string; terminal: "shell" | "restricted"; tokenRequired: boolean; hasConfig: boolean; maxParallel: number }
-export interface RunRow { id: string; hash: string; strategy: string; status: string; tier: string; from_d: string; to_d: string; created_at: string; seq: number; total_pnl: number | null; sharpe: number | null; trades: number | null; win_rate: number | null; duration_ms: number | null }
+export interface RunRow { id: string; hash: string; strategy: string; status: string; tier: string; from_d: string; to_d: string; created_at: string; seq: number; total_pnl: number | null; sharpe: number | null; trades: number | null; win_rate: number | null; duration_ms: number | null; kind: "strategy" | "portfolio"; members: number }
+export interface PortfolioMember { alias: string; path: string; rel: string | null; hold: boolean; exists: boolean; error?: string }
+export interface PortfolioListing { path: string; name?: string; members: PortfolioMember[] }
 export interface TripPage { total: number; offset: number; limit: number; rows: RoundTrip[] }
 export interface SymbolPref { source?: string; from?: string; to?: string }
 export interface SettingsView { sources: string[]; symbolPrefs: Record<string, SymbolPref>; dataRoot: string; defaultDataRoot: string; fromSettings: boolean; canChangeAnywhere: boolean; openRoots: string[]; looksLikeStore: boolean; exists: boolean }
@@ -65,6 +67,7 @@ export const api = {
   check: (kind: "qkt" | "config", content: string) => req<{ diagnostics: Diagnostic[] }>("/api/check", { method: "POST", body: JSON.stringify({ kind, content }) }),
 
   runs: (strategy?: string, limit = 200) => req<{ runs: RunRow[] }>(`/api/runs${qs({ strategy, limit })}`),
+  portfolios: () => req<{ portfolios: PortfolioListing[]; usedIn: Record<string, string[]> }>("/api/portfolios"),
   submit: (r: RunRequest) => req<{ runId: string; cached: boolean; joined: boolean }>("/api/runs", { method: "POST", body: JSON.stringify(r) }),
   run: (id: string) => req<RunJson>(`/api/runs/${id}`),
   /** `purge` also deletes the run's folder and history row, so nothing half-written is left behind. */
@@ -93,6 +96,10 @@ export const api = {
   monthly: (id: string) => req<MonthRow[]>(`/api/runs/${id}/derived/monthly`),
   equity: (id: string) => req<Equity>(`/api/runs/${id}/derived/equity`),
   meta: (id: string) => req<RunMeta>(`/api/runs/${id}/derived/meta`),
+  // Portfolio runs only (404 for a single strategy; callers check meta.strategies.length > 1 first).
+  strategies: (id: string) => req<StrategyRow[]>(`/api/runs/${id}/derived/strategies`),
+  equityByStrategy: (id: string) => req<{ ids: string[]; series: Record<string, Equity> }>(`/api/runs/${id}/derived/equity-by-strategy`),
+  book: (id: string) => req<BookInfo>(`/api/runs/${id}/derived/book`),
   trades: (id: string, q: TripQuery) => req<TripPage>(`/api/runs/${id}/trades${qs(tripParams(q))}`),
   overlay: (id: string, q: TripQuery, from: number, to: number, cap = 20000) => req<Overlay>(`/api/runs/${id}/overlay${qs({ ...tripParams({ ...q, fromTs: undefined, toTs: undefined }), from, to, cap })}`),
   artifact: async (id: string, path: string, tail?: number) => {

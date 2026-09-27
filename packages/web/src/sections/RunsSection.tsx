@@ -6,7 +6,7 @@ import { Modal } from "../ui/Modal.js";
 import { Popover } from "../ui/Popover.js";
 import { Tip } from "../ui/Tip.js";
 import { DASH, fmtMoney, fmtRatio, fmtTs } from "../util/format.js";
-import { ChevronDown, DiskIcon, GitCompare, RefreshCw, Trash2 } from "../ui/icons.js";
+import { ChevronDown, DiskIcon, GitCompare, Layers, RefreshCw, Trash2 } from "../ui/icons.js";
 
 const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : n < 1073741824 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1073741824).toFixed(2)} GB`);
 
@@ -99,7 +99,7 @@ export function RunsSection() {
                   ? <input type="checkbox" aria-label={`Select ${name} for deletion`} checked={sel.has(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.id)} style={{ marginTop: 4 }} />
                   : <input type="checkbox" aria-label={`Compare ${name}`} disabled={r.status !== "done"} checked={compare.includes(r.id)} onClick={(e) => e.stopPropagation()} onChange={() => store().toggleCompare(r.id)} style={{ marginTop: 4 }} />}
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div className="row" style={{ gap: 6 }}><span className={`dot ${dot}`} title={r.status} /><b style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</b><span className={`badge ${r.tier === "full" ? "accent" : ""}`}>{r.tier === "full" ? "Ticks" : "Bars"}</span></div>
+                  <div className="row" style={{ gap: 6 }}><span className={`dot ${dot}`} title={r.status} /><b style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</b><span className={`badge ${r.tier === "full" ? "accent" : ""}`}>{r.tier === "full" ? "Ticks" : "Bars"}</span>{r.kind === "portfolio" && <span className="badge" title={`Portfolio of ${r.members} strategies`}><Layers size={11} />{r.members}</span>}</div>
                   <div className="muted mono" style={{ fontSize: "var(--fs-xs)" }}>{r.from_d} → {r.to_d}</div>
                   <div className="row" style={{ gap: "var(--s3)", fontSize: "var(--fs-xs)" }}>
                     <span className={(r.total_pnl ?? 0) >= 0 ? "gain num" : "loss num"}>{r.total_pnl === null ? DASH : fmtMoney(r.total_pnl)}</span>
