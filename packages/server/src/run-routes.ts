@@ -40,6 +40,7 @@ export function parseTripQuery(q: Record<string, string | undefined>): TripQuery
 export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
   const tripCache = new Map<string, RoundTrip[]>();
   const loadTrips = async (id: string): Promise<RoundTrip[] | null> => {
+    await runner.ensureDerived(id).catch(() => undefined);
     const hit = tripCache.get(id);
     if (hit) { tripCache.delete(id); tripCache.set(id, hit); return hit; }
     try {
@@ -167,6 +168,7 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
 
   app.get<{ Params: { id: string; name: string } }>("/api/runs/:id/derived/:name", async (req, reply) => {
     if (!DERIVED.has(req.params.name)) return notFound(reply);
+    await runner.ensureDerived(req.params.id).catch(() => undefined);
     try {
       const text = await fs.readFile(path.join(runner.runDir(req.params.id), "derived", `${req.params.name}.json`), "utf8");
       return reply.type("application/json").send(text);

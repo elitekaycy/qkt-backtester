@@ -7,13 +7,13 @@ import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
   usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
-  parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, transition, uniqueStreams,
+  parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, tfMs, transition, uniqueStreams, warmupBarsEstimate,
   type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
 } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
 import { RunIndex, type IndexRow } from "./index-db.js";
 import { JailError, resolveInJail, toRel } from "./jail.js";
-import { postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
+import { DERIVED_VERSION, postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
 import { execQkt, spawnGroup, type ProcHandle } from "./proc.js";
 import { optionArgs, OptionsError, validateOptions, type RunOptions } from "./run-options.js";
 
@@ -181,16 +181,25 @@ export class Runner {
     return { sources, streams: uniqueStreams(streams) };
   }
 
-  private async dataFiles(streams: StreamDecl[], tier: Tier, from: string, to: string): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
-    const start = Date.parse(from) - 14 * DAY_MS, end = Date.parse(to);
-    const days: string[] = [];
-    for (let d = start; d < end; d += DAY_MS) days.push(isoDay(d));
-    const paths: string[] = [];
-    if (tier === "draft") for (const s of streams) for (const d of days) paths.push(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
-    else for (const sym of new Set(streams.map((s) => s.symbol))) for (const d of days) paths.push(path.join(rootFor(this.cfg, sym), "symbols", sym, `${d}.csv.gz`));
+  /**
+   * The data files a run reads, for its fingerprint: the window plus the warmup qkt reads before `from`. The warmup span is the
+   * bar count converted to calendar days with room for weekends and holidays (x1.5 + a week), never less than 14 days.
+   */
+  private async dataFiles(streams: StreamDecl[], tier: Tier, from: string, to: string, warmBars: number): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
+    const end = Date.parse(to);
+    const daysFor = (s: StreamDecl) => {
+      const back = Math.min(1100, Math.max(14, Math.ceil((Math.max(warmBars, s.warmupBars ?? 0) * (tfMs(s.tf) ?? DAY_MS) * 1.5) / DAY_MS) + 7));
+      const out: string[] = [];
+      for (let d = Date.parse(from) - back * DAY_MS; d < end; d += DAY_MS) out.push(isoDay(d));
+      return out;
+    };
+    const paths = new Set<string>();
+    if (tier === "draft") for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
+    else for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "symbols", s.symbol, `${d}.csv.gz`));
+    const list = [...paths];
     const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
-    for (let i = 0; i < paths.length; i += 256) {
-      const stats = await Promise.all(paths.slice(i, i + 256).map((p) => fs.stat(p).then((s) => ({ path: p, size: s.size, mtimeMs: s.mtimeMs }), () => null)));
+    for (let i = 0; i < list.length; i += 256) {
+      const stats = await Promise.all(list.slice(i, i + 256).map((p) => fs.stat(p).then((s) => ({ path: p, size: s.size, mtimeMs: s.mtimeMs }), () => null)));
       for (const s of stats) if (s) out.push(s);
     }
     return out;
@@ -217,7 +226,7 @@ export class Runner {
 
     const cfgAbs = path.join(ws, "qkt.config.yaml");
     const configText = await fs.readFile(cfgAbs, "utf8").catch(() => "");
-    const files = await this.dataFiles(streams, req.tier, req.from, req.to);
+    const files = await this.dataFiles(streams, req.tier, req.from, req.to, warmupBarsEstimate(Object.values(sources), req.params ?? {}));
     const wsEnv = await loadWorkspaceEnv(ws);
     // per-symbol data windows (Data -> symbol): a run may not reach outside them
     const win = allowedWindow(this.cfg, streams.map((s) => s.symbol));
@@ -235,6 +244,7 @@ export class Runner {
     if (!req.force) {
       const done = this.index.findDone(hash);
       if (done && (await fs.stat(path.join(this.runDir(done.id), "derived", "summary.json")).then(() => true, () => false))) {
+        await this.ensureDerived(done.id).catch(() => undefined);
         return { runId: done.id, cached: true, joined: false };
       }
       const live = this.index.findActive(hash);
@@ -323,6 +333,43 @@ export class Runner {
   }
 
   list(strategy?: string, limit?: number): IndexRow[] { return this.index.list({ strategy, limit }); }
+
+  private rederiving = new Map<string, Promise<void>>();
+  /**
+   * Make sure a finished run's derived/ files come from the current derivation rules, re-deriving them from engine/ if they are
+   * older. Concurrent callers share one re-derivation. A run without engine output (failed, cancelled) is left as it is.
+   */
+  async ensureDerived(id: string): Promise<void> {
+    if (this.active.has(id)) return;
+    const pending = this.rederiving.get(id);
+    if (pending) return pending;
+    const dir = this.runDir(id);
+    const meta = JSON.parse(await fs.readFile(path.join(dir, "derived", "meta.json"), "utf8").catch(() => "null")) as { derivedVersion?: number } | null;
+    if (!meta || meta.derivedVersion === DERIVED_VERSION) return;
+    if (!(await fs.stat(path.join(dir, "engine", "result.json")).then(() => true, () => false))) return;
+    const run = await this.getRun(id);
+    if (!run || run.status !== "done") return;
+    const job = (async () => {
+      const { root } = await prepareDataView(this.cfg, uniqueStreams(Object.values(await this.sourcesOf(dir, run.strategy)).flatMap((t) => parseStrategyInfo(t).streams)).map((s) => s.symbol));
+      await postprocess({ runDir: dir, run, dataRoot: root });
+    })().finally(() => this.rederiving.delete(id));
+    this.rederiving.set(id, job);
+    return job;
+  }
+
+  /** The strategy sources a run was made from (its source/ snapshot), keyed by relative path. */
+  private async sourcesOf(dir: string, strategy: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    const walk = async (d: string) => {
+      for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) await walk(p); else if (e.name.endsWith(".qkt")) out[path.relative(path.join(dir, "source"), p)] = await fs.readFile(p, "utf8");
+      }
+    };
+    await walk(path.join(dir, "source"));
+    if (!Object.keys(out).length) out[strategy] = "";
+    return out;
+  }
 
   /** Resolves when the run reaches a terminal state (tests and job chaining). */
   async waitFor(id: string): Promise<RunJson> {
