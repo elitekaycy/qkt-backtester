@@ -95,6 +95,9 @@ export function FilesSection() {
   const [portfolios, setPortfolios] = useState<{ byPath: Map<string, PortfolioListing>; usedIn: Record<string, string[]> }>({ byPath: new Map(), usedIn: {} });
   const [openPortfolios, setOpenPortfolios] = useState<Set<string>>(new Set());
   const refreshPortfolios = () => void api.portfolios().then((r) => setPortfolios({ byPath: new Map(r.portfolios.map((p) => [p.path, p])), usedIn: r.usedIn })).catch(() => {});
+  // Roving tabindex: the tree has exactly one tab stop, which follows the row last focused (not always the first row),
+  // so Tab away and back (or into the pane from elsewhere) resumes where you were, as WAI-ARIA's tree pattern expects.
+  const [focusIdx, setFocusIdx] = useState(0);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
@@ -116,6 +119,8 @@ export function FilesSection() {
   const [adding, setAdding] = useState(false);
   useEffect(() => { void api.scaffoldMissing().then((r) => setMissing(r.missing)).catch(() => setMissing([])); }, [root.length, root.map((e) => e.name).join("|")]);
   useEffect(refreshPortfolios, [tree]);
+  useEffect(() => { const i = rows.findIndex((r) => !r.member && r.e.path === activePath); if (i >= 0) setFocusIdx(i); }, [activePath]);
+  const focusRowIdx = Math.min(focusIdx, Math.max(0, rows.length - 1));
   async function addMissing() {
     setAdding(true);
     try {
@@ -148,6 +153,12 @@ export function FilesSection() {
     else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activate(r); }
     else if (ev.key === "F2" && !r.e.path.startsWith("runs")) { ev.preventDefault(); rename(r.e); }
     else if (ev.key === "Delete" && !r.e.path.startsWith("runs")) { ev.preventDefault(); remove(r.e); }
+    // typeahead: a printable character jumps to the next visible row starting with it, wrapping around
+    else if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      const q = ev.key.toLowerCase();
+      const n = rows.length;
+      for (let k = 1; k <= n; k++) { const j = (i + k) % n; if (rows[j]!.e.name.toLowerCase().startsWith(q)) { ev.preventDefault(); focusRow(j); break; } }
+    }
   };
 
   return (
@@ -183,8 +194,8 @@ export function FilesSection() {
               ? `${e.name}: ${member.exists ? e.path : "file not found"}${member.hold ? " · HOLD (keeps its position when the portfolio deactivates it)" : ""}`
               : portfolio ? `${e.path}: portfolio of ${portfolios.byPath.get(e.path)!.members.length} strategies` : e.type === "file" && FILE_HELP[e.path] ? `${e.path}: ${FILE_HELP[e.path]}` : e.path;
             return (
-              <div key={member ? `${member.portfolio}#${member.alias}` : e.path} role="treeitem" aria-level={depth + 1} aria-expanded={e.type === "dir" || portfolio ? !!open : undefined} aria-selected={!member && activePath === e.path} tabIndex={i === 0 ? 0 : -1}
-                className={`tree-row${member ? " member" : ""}`} style={{ paddingLeft: 6 + depth * 14 }} title={help} onClick={() => activate(row)} onKeyDown={(ev) => onKey(ev, i)}>
+              <div key={member ? `${member.portfolio}#${member.alias}` : e.path} role="treeitem" aria-level={depth + 1} aria-expanded={e.type === "dir" || portfolio ? !!open : undefined} aria-selected={!member && activePath === e.path} tabIndex={i === focusRowIdx ? 0 : -1}
+                className={`tree-row${member ? " member" : ""}`} style={{ paddingLeft: 6 + depth * 14 }} title={help} onClick={() => activate(row)} onKeyDown={(ev) => onKey(ev, i)} onFocus={() => setFocusIdx(i)}>
                 {Array.from({ length: depth }, (_, g) => <span key={g} className="tree-guide" style={{ left: 13 + g * 14 }} />)}
                 <span className={`twist${open ? " open" : ""}`} onClick={(ev) => { if (portfolio) { ev.stopPropagation(); togglePortfolio(e.path); } }}>{e.type === "dir" || portfolio ? <ChevronRight size={14} /> : null}</span>
                 <FileIcon e={e} open={!!open} portfolio={portfolio} />
