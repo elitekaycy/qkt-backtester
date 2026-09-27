@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBars, summarize, verifyManifest,
+  bookInfo, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBars, strategyBreakdown, summarize, verifyManifest,
   type BarCols, type IntegrityReport, type RunJson, type Summary,
 } from "@qkt-studio/core";
 
@@ -104,7 +104,23 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   const equity = downsampleEquity(eqRaw.ts, eqRaw.eq);
 
   const write = (name: string, v: unknown) => fs.writeFile(path.join(derivedDir, name), JSON.stringify(v));
+  // Portfolio runs only: per-strategy rows, equity per strategy and the book's own numbers. A plain strategy writes none of
+  // these, so nothing downstream has to special-case an old or single-strategy run beyond "the file is absent".
+  const strategyIds = Object.keys(result.perStrategy ?? {});
+  const portfolioFiles: Array<Promise<void>> = [];
+  if (strategyIds.length > 1) {
+    portfolioFiles.push(write("strategies.json", strategyBreakdown(result, trips)));
+    const book = bookInfo(result);
+    if (book) portfolioFiles.push(write("book.json", book));
+    const series: Record<string, EquitySeries> = {};
+    for (const id of strategyIds) {
+      const raw = await readEquity(path.join(engineDir, `equity_${encodeURIComponent(id)}.csv`)).catch(() => null);
+      if (raw && raw.ts.length) series[id] = downsampleEquity(raw.ts, raw.eq);
+    }
+    portfolioFiles.push(write("equity-by-strategy.json", { ids: strategyIds, series }));
+  }
   await Promise.all([
+    ...portfolioFiles,
     write("roundtrips.json", trips),
     write("summary.json", summary),
     write("monthly.json", monthlyPnl(trips)),

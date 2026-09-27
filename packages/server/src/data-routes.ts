@@ -7,6 +7,7 @@ import type { Jobs } from "./jobs.js";
 import type { Runner } from "./runner.js";
 import { applySettings, dataRootAllowed, loadSettings, saveSettings, savePrefs } from "./settings.js";
 import type { SymbolPref } from "./config.js";
+import { listPortfolios, resolveStrategy } from "./portfolio.js";
 import { missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
 import { rangeDays, longest } from "@qkt-studio/core";
 
@@ -69,7 +70,7 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
     const report = await scanCached(cfg.dataRoot, req.query.refresh === "1");
     const files = await listStrategies(cfg.workspace);
     const out = [];
-    for (const f of files) out.push(readinessFor(report, f, await fs.readFile(path.join(cfg.workspace, f), "utf8").catch(() => "")));
+    for (const f of files) out.push(readinessFor(report, f, await fs.readFile(path.join(cfg.workspace, f), "utf8").catch(() => ""), await resolveStrategy(cfg.workspace, f)));
     return { scannedAt: report.scannedAt, strategies: out };
   });
 
@@ -195,6 +196,9 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
     await savePrefs(cfg);
     return { changes, sourcesChecked: roots.length, ...(await settingsView()) };
   });
+
+  /** Every PORTFOLIO in the workspace with its members, and which portfolios each strategy file belongs to (for the Files tree). */
+  app.get("/api/portfolios", async () => listPortfolios(cfg.workspace, await listStrategies(cfg.workspace)));
 
   /** Kill switch: stop every run and job, and remove the partial output they leave behind. */
   app.post("/api/kill", async () => {

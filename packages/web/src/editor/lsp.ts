@@ -135,7 +135,8 @@ export class LspClient {
         const path = pathOf(model), cur = model.getValue(), range = toRange(model, position);
         // context-specific items first (fields after `gold.`, symbols and timeframes from the data source, actions after THEN...);
         // they come from the studio itself, so they still work while the language server is starting or reconnecting
-        const loc = path.endsWith(".qkt") ? localCompletions(cur, position.lineNumber, position.column, useStore.getState().scan) : { items: [], exclusive: false };
+        const qktFiles = Object.values(useStore.getState().tree).flat().filter((e) => e.type === "file" && e.name.endsWith(".qkt")).map((e) => e.path);
+        const loc = path.endsWith(".qkt") ? localCompletions(cur, position.lineNumber, position.column, useStore.getState().scan, qktFiles, path) : { items: [], exclusive: false };
         const kindOf = (k: string) => m.languages.CompletionItemKind[(k === "field" ? "Field" : k === "alias" ? "Variable" : k === "symbol" ? "Constant" : k === "timeframe" ? "Unit" : k === "snippet" ? "Snippet" : "Keyword") as keyof typeof m.languages.CompletionItemKind];
         const mine: languages.CompletionItem[] = loc.items.map((i) => ({
           label: { label: i.label, detail: i.detail ? `  ${i.detail}` : undefined }, kind: kindOf(i.kind), documentation: i.doc, insertText: i.insert,

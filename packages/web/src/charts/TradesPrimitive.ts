@@ -38,6 +38,8 @@ export class TradesPrimitive implements ISeriesPrimitive<Time> {
   private geo: TradeGeo[] = [];
   private mode: 0 | 1 | 2 = 0;
   private paneW = 0;
+  /** Set only on a portfolio run: colours the entry marker by strategy instead of the neutral ink, so several strategies on one chart stay distinguishable. */
+  private strategyColor: ((strategy: string) => string) | null = null;
   /** Number of trades painted in the last frame (asserted by the e2e tests). */
   drawn = 0;
 
@@ -88,8 +90,8 @@ export class TradesPrimitive implements ISeriesPrimitive<Time> {
     this.mode = this.geo.length > DENSE2 ? 2 : this.geo.length > DENSE ? 1 : 0;
   }
 
-  set(trips: RoundTrip[], tfMs: number, selectedId: number | null, colors: TradeColors, dataEndMs: number | null = null): void {
-    this.trips = trips; this.tfMs = tfMs; this.selectedId = selectedId; this.colors = colors; this.dataEnd = dataEndMs;
+  set(trips: RoundTrip[], tfMs: number, selectedId: number | null, colors: TradeColors, dataEndMs: number | null = null, strategyColor: ((strategy: string) => string) | null = null): void {
+    this.trips = trips; this.tfMs = tfMs; this.selectedId = selectedId; this.colors = colors; this.dataEnd = dataEndMs; this.strategyColor = strategyColor;
     this.maxHold = trips.reduce((m, t) => Math.max(m, t.holdMs ?? ((dataEndMs ?? t.entryTs) - t.entryTs)), 0);
     this.requestUpdate?.();
   }
@@ -148,7 +150,7 @@ export class TradesPrimitive implements ISeriesPrimitive<Time> {
     if (long) { ctx.moveTo(g.x1, cy - size); ctx.lineTo(g.x1 - size, cy + size * 0.7); ctx.lineTo(g.x1 + size, cy + size * 0.7); }
     else { ctx.moveTo(g.x1, cy + size); ctx.lineTo(g.x1 - size, cy - size * 0.7); ctx.lineTo(g.x1 + size, cy - size * 0.7); }
     ctx.closePath();
-    ctx.fillStyle = this.colors.ink; ctx.strokeStyle = this.colors.surface; ctx.lineWidth = 1.5; ctx.stroke(); ctx.fill();
+    ctx.fillStyle = this.strategyColor ? this.strategyColor(g.trip.strategy) : this.colors.ink; ctx.strokeStyle = this.colors.surface; ctx.lineWidth = 1.5; ctx.stroke(); ctx.fill();
   }
 
   private exitMarker(ctx: CanvasRenderingContext2D, g: TradeGeo, r: number): void {

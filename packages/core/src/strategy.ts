@@ -9,7 +9,7 @@ export interface StreamDecl {
   warmupBars?: number;
 }
 export interface ParamDecl { name: string; default: string }
-export interface ImportDecl { path: string; alias: string }
+export interface ImportDecl { path: string; alias: string; hold?: boolean }
 
 export interface StrategyInfo {
   kind: "strategy" | "portfolio" | "unknown";
@@ -44,8 +44,8 @@ export function parseStrategyInfo(source: string): StrategyInfo {
     const p = /^PARAM\s+(\w+)\s*=\s*(.*?)\s*$/.exec(line);
     if (p) { info.params.push({ name: p[1]!, default: p[2]! }); continue; }
     // IMPORT paths are quoted, and scrub() blanks string literals, so read this one from the raw line.
-    const i = /^IMPORT\s+['"]([^'"]+)['"]\s+AS\s+(\w+)/.exec(raw);
-    if (i) info.imports.push({ path: i[1]!, alias: i[2]! });
+    const i = /^IMPORT\s+['"]([^'"]+)['"]\s+AS\s+(\w+)(\s+HOLD\b)?/.exec(raw);
+    if (i) info.imports.push({ path: i[1]!, alias: i[2]!, ...(i[3] ? { hold: true } : {}) });
   }
   return info;
 }
@@ -66,4 +66,14 @@ export function usesIntrabarOrders(source: string): boolean {
     if (/\b(STOP_LOSS|TAKE_PROFIT|BRACKET|TRAILING|STOP_LIMIT)\b/.test(line) || /\bORDER_TYPE\s*=\s*(STOP|LIMIT|STOP_LIMIT|TRAILING)\b/.test(line)) return true;
   }
   return false;
+}
+
+/** Engine strategy id of a portfolio child is `<portfolio>:<alias>`; the alias is what people call it. */
+export const strategyAlias = (id: string): string => { const i = id.indexOf(":"); return i >= 0 ? id.slice(i + 1) : id; };
+
+/** `RUN <alias>` targets in a portfolio's rules. */
+export function portfolioRuns(source: string): string[] {
+  const out: string[] = [];
+  for (const raw of source.split(/\r?\n/)) { const m = /\bRUN\s+([A-Za-z_]\w*)/.exec(scrub(raw)); if (m && !out.includes(m[1]!)) out.push(m[1]!); }
+  return out;
 }

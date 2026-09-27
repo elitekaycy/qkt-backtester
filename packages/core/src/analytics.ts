@@ -25,6 +25,14 @@ export interface Analytics {
   exit: Array<{ reason: ExitReason } & Bucket>;
   hold: Array<{ label: string; minMs: number; maxMs: number } & Bucket>;
   pnlHistogram: Histogram;
+  /**
+   * Per-strategy breakdown of the matched trades (portfolio runs; empty when a single strategy traded). `strategy` is the
+   * engine id, `<portfolio>:<alias>` for a portfolio child.
+   */
+  byStrategy: Array<{ strategy: string; grossWin: number; grossLoss: number; closed: number; open: number } & Bucket>;
+  /** Realised P&L per UTC exit day / month split by strategy, for stacked bars. Empty for a single strategy. */
+  dailyByStrategy: Array<{ day: string; by: Record<string, number> }>;
+  monthlyByStrategy: Array<{ month: string; by: Record<string, number> }>;
   /** Distinct position sizes traded (at most 30, ascending): feeds the size: suggestions. */
   sizes: number[];
   rHistogram: Histogram | null;
@@ -93,6 +101,21 @@ export function analyze(trips: RoundTrip[]): Analytics {
     if (t.holdMs !== null) add(hold.find((h) => t.holdMs! >= h.minMs && t.holdMs! < h.maxMs) ?? hold[hold.length - 1]!, t);
   }
 
+  const ids = [...new Set(trips.map((t) => t.strategy))];
+  const multi = ids.length > 1;
+  const byStrategy = multi ? ids.map((strategy) => {
+    const mine = trips.filter((t) => t.strategy === strategy), done = mine.filter((t) => !t.open);
+    const b = bucket(); for (const t of done) add(b, t);
+    return { strategy, ...b, grossWin: done.reduce((a, t) => a + (t.pnl > 0 ? t.pnl : 0), 0), grossLoss: done.reduce((a, t) => a + (t.pnl < 0 ? t.pnl : 0), 0), closed: done.length, open: mine.length - done.length };
+  }) : [];
+  const split = (key: (iso: string) => string) => {
+    const m = new Map<string, Record<string, number>>();
+    for (const t of byExit) { const k = key(new Date(t.exitTs!).toISOString()); const r = m.get(k) ?? {}; r[t.strategy] = (r[t.strategy] ?? 0) + t.pnl; m.set(k, r); }
+    return [...m].sort(([a], [b]) => a.localeCompare(b));
+  };
+  const dailyByStrategy = multi ? split((s) => s.slice(0, 10)).map(([day, by]) => ({ day, by })) : [];
+  const monthlyByStrategy = multi ? split((s) => s.slice(0, 7)).map(([month, by]) => ({ month, by })) : [];
+
   return {
     count: trips.length, closed: closed.length, open: trips.length - closed.length,
     pnl, grossWin, grossLoss, wins: wins.length, losses: losses.length, breakeven: closed.length - wins.length - losses.length,
@@ -109,6 +132,7 @@ export function analyze(trips: RoundTrip[]): Analytics {
     weekday, hour, side,
     exit: (["target", "stop", "signal"] as ExitReason[]).filter((r) => exit.has(r)).map((reason) => ({ reason, ...exit.get(reason)! })),
     hold,
+    byStrategy, dailyByStrategy, monthlyByStrategy,
     sizes: [...new Set(trips.map((t) => t.qty))].sort((a, b) => a - b).slice(0, 30),
     pnlHistogram: histogram(closed.map((t) => t.pnl), Math.min(20, Math.max(6, Math.ceil(Math.sqrt(closed.length))))),
     rHistogram: withR.length ? histogram(withR.map((t) => t.r!), Math.min(16, Math.max(6, Math.ceil(Math.sqrt(withR.length))))) : null,

@@ -1,6 +1,8 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { strategyAlias } from "@qkt-studio/core/strategy";
 import type { RoundTrip } from "../api/types.js";
 import { fmtDur, fmtMoney, fmtNum, fmtPct, fmtPrice, fmtTs } from "../util/format.js";
+import { strategyColor } from "../util/strategyColor.js";
 
 const EXIT_LABEL: Record<string, string> = { target: "◆ Target hit", stop: "✕ Stop hit", signal: "● Rule exit", open: "Still open" };
 
@@ -18,7 +20,7 @@ function Field({ l, v, tone, title, wide }: { l: string; v: React.ReactNode; ton
 }
 
 /** The selected trade in plain numbers: everything an analyst needs to explain the entry, the risk and the exit. */
-export function TradeStrip({ trip: t, index, count, startBalance, onPrev, onNext, onClose }: { trip: RoundTrip | null; index: number; count: number; startBalance: number; onPrev(): void; onNext(): void; onClose(): void }) {
+export function TradeStrip({ trip: t, index, count, startBalance, multi, onPrev, onNext, onClose }: { trip: RoundTrip | null; index: number; count: number; startBalance: number; multi?: boolean; onPrev(): void; onNext(): void; onClose(): void }) {
   if (!t) return <div className="trade-strip empty-strip"><span className="muted">Click an entry marker or a trade box, or use ◀ ▶ to walk through the trades one by one.</span><span className="legend" aria-label="Legend"><span>▲ long entry</span><span>▼ short entry</span><span>◆ target</span><span>■✕ stop</span><span>● rule exit</span></span></div>;
   const long = t.side === "long";
   const rr = t.sl !== undefined && t.tp !== undefined && t.entryPx !== t.sl ? Math.abs(t.tp - t.entryPx) / Math.abs(t.entryPx - t.sl) : null;
@@ -27,6 +29,7 @@ export function TradeStrip({ trip: t, index, count, startBalance, onPrev, onNext
     <div className="trade-strip" role="group" aria-label="Selected trade">
       <div className="head">
         <b className="side">{long ? "▲ Long" : "▼ Short"}</b><span className="ink2">{t.symbol.split(":").pop()}</span>
+        {multi && <span className="badge" style={{ color: strategyColor(t.strategy) }}>{strategyAlias(t.strategy)}</span>}
         <span className="muted">{index >= 0 ? `trade ${index + 1} of ${count}` : `trade #${t.id}`}</span>
         <span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{EXIT_LABEL[t.open ? "open" : t.exit] ?? t.exit}</span>
         <span className="grow" />

@@ -135,6 +135,25 @@ the engine's realised P&L on every run.
 | Every fill lies inside its bar | catches misplaced data; amber (expected) in Draft for stop/target fills |
 | Engine artifact checksums | every file in qkt's `manifest.json` still matches its sha256 |
 
+## Portfolios
+
+A `PORTFOLIO` file (qkt's own `IMPORT '...' AS alias` / `RUN alias` syntax) runs several strategies as one book. The
+studio treats a portfolio run exactly like a single-strategy one — same trades.csv, same charts, same journal — with
+a bit more shown when there is more than one strategy to show:
+
+- **Files** — a portfolio file expands to list its members (alias, path, `HOLD`, a warning if one is missing); a
+  strategy used by more than one portfolio is marked. "New portfolio" scaffolds `IMPORT`/`RUN` lines for the
+  strategies you pick.
+- **Chart** — every strategy that trades a symbol draws on that symbol's chart, each in its own colour and badge, with
+  a legend to show, hide or solo a strategy (double-click). The trade detail card and the trades list name the
+  strategy a trade belongs to.
+- **Journal → Strategies** — appears only for a portfolio run: per-strategy P&L, win rate, profit factor and
+  contribution to the book, an equity chart per strategy against the book total, and the book's own risk numbers
+  (gross/net exposure, volatility, return correlation between strategies) when qkt reports them.
+- **Search** — `strategy:trend` (or the alias alone) filters trades to one strategy, everywhere filters apply.
+
+A single-strategy run shows none of this: no extra columns, no legend, no Strategies section.
+
 ## Known limits
 
 - Single-user / small-team. No accounts. One qkt version per image.

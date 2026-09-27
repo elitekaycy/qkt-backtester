@@ -60,3 +60,32 @@ describe("local completions", () => {
     expect(at("-- a comment").items).toEqual([]);
   });
 });
+
+describe("portfolio completions", () => {
+  const src = "PORTFOLIO book VERSION 1\n\nIMPORT 'trend.qkt' AS trend\nIMPORT 'fade.qkt' AS fade\n\nRULES\n    RUN trend\n";
+  const at = (extra: string, files: string[] = ["strategies/book.qkt", "strategies/trend.qkt", "strategies/fade.qkt", "strategies/btc.qkt"], self = "strategies/book.qkt") => {
+    const t = src + extra; const lines = t.split("\n");
+    return localCompletions(t, lines.length, lines[lines.length - 1]!.length + 1, null, files, self);
+  };
+  it("offers the workspace's other .qkt files after IMPORT '", () => {
+    const r = at("IMPORT '");
+    expect(labels(r)).toEqual(["btc.qkt"]); // trend.qkt and fade.qkt are already imported; book.qkt is itself
+    expect(r.exclusive).toBe(true);
+  });
+  it("inserts the closing quote and ` AS `", () => {
+    const r = at("IMPORT '");
+    expect(r.items[0]!.insert).toBe("btc.qkt' AS ");
+  });
+  it("offers the declared aliases after RUN, not qkt's keyword dump", () => {
+    const r = at("    RUN ");
+    expect(labels(r)).toEqual(["trend", "fade"]);
+    expect(r.exclusive).toBe(true);
+  });
+  it("does not offer aliases after RUN ... OVERRIDE", () => {
+    expect(at("    RUN trend OVERRIDE { x = 1 } RUN ").items).toEqual([]);
+  });
+  it("a plain strategy file never sees portfolio completions", () => {
+    const r = localCompletions("STRATEGY s VERSION 1\n\nRULES\n    RUN ", 4, 9, null, ["a.qkt"], "s.qkt");
+    expect(r.items).toEqual([]);
+  });
+});

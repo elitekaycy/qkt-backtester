@@ -19,6 +19,12 @@ export interface QktResult {
   global: PerfReport;
   perStrategy: Record<string, PerfReport>;
   tradeSummary?: Record<string, unknown>;
+  /** Present on portfolio runs only. */
+  bookAnalytics?: {
+    contributionToReturn?: Record<string, string>; riskContribution?: Record<string, string>; drawdownContribution?: Record<string, string>;
+    returnCorrelation?: Array<{ a: string; b: string; correlation: string }>;
+  };
+  bookRisk?: { bookVol?: string; maxGrossExposure?: string; maxNetExposure?: string; samples?: number; events?: number };
   artifacts?: Record<string, unknown>;
 }
 

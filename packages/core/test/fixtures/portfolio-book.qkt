@@ -1,0 +1,13 @@
+PORTFOLIO book VERSION 1
+
+SYMBOLS
+    gold = BACKTEST:XAUUSD EVERY 15m
+
+IMPORT 'xau_trend.qkt' AS trend
+IMPORT 'xau_fade.qkt' AS fade
+IMPORT 'btc_trend.qkt' AS btc
+
+RULES
+    RUN trend
+    RUN fade
+    RUN btc
