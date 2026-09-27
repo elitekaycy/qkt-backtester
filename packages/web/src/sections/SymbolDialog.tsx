@@ -35,7 +35,7 @@ function Heatmap({ symbol, kind, source, onPick, sel }: { symbol: string; kind: 
   if (err) return <div className="muted">No calendar: {err}</div>;
   if (!data) return <div className="empty"><span className="spin" />Reading days…</div>;
   return (
-    <div className="heat" aria-label={`Day-by-day status of ${symbol} ${kind}`}>
+    <div className="heat" role="region" tabIndex={0} aria-label={`Day-by-day status of ${symbol} ${kind}`}>
       {grids.map((g) => (
         <div key={g.year} className="heat-year">
           <div className="heat-y">{g.year}</div>
@@ -139,7 +139,7 @@ export function SymbolDialog() {
             {rep?.notes.map((n, i) => <div key={i} className="banner info"><CircleAlert size={14} /><span>{n}</span></div>)}
 
             <section className="sd-sec">
-              <h4>Where {symbol} is read from</h4>
+              <h3>Where {symbol} is read from</h3>
               <div className="sd-sources" role="radiogroup" aria-label={`Source for ${symbol}`}>
                 {detail.sources.map((x) => {
                   const on = (source ? x.root === source : x.isDefault);
@@ -160,7 +160,7 @@ export function SymbolDialog() {
 
             {rep && (
               <section className="sd-sec">
-                <h4>Series in this source</h4>
+                <h3>Series in this source</h3>
                 <div style={{ overflowX: "auto" }}><table className="tbl sd-tbl">
                   <thead><tr><th>Series</th><th>First → last</th><th className="r">Files</th><th className="r">ok</th><th className="r">closed</th><th className="r">thin</th><th className="r">missing</th><th>Status</th></tr></thead>
                   <tbody>
@@ -192,7 +192,7 @@ export function SymbolDialog() {
 
             {rep && cur && (
               <section className="sd-sec">
-                <h4>Calendar · {cur.label} <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· click a day to start a range, click another to end it</span></h4>
+                <h3>Calendar · {cur.label} <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· click a day to start a range, click another to end it</span></h3>
                 <div className="legend" aria-hidden="true"><span><i className="hc s-o" />ok</span><span><i className="hc s-c" />closed</span><span><i className="hc s-t" />thin</span><span><i className="hc s-m" />missing</span></div>
                 <Heatmap symbol={symbol!} kind={cur.kind} source={source || undefined} onPick={pick} sel={{ from, to }} />
                 {gaps.length > 0 && (
@@ -208,7 +208,7 @@ export function SymbolDialog() {
             )}
 
             <section className="sd-sec">
-              <h4>Range strategies may use</h4>
+              <h3>Range strategies may use</h3>
               <div className="grid-2">
                 <div className="field"><label htmlFor="sd-from">Start (first day used)</label>
                   <input id="sd-from" className="input" type="date" min={first ?? undefined} max={last ?? undefined} value={from} placeholder={first ?? ""} onChange={(e) => { setFrom(e.target.value); setAnchorDay(null); }} />
@@ -224,7 +224,7 @@ export function SymbolDialog() {
             </section>
 
             <section className="sd-sec">
-              <h4>Strategies that read {symbol}</h4>
+              <h3>Strategies that read {symbol}</h3>
               {users.length === 0 ? <div className="muted">No strategy in the workspace uses {symbol}.</div> : users.map((r) => (
                 <div key={r.strategy} className="sd-strat">
                   <button className="link" onClick={() => { void openFile(r.strategy); close(null); }}>{r.strategy.replace(/^strategies\//, "")}</button>
