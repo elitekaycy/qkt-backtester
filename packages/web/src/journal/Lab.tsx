@@ -174,7 +174,7 @@ function Grid() {
       {(job?.result?.warnings as string[] | undefined)?.map((w, i) => <div key={i} className="banner warn">⚠ {w}</div>)}
       {rows.length > 0 && (
         <table className="tbl">
-          <thead><tr><th>#</th><th>Parameters</th>{cols.map((c) => <th key={c} className="num" style={c === rank ? { color: "var(--accent)" } : undefined}>{c}{c === rank ? " ▼" : ""}</th>)}<th className="num">trades</th><th className="num">max DD</th><th /></tr></thead>
+          <thead><tr><th>#</th><th>Parameters</th>{cols.map((c) => <th key={c} className="num" style={c === rank ? { color: "var(--accent)" } : undefined}>{c}{c === rank ? " ▼" : ""}</th>)}<th className="num">trades</th><th className="num">max DD</th><th><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={`click${results?.runId === r.runId ? " sel" : ""}`} onClick={() => r.runId && r.status === "done" && void useStore.getState().selectRun(r.runId)} title={r.status === "done" ? "Open this run's charts and trades" : r.status}>
@@ -262,7 +262,7 @@ export function Lab() {
     <div className="grid" style={{ gap: "var(--s4)" }}>
       <div className="row">
         <div className="seg" role="tablist" aria-label="Robustness tools">
-          {([["mc", "Monte Carlo"], ["grid", "Parameter grid"], ["wf", "Walk-forward"]] as Array<[Tab, string]>).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>)}
+          {([["mc", "Monte Carlo"], ["grid", "Parameter grid"], ["wf", "Walk-forward"]] as Array<[Tab, string]>).map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>)}
         </div>
         <span className="muted" style={{ fontSize: "var(--fs-sm)" }}>{tab === "mc" ? "Resample the trades to see how much of the result is luck." : tab === "grid" ? "Run the strategy over a grid of parameter values." : "Train on one window, test on the next, roll forward."}</span>
       </div>

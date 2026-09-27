@@ -4,8 +4,8 @@
 
 /* year chips: tone = missing share inside the data; partial (data starts/stops mid-year) is dashed and says so */
 .year { flex-direction: column; line-height: 1.05; min-height: 22px; height: auto; padding: 2px 6px; gap: 0; }
-.year small { font-size: 8.5px; font-weight: 500; opacity: 0.85; letter-spacing: 0.01em; white-space: nowrap; }
-.year.t-ok { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.year small { font-size: 8.5px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
+.year.t-ok { background: color-mix(in srgb, var(--ok) 26%, transparent); color: var(--ok); }
 .year.t-warn { background: color-mix(in srgb, var(--warn) 24%, transparent); color: var(--warn); }
 .year.t-bad { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--loss-ink); }
 .year.t-empty { background: var(--card-2); color: var(--ink-3); }
@@ -34,7 +34,7 @@
 /* symbol dialog */
 .sd-head { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
 .sd-sec { display: flex; flex-direction: column; gap: var(--s2); padding-top: var(--s3); border-top: 1px solid var(--line); }
-.sd-sec h4 { margin: 0; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); font-weight: 600; }
+.sd-sec h3 { margin: 0; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); font-weight: 600; }
 .sd-sources { display: flex; flex-direction: column; gap: 4px; }
 .sd-src { display: flex; align-items: center; gap: var(--s2); padding: 6px var(--s3); border: 1px solid var(--line); border-radius: var(--r-md); cursor: pointer; background: var(--card); min-width: 0; }
 .sd-src:hover { background: var(--card-2); }

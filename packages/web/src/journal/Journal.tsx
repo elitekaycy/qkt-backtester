@@ -40,7 +40,7 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
   const sec = nav.find((n) => n.id === ui.journalSection) ?? nav[0]!;
   const width = ui.journalMax ? containerWidth : Math.min(containerWidth, Math.max(720, ui.journalW || Math.round(containerWidth * 0.74)));
 
-  const drawer = useRef<HTMLElement>(null);
+  const drawer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
     const t = setTimeout(() => navRef.current?.querySelector<HTMLElement>("[aria-current='page']")?.focus(), 60);
@@ -72,8 +72,8 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
   return (
     <>
       <div className="scrim" data-testid="journal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) ui.set({ journalOpen: false }); }} aria-hidden="true" />
-      <aside ref={drawer} className="drawer" role="dialog" aria-modal="true" aria-label={`Journal: ${sec.label}`} style={{ width }}>
-        <div className="drawer-grip" role="separator" aria-orientation="vertical" aria-label="Resize journal" tabIndex={0} onPointerDown={grip} onDoubleClick={() => ui.set({ journalW: 0, journalMax: false })}
+      <div ref={drawer} className="drawer" role="dialog" aria-modal="true" aria-label={`Journal: ${sec.label}`} style={{ width }}>
+        <div className="drawer-grip" role="separator" aria-orientation="vertical" aria-label="Resize journal" aria-valuenow={Math.round(width)} aria-valuemin={720} aria-valuemax={containerWidth} tabIndex={0} onPointerDown={grip} onDoubleClick={() => ui.set({ journalW: 0, journalMax: false })}
           onKeyDown={(e) => { if (e.key === "ArrowLeft") ui.set({ journalMax: false, journalW: Math.min(containerWidth, width + 48) }); else if (e.key === "ArrowRight") ui.set({ journalMax: false, journalW: Math.max(720, width - 48) }); }} />
         <nav className="jnav" aria-label="Journal sections" ref={navRef}>
           <h2><ChartColumn size={20} color="var(--accent-ink)" /><span>Journal</span></h2>
@@ -100,7 +100,7 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
             </AnalyticsProvider>
           )}
         </div>
-      </aside>
+      </div>
     </>
   );
 }

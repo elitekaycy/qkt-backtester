@@ -18,10 +18,12 @@ export function DockBar() {
     { id: "terminal", label: "Terminal", icon: <SquareTerminal size={15} /> },
   ];
   return (
-    <div className="dock-bar" role="tablist" aria-label="Output">
-      {tabs.map((t) => (
-        <button key={t.id} role="tab" className="dock-tab" aria-selected={ui.dockOpen && ui.dockTab === t.id} onClick={() => ui.set({ dockOpen: true, dockTab: t.id })}>{t.icon}{t.label}{t.badge}</button>
-      ))}
+    <div className="dock-bar">
+      <div role="tablist" aria-label="Output" style={{ display: "contents" }}>
+        {tabs.map((t) => (
+          <button key={t.id} role="tab" id={`dock-tab-${t.id}`} aria-controls={`dock-panel-${t.id}`} className="dock-tab" aria-selected={ui.dockOpen && ui.dockTab === t.id} onClick={() => ui.set({ dockOpen: true, dockTab: t.id })}>{t.icon}{t.label}{t.badge}</button>
+        ))}
+      </div>
       <span style={{ flex: 1 }} />
       <PaneControls pane="dock" />
     </div>
@@ -35,9 +37,9 @@ export function DockBody() {
   useEffect(() => { if (tab === "terminal") setSeen(true); }, [tab]);
   return (
     <>
-      {tab === "pipeline" && <PipelineTab />}
-      {tab === "problems" && <ProblemsTab />}
-      {seen && <div className="dock-term" style={{ display: tab === "terminal" ? "flex" : "none" }}><TerminalTab /></div>}
+      {tab === "pipeline" && <div role="tabpanel" id="dock-panel-pipeline" aria-labelledby="dock-tab-pipeline" style={{ display: "contents" }}><PipelineTab /></div>}
+      {tab === "problems" && <div role="tabpanel" id="dock-panel-problems" aria-labelledby="dock-tab-problems" style={{ display: "contents" }}><ProblemsTab /></div>}
+      {seen && <div role="tabpanel" id="dock-panel-terminal" aria-labelledby="dock-tab-terminal" className="dock-term" style={{ display: tab === "terminal" ? "flex" : "none" }}><TerminalTab /></div>}
     </>
   );
 }

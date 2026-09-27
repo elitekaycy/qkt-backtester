@@ -73,23 +73,27 @@ export function CalendarView() {
           {best && <span className="muted hide-md">best <b className="gain">{fmtMoney(best.pnl, 0)}</b></span>}{worst && worst.pnl < 0 && <span className="muted hide-md">worst <b className="loss">{fmtMoney(worst.pnl, 0)}</b></span>}
         </div>
         <div className="cal" role="grid" aria-label={`P&L calendar for ${monthLabel(month)}`}>
-          {DOW.map((d) => <div key={d} className="dow" role="columnheader">{d}</div>)}<div className="dow">Week</div>
+          <div role="row" style={{ display: "contents" }}>
+            {DOW.map((d) => <div key={d} className="dow" role="columnheader">{d}</div>)}<div className="dow" role="columnheader">Week</div>
+          </div>
           {weeks.map((w, wi) => {
             const wd = w.filter((c) => c.inMonth).map((c) => days.get(c.day)).filter(Boolean) as typeof inMonth;
             const wp = wd.reduce((a, d) => a + d.pnl, 0), wt = wd.reduce((a, d) => a + d.trades, 0);
-            return [
-              ...w.map((c) => {
-                const d = days.get(c.day), n = Number(c.day.slice(8));
-                if (!d || !c.inMonth) return <div key={c.day} className={`cal-cell${c.inMonth ? "" : " out"}`} role="gridcell" style={c.inMonth && d ? undefined : { background: c.inMonth ? "var(--card)" : "transparent", borderStyle: c.inMonth ? "solid" : "dashed" }}><span className="d">{n}</span></div>;
-                return (
-                  <button key={c.day} className="cal-cell" role="gridcell" aria-pressed={filters.day === c.day} style={{ background: shade(d.pnl, max) }}
-                    aria-label={`${c.day}: ${fmtMoney(d.pnl)}, ${d.trades} trades`} title={`${dayName(c.day)} ${c.day} · ${glyph(d.pnl)} ${fmtMoney(d.pnl)} · ${d.trades} trade${d.trades === 1 ? "" : "s"} · ${fmtPct(d.wins / d.trades, 0)} win`} onClick={() => setFilters({ day: filters.day === c.day ? undefined : c.day })}>
-                    <span className="d">{n}</span><span className={`p ${d.pnl >= 0 ? "gain" : "loss"}`} style={{ color: "var(--ink)" }}>{glyph(d.pnl)} {fmtMoney(d.pnl, 0)}</span><span className="t">{d.trades} trade{d.trades === 1 ? "" : "s"}</span>
-                  </button>
-                );
-              }),
-              <div key={`w${wi}`} className="cal-week"><span>Week {wi + 1}</span><b className={wp >= 0 ? "gain" : "loss"}>{wt ? fmtMoney(wp, 0) : DASH}</b><span>{wt} trades</span></div>,
-            ];
+            return (
+              <div key={`w${wi}`} role="row" style={{ display: "contents" }}>
+                {w.map((c) => {
+                  const d = days.get(c.day), n = Number(c.day.slice(8));
+                  if (!d || !c.inMonth) return <div key={c.day} className={`cal-cell${c.inMonth ? "" : " out"}`} role="gridcell" style={c.inMonth && d ? undefined : { background: c.inMonth ? "var(--card)" : "transparent", borderStyle: c.inMonth ? "solid" : "dashed" }}><span className="d">{n}</span></div>;
+                  return (
+                    <button key={c.day} className="cal-cell" role="gridcell" aria-selected={filters.day === c.day} style={{ background: shade(d.pnl, max) }}
+                      aria-label={`${c.day}: ${fmtMoney(d.pnl)}, ${d.trades} trades`} title={`${dayName(c.day)} ${c.day} · ${glyph(d.pnl)} ${fmtMoney(d.pnl)} · ${d.trades} trade${d.trades === 1 ? "" : "s"} · ${fmtPct(d.wins / d.trades, 0)} win`} onClick={() => setFilters({ day: filters.day === c.day ? undefined : c.day })}>
+                      <span className="d">{n}</span><span className={`p ${d.pnl >= 0 ? "gain" : "loss"}`} style={{ color: "var(--ink)" }}>{glyph(d.pnl)} {fmtMoney(d.pnl, 0)}</span><span className="t">{d.trades} trade{d.trades === 1 ? "" : "s"}</span>
+                    </button>
+                  );
+                })}
+                <div className="cal-week" role="gridcell"><span>Week {wi + 1}</span><b className={wp >= 0 ? "gain" : "loss"}>{wt ? fmtMoney(wp, 0) : DASH}</b><span>{wt} trades</span></div>
+              </div>
+            );
           })}
         </div>
         <div className="legend" style={{ marginTop: "var(--s3)" }}><span><i style={{ background: shade(max, max) }} />profit day</span><span><i style={{ background: shade(-max, max) }} />loss day</span><span className="muted">Intensity follows the size of the day.</span></div>

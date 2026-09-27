@@ -46,7 +46,7 @@
 .card.pad { padding: var(--s3); }
 .list-row { display: flex; align-items: center; gap: var(--s2); min-height: 36px; padding: 4px var(--s2); border-radius: var(--r-md); cursor: pointer; color: var(--ink-2); }
 .list-row:hover { background: var(--hover); color: var(--ink); }
-.list-row[aria-selected="true"] { background: var(--accent-soft); color: var(--ink); }
+.list-row[aria-selected="true"], .list-row[aria-current="true"] { background: var(--accent-soft); color: var(--ink); }
 
 /* ---------- main column ---------- */
 .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); position: relative; }
@@ -73,13 +73,16 @@
 /* ---------- editor tabs ---------- */
 .tabs { display: flex; height: 38px; flex: none; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid var(--line); background: var(--side); scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tab { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 var(--s2) 0 var(--s3); height: 100%; color: var(--ink-3); cursor: pointer; white-space: nowrap; border-right: 1px solid var(--line); flex: none; transition: background var(--t-fast), color var(--t-fast); }
+.tab { position: relative; display: flex; align-items: center; gap: 4px; padding: 0 var(--s2) 0 0; height: 100%; color: var(--ink-3); white-space: nowrap; border-right: 1px solid var(--line); flex: none; transition: background var(--t-fast), color var(--t-fast); }
 .tab:hover { background: var(--hover); color: var(--ink); }
-.tab[aria-selected="true"] { background: var(--main); color: var(--ink); }
-.tab[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent-hi); }
+.tab.active { background: var(--main); color: var(--ink); }
+.tab.active::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent-hi); }
 .tab.dragover { box-shadow: inset 2px 0 0 var(--accent-hi); }
-.tab .x { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; border: 0; background: transparent; color: var(--ink-3); opacity: 0; }
-.tab:hover .x, .tab[aria-selected="true"] .x, .tab:focus-within .x { opacity: 1; }
+/* the tab-select control and the close button are siblings (not one nested inside the other), reset to look like one row */
+.tab-btn { all: unset; display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 var(--s2) 0 var(--s3); cursor: pointer; box-sizing: border-box; }
+.tab-btn:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
+.tab .x { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; border: 0; background: transparent; color: var(--ink-3); opacity: 0; cursor: pointer; }
+.tab:hover .x, .tab.active .x, .tab:focus-within .x { opacity: 1; }
 .tab .x:hover { background: var(--press); color: var(--ink); }
 .tab .unsaved { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-2); flex: none; }
 .editor-status { display: flex; align-items: center; gap: var(--s3); height: 26px; flex: none; padding: 0 var(--s3); border-top: 1px solid var(--line); background: var(--side); color: var(--ink-3); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; }
@@ -195,10 +198,14 @@
 .cal-cell { min-height: 78px; border-radius: var(--r-md); border: 1px solid var(--line); padding: 6px 8px; display: flex; flex-direction: column; justify-content: space-between; background: var(--card); text-align: left; color: inherit; transition: transform var(--t-fast), border-color var(--t-fast); }
 button.cal-cell { cursor: pointer; }
 button.cal-cell:hover { border-color: var(--ink-4); transform: translateY(-1px); }
-button.cal-cell[aria-pressed="true"] { border-color: var(--accent-hi); box-shadow: 0 0 0 2px var(--accent-soft); }
+button.cal-cell[aria-selected="true"] { border-color: var(--accent-hi); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* day/win-loss shading behind these varies from near-transparent to fairly saturated: the muted ink token does not
+   have enough contrast against every shade, so filled cells use the full-contrast ink instead (empty cells keep muted). */
 .cal-cell .d { font-size: var(--fs-xs); color: var(--ink-3); }
+button.cal-cell .d { color: var(--ink); }
 .cal-cell .p { font-weight: 650; font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
 .cal-cell .t { font-size: var(--fs-xs); color: var(--ink-3); }
+button.cal-cell .t { color: var(--ink); }
 .cal-cell.out { opacity: 0.35; }
 .cal-week { border-radius: var(--r-md); border: 1px dashed var(--line-2); padding: 6px 8px; display: flex; flex-direction: column; justify-content: center; gap: 2px; font-size: var(--fs-xs); color: var(--ink-3); }
 .cal-week b { font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
@@ -219,8 +226,11 @@ table.tbl tr.click { cursor: pointer; }
 
 /* data section */
 .sym { border-radius: var(--r-md); }
-.sym-head { display: flex; align-items: center; gap: var(--s2); min-height: 40px; padding: 4px var(--s2); border-radius: var(--r-md); cursor: pointer; }
+.sym-head { display: flex; align-items: center; gap: var(--s2); min-height: 40px; padding: 4px var(--s2); border-radius: var(--r-md); }
 .sym-head:hover { background: var(--hover); }
+/* the "open details" action: a real sibling button, not nested inside the expand toggle's clickable row */
+.sym-open { all: unset; display: flex; align-items: center; gap: var(--s2); flex: 1; min-width: 0; cursor: pointer; }
+.sym-open:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; border-radius: var(--r-sm); }
 .sym-body { padding: 0 var(--s2) var(--s3) 26px; display: flex; flex-direction: column; gap: var(--s3); }
 .src { display: flex; flex-direction: column; gap: 6px; padding: var(--s2) var(--s3); background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); }
 .src .top { display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); }
@@ -240,10 +250,10 @@ table.tbl tr.click { cursor: pointer; }
 /* modal */
 .modal-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: var(--z-modal); display: grid; place-items: center; animation: fadein var(--t-med); }
 .modal { background: var(--card); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-2); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column; animation: popin var(--t-med) var(--ease); }
-.modal > header { display: flex; align-items: center; gap: var(--s2); padding: var(--s4) var(--s4) var(--s3); }
-.modal > header h2 { margin: 0; font-size: var(--fs-lg); flex: 1; }
+.modal > .modal-head { display: flex; align-items: center; gap: var(--s2); padding: var(--s4) var(--s4) var(--s3); }
+.modal > .modal-head h2 { margin: 0; font-size: var(--fs-lg); flex: 1; }
 .modal > .content { padding: 0 var(--s4) var(--s4); overflow: auto; display: flex; flex-direction: column; gap: var(--s3); }
-.modal > footer { display: flex; justify-content: flex-end; gap: var(--s2); padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
+.modal > .modal-foot { display: flex; justify-content: flex-end; gap: var(--s2); padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
 .palette { width: min(620px, calc(100vw - 32px)); align-self: start; margin-top: 14vh; }
 .palette input { border: 0; background: transparent; height: 48px; padding: 0 var(--s4); font-size: var(--fs-lg); width: 100%; border-bottom: 1px solid var(--line); outline: none; }
 .palette .results { max-height: 360px; overflow: auto; padding: var(--s2); }
@@ -256,7 +266,7 @@ table.tbl tr.click { cursor: pointer; }
 
 /* Monaco takes the pane's surface so the editor reads as part of the card, in both themes */
 .monaco-host .monaco-editor, .monaco-host .monaco-editor .margin, .monaco-host .monaco-editor-background, .monaco-host .monaco-editor .sticky-widget { background-color: var(--main) !important; }
-.monaco-host .monaco-editor .line-numbers { color: var(--ink-4) !important; }
+.monaco-host .monaco-editor .line-numbers { color: var(--ink-3) !important; }
 .monaco-host .monaco-editor .active-line-number { color: var(--ink-2) !important; }
 .monaco-host .monaco-editor .current-line { border: 0 !important; background: var(--hover) !important; }
 .monaco-host .monaco-editor .cursors-layer .cursor { background-color: var(--accent-hi) !important; border-color: var(--accent-hi) !important; }

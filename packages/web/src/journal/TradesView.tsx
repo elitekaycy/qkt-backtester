@@ -26,7 +26,7 @@ const colsFor = (strat: boolean) => (strat ? [BASE_COLS[0]!, BASE_COLS[1]!, STRA
 const H = 3_600_000;
 
 function TradeCells({ t, strat }: { t: RoundTrip; strat: boolean }) {
-  const c = (v: React.ReactNode, right?: boolean, cls = "") => <div className={`${cls}${right ? " num" : ""} nowrap`} style={{ padding: "0 var(--s3)", overflow: "hidden", textOverflow: "ellipsis", textAlign: right ? "right" : "left" }}>{v}</div>;
+  const c = (v: React.ReactNode, right?: boolean, cls = "") => <div role="cell" className={`${cls}${right ? " num" : ""} nowrap`} style={{ padding: "0 var(--s3)", overflow: "hidden", textOverflow: "ellipsis", textAlign: right ? "right" : "left" }}>{v}</div>;
   return (
     <>
       {c(t.id, true, "muted")}{c(t.symbol.split(":").pop())}
@@ -74,6 +74,7 @@ export function TradesTable() {
       {selected && <button className="btn sm primary" onClick={() => { selectTrip(selected, true); ui.set({ journalOpen: false }); }}><ArrowUpRight size={14} />Show #{selected.id} on the chart</button>}
       <span className="muted">{total.toLocaleString()} round trips · one row per entry-to-exit</span></>} style={{ padding: 0 }}>
       <div style={{ overflowX: "auto" }}><div style={{ minWidth: strat ? 1316 : 1220 }}>
+      <div role="table" aria-label="Round trips" aria-rowcount={total}>
       <div style={{ display: "grid", gridTemplateColumns: template, borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", background: "var(--card)", paddingRight: 10 }} role="row">
         {cols.map((c) => (
           <div key={c.key} role="columnheader" aria-sort={c.sort === sort ? (dir === "asc" ? "ascending" : "descending") : undefined} tabIndex={c.sort ? 0 : undefined}
@@ -84,7 +85,7 @@ export function TradesTable() {
           </div>
         ))}
       </div>
-      <div ref={scroller} role="table" aria-label="Round trips" aria-rowcount={total} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })} style={{ overflow: "auto", height: 420, position: "relative" }}>
+      <div ref={scroller} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })} style={{ overflow: "auto", height: 420, position: "relative" }}>
         {err && <div className="banner bad">{err}</div>}
         {total === 0 && !err && <div className="empty">No trades match these filters.</div>}
         <div style={{ height: total * ROW, position: "relative" }}>
@@ -100,10 +101,11 @@ export function TradesTable() {
                   requestAnimationFrame(() => el?.querySelector<HTMLElement>(`[data-row="${n}"]`)?.focus({ preventScroll: true }));
                 }
               }}>
-              {t ? <TradeCells t={t} strat={strat} /> : <div style={{ gridColumn: "1 / -1", padding: "0 var(--s3)" }} className="muted">…</div>}
+              {t ? <TradeCells t={t} strat={strat} /> : <div role="cell" style={{ gridColumn: "1 / -1", padding: "0 var(--s3)" }} className="muted">…</div>}
             </div>
           ))}
         </div>
+      </div>
       </div>
       </div></div>
     </Widget>

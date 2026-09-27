@@ -37,7 +37,7 @@ export function Compare() {
             <div className="legend">{cmp.map((id, i) => <span key={id}><i style={{ background: tok(SERIES[i]!) }} /><b>{String.fromCharCode(65 + i)}</b> {label(id)}</span>)}</div>
           </Widget>
           <Widget title="Metrics" className="flush" style={{ padding: 0 }}>
-            <table className="tbl"><thead><tr><th /><th className="r">Net P&L</th><th className="r">Sharpe</th><th className="r">Profit factor</th><th className="r">Win rate</th><th className="r">Trades</th><th className="r">Max DD</th></tr></thead>
+            <table className="tbl"><thead><tr><th><span className="sr-only">Run</span></th><th className="r">Net P&L</th><th className="r">Sharpe</th><th className="r">Profit factor</th><th className="r">Win rate</th><th className="r">Trades</th><th className="r">Max DD</th></tr></thead>
               <tbody>{cmp.map((id, i) => {
                 const s = data[id]!.s, b = data[cmp[0]!]!.s;
                 const dlt = (x: number, y: number, f: (v: number) => string) => (i === 0 ? "" : ` (${x - y >= 0 ? "+" : "−"}${f(Math.abs(x - y))})`);

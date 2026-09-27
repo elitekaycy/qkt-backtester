@@ -81,14 +81,34 @@ export function CommandPalette() {
 const KEYS: Array<[string, string]> = [
   ["Ctrl Enter", "Run the open strategy"], ["Ctrl .", "Stop everything and clean up"], ["Ctrl ,", "Run settings"], ["Ctrl K", "Command palette"],
   ["Ctrl J", "Open or close the Journal"], ["Ctrl B", "Show or hide the sidebar"], ["Ctrl 1 · 2 · 3", "Files · Data · Runs"], ["Ctrl `", "Show or hide the output panel"],
-  ["Ctrl S", "Save the file"], ["Esc", "Close the journal, dialogs and menus; leave a full-screen pane"], ["Ctrl Z · Ctrl Y", "Undo / redo in the editor (also Ctrl Shift Z)"], ["?", "This list"], ["← → · Shift", "Resize a focused divider (Shift for larger steps)"],
+  ["Ctrl S", "Save the file"], ["Esc", "Close the journal, a dialog or a menu; put the cursor back in a full-screen editor (it stays full screen)"],
+  ["Ctrl Z · Ctrl Y", "Undo / redo in the editor (also Ctrl Shift Z)"], ["?", "This list"], ["← → · Shift", "Resize a focused divider (Shift for larger steps)"],
+];
+const TREE_KEYS: Array<[string, string]> = [
+  ["↑ ↓", "Move between rows"], ["→", "Open a closed folder, or move into it"], ["←", "Close an open folder, or go to its parent"],
+  ["Home · End", "First / last row"], ["Enter · Space", "Open the file, or toggle the folder"], ["A letter", "Jump to a name starting with it"],
+  ["F2", "Rename"], ["Delete", "Delete (with confirm)"], ["Shift F10 · Menu", "Focus the row's actions"],
+];
+const VIM_KEYS: Array<[string, string]> = [
+  [":w", "Save"], [":wq · :x", "Save and close the tab"], [":q", "Close the tab (refuses with unsaved changes)"], [":q!", "Close and discard changes"],
+  [":wa", "Save every open file"], [":run", "Run the strategy"], [":12", "Jump to line 12"],
 ];
 export function Shortcuts() {
   const ui = useUi();
+  const table = (keys: Array<[string, string]>) => (
+    <div className="kv" style={{ gap: "var(--s2) var(--s5)" }}>{keys.map(([k, d]) => <div key={k} style={{ display: "contents" }}><span className="row" style={{ gap: 4 }}>{k.split(" ").map((x, i) => (x === "·") ? <span key={i}>·</span> : <span key={i} className="kbd">{x}</span>)}</span><span className="ink2">{d}</span></div>)}</div>
+  );
   return (
-    <Modal open={ui.shortcuts} onClose={() => ui.set({ shortcuts: false })} title="Keyboard shortcuts" width={520}>
-      <div className="kv" style={{ gap: "var(--s2) var(--s5)" }}>{KEYS.map(([k, d]) => <div key={k} style={{ display: "contents" }}><span className="row" style={{ gap: 4 }}>{k.split(" ").map((x, i) => (x === "·" || x === "Shift" && false) ? <span key={i}>·</span> : <span key={i} className="kbd">{x}</span>)}</span><span className="ink2">{d}</span></div>)}</div>
+    <Modal open={ui.shortcuts} onClose={() => ui.set({ shortcuts: false })} title="Keyboard shortcuts" width={560}>
+      {table(KEYS)}
       <div className="hint muted">On macOS use ⌘ in place of Ctrl. Panels can be resized by dragging the dividers, or with the arrow keys when a divider has focus. Double-click a divider to reset it.</div>
+      <h4 style={{ margin: "var(--s4) 0 var(--s2)" }}>File tree, Runs and Data lists</h4>
+      {table(TREE_KEYS)}
+      <div className="hint muted">Runs and the Data section's symbol list use the same ↑ ↓, Home and End.</div>
+      <h4 style={{ margin: "var(--s4) 0 var(--s2)" }}>Chart</h4>
+      {table([["← →", "Step to the previous / next trade"], ["Esc", "Deselect the trade"]])}
+      <h4 style={{ margin: "var(--s4) 0 var(--s2)" }}>Vim mode: ex commands</h4>
+      {table(VIM_KEYS)}
     </Modal>
   );
 }

@@ -66,7 +66,7 @@ ok("Esc closes only the popover", !!(await page.$(".drawer")) && !(await page.$(
 await page.evaluate(() => [...document.querySelectorAll(".filterbar .btn")].find((b) => /Clear all/.test(b.textContent))?.click()); await sleep(600);
 
 // ---- daily chart: hover, zoom, drill ----
-await nav(2);
+await nav(3); // Overview, Strategies, Calendar, Daily, Monthly, Trades, ...
 const box = await page.evaluate(() => { const r = document.querySelector('[data-testid], .widget [role=img]')?.getBoundingClientRect(); const c = [...document.querySelectorAll('[role=img][aria-label="Profit and loss per day"]')][0].getBoundingClientRect(); return { x: c.x, y: c.y, w: c.width, h: c.height }; });
 await page.mouse.move(box.x + box.w * 0.55, box.y + box.h * 0.4); await sleep(500);
 const tip = await page.evaluate(() => [...document.querySelectorAll("div")].map((d) => d.textContent).find((t) => /Win rate/.test(t) && /Cumulative/.test(t) && t.length < 240) ?? "");
@@ -84,14 +84,14 @@ ok("clicking a bar drills to that day (chip + trades list)", (await chips()).som
 await page.evaluate(() => [...document.querySelectorAll(".filterbar .btn")].find((b) => /Clear all/.test(b.textContent))?.click()); await sleep(500);
 
 // ---- monthly click -> calendar ----
-await nav(3);
+await nav(4);
 const mb = await page.evaluate(() => { const c = document.querySelector('[role=img][aria-label="Profit and loss per month"]').getBoundingClientRect(); return { x: c.x, y: c.y, w: c.width, h: c.height }; });
 await page.mouse.click(mb.x + mb.w * 0.27, mb.y + mb.h * 0.35); await sleep(900);
 ok("clicking a month opens it in the calendar", await page.evaluate(() => document.querySelector(".jnav-btn[aria-current=page]")?.textContent === "Calendar"));
 
 // ---- empty state through filters ----
 await typeFilter("pnl:>100000 "); await sleep(900);
-await nav(2);
+await nav(3);
 ok("an empty selection explains itself in one message", /No closed trades in this selection/.test(await page.$eval(".jbody", (e) => e.textContent)));
 await page.evaluate(() => [...document.querySelectorAll(".filterbar .btn")].find((b) => /Clear all/.test(b.textContent))?.click()); await sleep(500);
 
@@ -104,7 +104,7 @@ ok("double-tapping maximize raises no errors and keeps the journal open", errs.l
 ok("charts still render after the resize storm", await page.evaluate(() => document.querySelector(".drawer canvas")?.width > 50));
 
 // ---- trades keyboard ----
-await nav(4);
+await nav(5);
 await page.focus(".vrow[data-row='0']"); await page.keyboard.press("ArrowDown"); await sleep(300);
 ok("arrow keys move the trade selection", await page.evaluate(() => document.querySelector(".vrow[aria-selected=true]")?.getAttribute("data-row") === "1"));
 
