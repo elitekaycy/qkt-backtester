@@ -2,15 +2,112 @@ name: check
 on:
   push: { branches: [main] }
   pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: npm i -g pnpm@latest
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 12.5.1 }            # same pnpm as the Dockerfile (PNPM_VERSION)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r build
-      # Tests that need a real qkt binary and data store skip themselves when they are absent.
+      - run: pnpm -r build                   # includes the web type check
+      # Tests that need a real qkt binary and a market data store skip themselves here; the image job below runs the engine.
       - run: pnpm -r test
+
+  # The published way to run the studio: build the image, start it on an empty workspace and empty data (synthetic demo), and
+  # prove a run works, is cached, is deterministic, matches an independent reimplementation, and is what the UI displays.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: qkt-backtester:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: first run on an empty workspace and empty data
+        run: |
+          mkdir -p ws
+          docker run -d --name studio -p 127.0.0.1:8080:8080 -v "$PWD/ws:/workspace" qkt-backtester:ci
+          scripts/docker-smoke.sh http://127.0.0.1:8080
+          test "$(stat -c %u ws/qkt.config.yaml)" = "$(id -u)"   # files the studio creates belong to the host user
+      - name: strategies that exercise brackets, rule exits and a portfolio
+        run: |
+          cat > ws/strategies/brk.qkt <<'EOF'
+          STRATEGY brk VERSION 1
+
+          SYMBOLS
+              px = BACKTEST:DEMOUSD EVERY 15m
+
+          RULES
+              WHEN ema(px.close, 9) CROSSES ABOVE ema(px.close, 21)
+               AND POSITION.px = 0
+              THEN BUY px SIZING 10
+                  BRACKET { STOP_LOSS BY 0.4 PCT, TAKE_PROFIT BY 0.8 PCT }
+
+              WHEN ema(px.close, 9) CROSSES BELOW ema(px.close, 21)
+               AND POSITION.px > 0
+              THEN CLOSE px
+          EOF
+          cat > ws/strategies/fade.qkt <<'EOF'
+          STRATEGY fade VERSION 1
+
+          SYMBOLS
+              px = BACKTEST:DEMOUSD EVERY 15m
+
+          RULES
+              WHEN rsi(px.close, 14) > 70
+               AND POSITION.px = 0
+              THEN SELL px SIZING 10
+                  BRACKET { STOP_LOSS BY 0.5 PCT, TAKE_PROFIT BY 0.5 PCT }
+          EOF
+          cat > ws/strategies/book.qkt <<'EOF'
+          PORTFOLIO book VERSION 1
+
+          IMPORT 'brk.qkt' AS brk
+          IMPORT 'fade.qkt' AS fade
+
+          RULES
+              RUN brk
+              RUN fade
+          EOF
+          sed -i 's/^          //' ws/strategies/brk.qkt ws/strategies/fade.qkt ws/strategies/book.qkt
+      - name: numbers match an independent reimplementation, and repeat byte for byte
+        run: |
+          B=http://127.0.0.1:8080
+          scripts/accuracy-check.py $B strategies/ema_cross.qkt 2024-01-01 2024-03-30 draft "" 3
+          scripts/accuracy-check.py $B strategies/brk.qkt 2024-01-01 2024-03-30 draft "" 2
+          scripts/accuracy-check.py $B strategies/book.qkt 2024-01-01 2024-03-30 draft
+          scripts/accuracy-check.py $B strategies/brk.qkt 2024-01-02 2024-01-20 full "" 2
+          scripts/accuracy-check.py $B strategies/brk.qkt 2024-01-01 2024-03-30 draft '{"positionMode":"netting"}'
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 12.5.1 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: pnpm }
+      - name: the UI shows exactly those numbers
+        run: |
+          pnpm install --frozen-lockfile --filter @qkt-studio/web...
+          BASE=http://127.0.0.1:8080/ STRATEGY=strategies/brk.qkt FROM=2024-01-01 TO=2024-03-30 OPTIONS='{}' node scripts/display-truth.e2e.mjs
+          BASE=http://127.0.0.1:8080/ STRATEGY=strategies/book.qkt FROM=2024-01-01 TO=2024-03-30 OPTIONS='{}' node scripts/display-truth.e2e.mjs
+      - name: token mode stays healthy
+        run: |
+          mkdir -p ws2
+          docker run -d --name studio-token -e STUDIO_TOKEN=ci -v "$PWD/ws2:/workspace" qkt-backtester:ci
+          for i in $(seq 1 30); do s=$(docker inspect -f '{{.State.Health.Status}}' studio-token); [ "$s" = healthy ] && break; sleep 2; done
+          test "$s" = healthy
+      - name: container logs
+        if: always()
+        run: docker logs studio; docker logs studio-token || true
