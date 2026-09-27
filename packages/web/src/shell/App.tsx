@@ -123,6 +123,7 @@ function Shell() {
   return (
     <div className="app" data-maxed={maxed ?? undefined}>
       <a className="skip-link" href="#editor">Skip to the editor</a>
+      <header className="sr-only"><h1>qkt backtester</h1></header>
       <div className="body" ref={bodyRef}>
         <Rail />
         {showSide && (
@@ -132,7 +133,7 @@ function Shell() {
               {ui.section === "files" ? <FilesSection /> : ui.section === "data" ? <DataSection /> : <RunsSection />}
             </aside>
             {maxed !== "sidebar" && (
-              <div style={{ width: 0, position: "relative", flex: "none" }}>
+              <div role="region" aria-label="Sidebar resize handle" style={{ width: 0, position: "relative", flex: "none" }}>
                 <div className="side-split">
                   <Splitter dir="v" label="Resize sidebar" value={sideW} min={MIN_SIDE} max={sideMax} onChange={(v) => ui.set({ sidebarW: v })} onReset={() => ui.resetPane("sidebar")} />
                 </div>

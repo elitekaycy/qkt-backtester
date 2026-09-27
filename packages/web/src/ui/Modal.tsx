@@ -27,9 +27,9 @@ export function Modal({ open, onClose, title, children, footer, width }: { open:
   return createPortal(
     <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={ref} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} style={width ? { width: `min(${width}px, calc(100vw - 32px))` } : undefined}>
-        <header><h2 id={titleId}>{title}</h2><button className="btn ghost icon sm close" aria-label="Close" onClick={onClose}><X size={16} /></button></header>
+        <div className="modal-head"><h2 id={titleId}>{title}</h2><button className="btn ghost icon sm close" aria-label="Close" onClick={onClose}><X size={16} /></button></div>
         <div className="content">{children}</div>
-        {footer && <footer>{footer}</footer>}
+        {footer && <div className="modal-foot" role="group" aria-label="Dialog actions">{footer}</div>}
       </div>
     </div>, document.body);
 }

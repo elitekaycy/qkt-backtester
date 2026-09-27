@@ -285,7 +285,7 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
   const inChartTab = prefs.tab === "chart";
 
   return (
-    <div className={`chart-body${resultsStale ? " dim" : ""}`} tabIndex={0} role="region" aria-label="Chart" onKeyDown={onKey}>
+    <div className={`chart-body${resultsStale ? " dim" : ""}`} tabIndex={0} role="region" aria-label="Candlestick chart with trades" onKeyDown={onKey}>
       <ChartToolbar
         streams={sorted} hidden={prefs.hidden} layout={prefs.layout} follow={prefs.follow} tab={prefs.tab} addable={addable} extra={extra}
         activeKey={active ? keyOf(active) : null} count={rows.length} total={trips.total} index={idx} truncated={trips.truncated}
