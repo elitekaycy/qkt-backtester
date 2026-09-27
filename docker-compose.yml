@@ -4,8 +4,7 @@ services:
   studio:
     build: { context: ., dockerfile: docker/Dockerfile }
     image: qkt-backtester:local
-    # Run as the owner of the mounted folders so files you edit here stay yours. `export UID GID` first on bash.
-    user: "${UID:-1000}:${GID:-1000}"
+    # The entrypoint drops to the owner of ./workspace (or PUID:PGID when Docker had to create it).
     ports: ["127.0.0.1:8080:8080"]
     volumes:
       - ./workspace:/workspace
@@ -13,4 +12,6 @@ services:
     environment:
       STUDIO_TOKEN: ${STUDIO_TOKEN:-}     # set to require a token and enable the full-shell terminal when exposed beyond localhost
       QKT_DEMO: ${QKT_DEMO:-1}            # 0 disables the synthetic demo data seeding
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
     restart: unless-stopped

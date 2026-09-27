@@ -75,7 +75,11 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
   app.get("/api/health", async () => ({ ok: true }));
 
   if (cfg.webRoot && existsSync(cfg.webRoot)) {
-    await app.register(fastifyStatic, { root: cfg.webRoot, index: ["index.html"] });
+    await app.register(fastifyStatic, {
+      root: cfg.webRoot, index: ["index.html"], preCompressed: true, cacheControl: false,
+      // hashed build output never changes under the same name; index.html must always be revalidated
+      setHeaders: (res, file) => res.setHeader("Cache-Control", file.includes(`${path.sep}assets${path.sep}`) ? "public, max-age=31536000, immutable" : "no-cache"),
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith("/api") || req.url.startsWith("/ws")) return reply.code(404).send({ error: "not found" });
       return reply.sendFile("index.html", path.resolve(cfg.webRoot!));
