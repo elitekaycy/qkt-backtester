@@ -3,18 +3,20 @@ import { useStore } from "../state/store.js";
 import { useUi, type JournalSection } from "../state/ui.js";
 import { Tip } from "../ui/Tip.js";
 import { fmtNum } from "../util/format.js";
-import { Calendar, CalendarDays, ChartColumn, Clock, Dices, GitCompare, LayoutGrid, ListChecks, Maximize2, Minimize2, Play, X } from "../ui/icons.js";
+import { Calendar, CalendarDays, ChartColumn, Clock, Dices, GitCompare, LayoutGrid, Layers, ListChecks, Maximize2, Minimize2, Play, X } from "../ui/icons.js";
 import { CalendarView, DailyView, MonthlyView } from "./Calendar.js";
 import { Compare } from "./Compare.js";
 import { FilterBar } from "./FilterBar.js";
 import { Lab } from "./Lab.js";
 import { Overview } from "./Overview.js";
+import { Strategies } from "./Strategies.js";
 import { TimeRisk } from "./TimeRisk.js";
 import { TradesView } from "./TradesView.js";
 import { AnalyticsProvider } from "./useAnalytics.js";
 
 const NAV: Array<{ id: JournalSection; label: string; icon: typeof ChartColumn; filters: boolean; hint: string }> = [
   { id: "overview", label: "Overview", icon: LayoutGrid, filters: true, hint: "The headline numbers and how the equity got there" },
+  { id: "strategies", label: "Strategies", icon: Layers, filters: true, hint: "Contribution, equity and risk per strategy" },
   { id: "calendar", label: "Calendar", icon: CalendarDays, filters: true, hint: "Every day's P&L, week by week" },
   { id: "daily", label: "Daily", icon: Calendar, filters: true, hint: "P&L per trading day" },
   { id: "monthly", label: "Monthly", icon: ChartColumn, filters: true, hint: "P&L, trades and win rate per month" },
@@ -24,7 +26,7 @@ const NAV: Array<{ id: JournalSection; label: string; icon: typeof ChartColumn; 
   { id: "compare", label: "Compare", icon: GitCompare, filters: false, hint: "Runs side by side" },
 ];
 
-const Body = ({ id }: { id: JournalSection }) => id === "overview" ? <Overview /> : id === "calendar" ? <CalendarView /> : id === "daily" ? <DailyView /> : id === "monthly" ? <MonthlyView /> : id === "trades" ? <TradesView /> : id === "time" ? <TimeRisk /> : id === "lab" ? <Lab /> : <Compare />;
+const Body = ({ id }: { id: JournalSection }) => id === "overview" ? <Overview /> : id === "strategies" ? <Strategies /> : id === "calendar" ? <CalendarView /> : id === "daily" ? <DailyView /> : id === "monthly" ? <MonthlyView /> : id === "trades" ? <TradesView /> : id === "time" ? <TimeRisk /> : id === "lab" ? <Lab /> : <Compare />;
 
 /** The trading journal: a resizable slide-over with its own menu. Everything inside reacts to the shared filters. */
 export function Journal({ containerWidth }: { containerWidth: number }) {
@@ -33,7 +35,9 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
   const startRun = useStore((s) => s.startRun);
   const opener = useRef<HTMLElement | null>(null);
   const navRef = useRef<HTMLDivElement>(null);
-  const sec = NAV.find((n) => n.id === ui.journalSection) ?? NAV[0]!;
+  const multi = (results?.meta.strategies.length ?? 0) > 1;
+  const nav = NAV.filter((n) => n.id !== "strategies" || multi);
+  const sec = nav.find((n) => n.id === ui.journalSection) ?? nav[0]!;
   const width = ui.journalMax ? containerWidth : Math.min(containerWidth, Math.max(720, ui.journalW || Math.round(containerWidth * 0.74)));
 
   const drawer = useRef<HTMLElement>(null);
@@ -73,7 +77,7 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
           onKeyDown={(e) => { if (e.key === "ArrowLeft") ui.set({ journalMax: false, journalW: Math.min(containerWidth, width + 48) }); else if (e.key === "ArrowRight") ui.set({ journalMax: false, journalW: Math.max(720, width - 48) }); }} />
         <nav className="jnav" aria-label="Journal sections" ref={navRef}>
           <h2><ChartColumn size={20} color="var(--accent-ink)" /><span>Journal</span></h2>
-          {NAV.map((n) => { const Icon = n.icon; return (
+          {nav.map((n) => { const Icon = n.icon; return (
             <button key={n.id} className="jnav-btn" title={n.label} aria-label={n.label} aria-current={n.id === ui.journalSection ? "page" : undefined} onClick={() => ui.set({ journalSection: n.id })}><Icon size={17} strokeWidth={1.75} /><span>{n.label}</span></button>
           ); })}
           <div className="foot">{results ? <>{results.summary.trades} trades · {fmtNum(results.summary.fills, 0)} fills<br />{results.meta.tier === "full" ? "Ticks" : "Bars"} · {results.meta.from} → {results.meta.to}</> : "No run loaded"}</div>
