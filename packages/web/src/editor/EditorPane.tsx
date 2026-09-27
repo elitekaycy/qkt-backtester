@@ -173,23 +173,36 @@ export function EditorPane() {
   }
 
   const onTabKey = (e: React.KeyboardEvent, i: number) => {
-    const move = (j: number) => { const f = openFiles[(j + openFiles.length) % openFiles.length]; if (f) { store.getState().setActive(f.path); (e.currentTarget.parentElement?.children[(j + openFiles.length) % openFiles.length] as HTMLElement | undefined)?.focus(); } };
+    // currentTarget is the inner .tab-btn; its parent is the .tab wrapper, whose parent is the .tabs row
+    const move = (j: number) => {
+      const f = openFiles[(j + openFiles.length) % openFiles.length];
+      if (!f) return;
+      store.getState().setActive(f.path);
+      const wrapper = e.currentTarget.parentElement?.parentElement?.children[(j + openFiles.length) % openFiles.length] as HTMLElement | undefined;
+      wrapper?.querySelector<HTMLElement>(".tab-btn")?.focus();
+    };
     if (e.key === "ArrowRight") { e.preventDefault(); move(i + 1); } else if (e.key === "ArrowLeft") { e.preventDefault(); move(i - 1); }
   };
 
   return (
     <>
       <div className="tabs-row">
-      <div className="tabs" role="tablist" aria-label="Open files">
+      {/* Not role=tablist: each open file also carries a close button, and ARIA's tablist requires every direct (and
+          flattened-presentational) child to be a tab, which a close button can never satisfy. A labelled group of
+          toggle buttons, one current, is the accessible shape that actually matches what is on screen here. */}
+      <div className="tabs" role="group" aria-label="Open files">
         {openFiles.map((f, i) => (
-          <div key={f.path} role="tab" tabIndex={f.path === activePath ? 0 : -1} aria-selected={f.path === activePath} className={`tab${dragOver === f.path ? " dragover" : ""}`} title={f.path} draggable
-            onClick={() => store.getState().setActive(f.path)} onKeyDown={(e) => onTabKey(e, i)}
+          <div key={f.path} className={`tab${dragOver === f.path ? " dragover" : ""}${f.path === activePath ? " active" : ""}`} title={f.path} draggable
             onAuxClick={(e) => { if (e.button === 1) store.getState().closeFile(f.path); }}
             onDragStart={(e) => { e.dataTransfer.setData("text/plain", f.path); e.dataTransfer.effectAllowed = "move"; }}
             onDragOver={(e) => { e.preventDefault(); setDragOver(f.path); }} onDragLeave={() => setDragOver(null)}
             onDrop={(e) => { e.preventDefault(); setDragOver(null); store.getState().reorderFiles(e.dataTransfer.getData("text/plain"), f.path); }}>
-            <TabIcon path={f.path} /><span>{f.path.split("/").pop()}</span>
-            {f.conflict ? <span className="badge bad">conflict</span> : f.content !== f.saved ? <span className="unsaved" title="Unsaved changes" /> : null}
+            {/* the close button is a SIBLING of the tab button, not nested inside it: two adjacent interactive controls, not one inside the other */}
+            <button className="tab-btn" tabIndex={f.path === activePath ? 0 : -1} aria-current={f.path === activePath || undefined} aria-label={f.path.split("/").pop()}
+              onClick={() => store.getState().setActive(f.path)} onKeyDown={(e) => onTabKey(e, i)}>
+              <TabIcon path={f.path} /><span>{f.path.split("/").pop()}</span>
+              {f.conflict ? <span className="badge bad">conflict</span> : f.content !== f.saved ? <span className="unsaved" title="Unsaved changes" /> : null}
+            </button>
             <button className="x" tabIndex={-1} aria-label={`Close ${f.path}`} onClick={(e) => { e.stopPropagation(); if (f.content === f.saved || window.confirm(`Discard unsaved changes to ${f.path}?`)) store.getState().closeFile(f.path); }}><X size={13} /></button>
           </div>
         ))}
