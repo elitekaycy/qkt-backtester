@@ -19,7 +19,7 @@ const DAY_TEXT: Record<string, string> = { o: "ok", c: "closed", t: "thin", m: "
 interface Series { key: string; label: string; kind: string; r: TfReport | TickReport; isTicks: boolean }
 const seriesOf = (rep: SymbolReport | null): Series[] => !rep ? [] : [
   ...(rep.ticks ? [{ key: "ticks", label: "Ticks", kind: "ticks", r: rep.ticks, isTicks: true }] : []),
-  ...rep.bars.filter((b) => b.files > 0).map((b) => ({ key: `${b.broker}:${b.tf}`, label: `${b.tf} bars`, kind: `${b.broker}:${b.tf}`, r: b as TfReport | TickReport, isTicks: false })),
+  ...rep.bars.filter((b) => b.files > 0).map((b) => ({ key: `${b.broker}:${b.tf}`, label: b.qktReads ? `${b.tf} bars (not read by qkt: expects ${b.qktReads})` : `${b.tf} bars`, kind: `${b.broker}:${b.tf}`, r: b as TfReport | TickReport, isTicks: false })),
 ];
 
 /** Calendar heat-map of one series: a small month grid per year, missing days in red, click a day to start a range there. */

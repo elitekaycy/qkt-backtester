@@ -21,6 +21,39 @@ export interface StrategyInfo {
 
 const STREAM = /^\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z0-9_]+):([A-Za-z0-9_.\-]+)\s+EVERY\s+(\d+[smhdw])(?:\s+WARMUP\s+(\d+)\s+BARS)?/;
 
+const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+/**
+ * qkt's own name for a timeframe (TimeWindow.canonicalSpec): the duration in the largest whole unit, so `60m` is `1h` and
+ * `1440m` is `1d`. The bar store keys folders by this name, so a `1440m` folder is never read. null for a spec qkt rejects.
+ */
+export function canonicalTf(spec: string): string | null {
+  const m = /^(\d+)([smhd])$/.exec(spec.trim());
+  if (!m || +m[1]! <= 0) return null;
+  const ms = +m[1]! * UNIT_MS[m[2]!]!;
+  for (const [u, n] of [["d", 86_400_000], ["h", 3_600_000], ["m", 60_000], ["s", 1_000]] as const) if (ms % n === 0) return `${ms / n}${u}`;
+  return `${ms}ms`;
+}
+
+/** Milliseconds in a timeframe spec (`15m`, `1h`, `1d`), or null. */
+export function tfMs(spec: string): number | null {
+  const m = /^(\d+)([smhd])$/.exec(spec.trim());
+  return m && +m[1]! > 0 ? +m[1]! * UNIT_MS[m[2]!]! : null;
+}
+
+/**
+ * How many bars qkt may read before `from` to warm the indicators up. qkt seeds each stream with as many bars as its longest
+ * lookback (`WARMUP N BARS` when declared); the periods are literals or PARAMs in the source, so the largest whole number the
+ * sources and parameter values use bounds it (at least 200). Over-estimating only makes the run fingerprint stat a few more
+ * files; under-estimating would let a data change in the warmup go unnoticed by the run cache.
+ */
+export function warmupBarsEstimate(sources: string[], params: Record<string, string> = {}): number {
+  let max = 200;
+  const look = (text: string) => { for (const m of scrub(text).matchAll(/(?<![\w.])(\d{1,6})(?![\w.])/g)) max = Math.max(max, +m[1]!); };
+  for (const s of sources) look(s.split(/\r?\n/).map((l) => (/^\s*--/.test(l) ? "" : l)).join("\n"));
+  for (const v of Object.values(params)) look(v);
+  return max;
+}
+
 /** Read the declarative headers of a .qkt file: what it trades, what it can be tuned by, what it imports. */
 export function parseStrategyInfo(source: string): StrategyInfo {
   const info: StrategyInfo = { kind: "unknown", streams: [], params: [], imports: [] };
@@ -37,7 +70,8 @@ export function parseStrategyInfo(source: string): StrategyInfo {
       if (!/^\s/.test(line)) inSymbols = false;
       else {
         const m = STREAM.exec(line);
-        if (m) info.streams.push({ alias: m[1]!, broker: m[2]!, symbol: m[3]!, tf: m[4]!, warmupBars: m[5] ? +m[5] : undefined });
+        // tf as qkt resolves it (EVERY 60m reads the 1h bars), so data checks and cache keys look where qkt looks
+        if (m) info.streams.push({ alias: m[1]!, broker: m[2]!, symbol: m[3]!, tf: canonicalTf(m[4]!) ?? m[4]!, warmupBars: m[5] ? +m[5] : undefined });
         continue;
       }
     }

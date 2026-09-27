@@ -89,3 +89,21 @@ describe("calendar-aware completeness", () => {
     expect(r!.days.slice(i, i + 3)).toBe("mmo");
   });
 });
+
+import { readinessFor } from "../src/data-scan.js";
+describe("timeframe folders qkt cannot read", () => {
+  it("a 1440m folder is flagged (qkt reads 1d), never counts as available, and readiness says how to fix it", async () => {
+    const dir = path.join(store, "bars", "BACKTEST", "OILX", "1440m");
+    mkdirSync(dir, { recursive: true });
+    for (let i = 0; i < 40; i++) { const d = new Date(Date.UTC(2024, 0, 1) + i * 86_400_000); if (d.getUTCDay() % 6) writeFileSync(path.join(dir, `${d.toISOString().slice(0, 10)}.bin`), barFile("OILX", 86_400_000, 1)); }
+    const r = await scanStore(store);
+    const sym = r.symbols.find((s) => s.symbol === "OILX")!;
+    expect(sym.bars[0]!.qktReads).toBe("1d");
+    expect(sym.status).toBe("incomplete");
+    expect(sym.notes.join(" ")).toMatch(/looks for "1d"/);
+    const ready = readinessFor(r, "strategies/oil.qkt", "STRATEGY oil VERSION 1\n\nSYMBOLS\n    o = BACKTEST:OILX EVERY 1440m\n\nRULES\n    WHEN o.close > 0\n    THEN BUY o SIZING 1\n");
+    expect(ready.bars.runnable).toBe(false);
+    expect(ready.bars.blocked[0]!.reason).toMatch(/named "1440m", which qkt does not read: rename it to 1d/);
+    rmSync(path.join(store, "bars", "BACKTEST", "OILX"), { recursive: true, force: true });
+  });
+});

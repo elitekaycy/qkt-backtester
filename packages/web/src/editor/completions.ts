@@ -81,7 +81,7 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
     const every = /=\s*([A-Za-z0-9_]+):([A-Za-z0-9_.]+)\s+EVERY\s+(\w*)$/.exec(before);
     if (every) {
       const sym = scan?.symbols.find((s) => s.symbol === every[2]);
-      const have = [...new Set((sym?.bars ?? []).filter((b) => b.files > 0 && b.broker === every[1]).map((b) => b.tf))];
+      const have = [...new Set((sym?.bars ?? []).filter((b) => b.files > 0 && b.broker === every[1] && !b.qktReads).map((b) => b.tf))];
       const tfs = [...have, ...TFS.filter((t) => !have.includes(t))];
       tfs.forEach((t, i) => add({ label: t, insert: t, detail: have.includes(t) ? "bars built in your data source" : "not built in your data source", kind: "timeframe", sort: `0${String(i).padStart(2, "0")}` }));
       return out;

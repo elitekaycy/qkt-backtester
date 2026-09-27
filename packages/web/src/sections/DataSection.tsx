@@ -45,7 +45,9 @@ function SourceBlock({ label, sub, r, kind, onFill }: { label: string; sub?: str
         {kind === "bars" ? <Zap size={14} className="ficon qkt" /> : <Database size={14} className="ficon yaml" />}
         <b>{label}</b>{sub && <span className="muted">{sub}</span>}
         <span className="grow" />
-        <StatusIcon s={r.status} /><span className="ink2">{LABEL[r.status]}</span>
+        {"qktReads" in r && r.qktReads
+          ? <span className="badge bad" title={`qkt looks for these bars in a folder named ${r.qktReads}, so it never reads this one. Rename the folder to ${r.qktReads} or rebuild the bars.`}><CircleAlert size={12} />not read by qkt · expects {r.qktReads}</span>
+          : <><StatusIcon s={r.status} /><span className="ink2">{LABEL[r.status]}</span></>}
       </div>
       {r.first ? (
         <>

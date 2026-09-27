@@ -80,7 +80,7 @@ export function recomputeReadiness(r: Readiness, scan: ScanReport, prefs: Record
       const label = `${s.broker}:${s.symbol} ${s.tf}`;
       if (!sym) { blocked.push({ stream: label, reason: "symbol is not in the data source", fix: "fetch" }); continue; }
       if (kind === "bars") {
-        const tf = sym.bars.find((b) => b.broker === s.broker && b.tf === s.tf && b.files > 0);
+        const tf = sym.bars.find((b) => b.broker === s.broker && b.tf === s.tf && b.files > 0 && !b.qktReads);
         if (tf) sets.push(tf.usable);
         else blocked.push({ stream: label, reason: sym.ticks ? `no ${s.tf} bars built for ${s.broker}` : `no ${s.tf} bars for ${s.broker}`, fix: sym.ticks ? "build-bars" : "fetch" });
       } else if (sym.ticks) sets.push(sym.ticks.usable);

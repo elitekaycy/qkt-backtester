@@ -6,6 +6,7 @@ import {
 } from "@qkt-studio/core";
 import type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfReport, TickReport } from "@qkt-studio/core";
 import { barCountOf } from "./barfile.js";
+import { canonicalTf } from "@qkt-studio/core";
 import type { ResolvedStrategy } from "./portfolio.js";
 export type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfReport, TickReport } from "@qkt-studio/core";
 
@@ -127,7 +128,9 @@ function classifyDays(set: RawSet, holidays: ReadonlySet<string>, isBars: boolea
 }
 
 function reportBars(broker: string, tf: string, set: RawSet | null, holidays: ReadonlySet<string>): TfReport {
-  if (!set) return { broker, tf, files: 0, first: null, last: null, span: 0, ok: 0, closed: 0, thin: 0, missing: 0, status: "empty", usable: [], gaps: [], years: [], always: false };
+  const canon = canonicalTf(tf);
+  const qktReads = canon && canon !== tf ? { qktReads: canon } : {};
+  if (!set) return { broker, tf, files: 0, first: null, last: null, span: 0, ok: 0, closed: 0, thin: 0, missing: 0, status: "empty", usable: [], gaps: [], years: [], always: false, ...qktReads };
   const days = classifyDays(set, holidays, true);
   const tally = (s: DayStatus) => days.filter((d) => d.status === s).length;
   const flags = days.map((d) => ({ day: d.day, ok: d.status !== "missing" }));
@@ -135,7 +138,7 @@ function reportBars(broker: string, tf: string, set: RawSet | null, holidays: Re
   return {
     broker, tf, files: set.days.filter((d) => d.present).length, first: set.first, last: set.last, span: days.length,
     ok: tally("ok"), closed: tally("closed"), thin: tally("thin"), missing, status: completeness(days.length, missing),
-    usable: runsOf(flags), gaps: gapsOf(flags).slice(0, MAX_GAPS_LISTED), years: yearRows(days), always: set.always,
+    usable: runsOf(flags), gaps: gapsOf(flags).slice(0, MAX_GAPS_LISTED), years: yearRows(days), always: set.always, ...qktReads,
   };
 }
 
@@ -225,12 +228,14 @@ export async function scanStore(dataRoot: string, only?: string): Promise<ScanRe
     const ticks = t ? reportTicks(t.set, holidays, t.manifest) : null;
     const bars = rawBars.map((b) => reportBars(b.broker, b.tf, b.set, holidays));
     bars.sort((a, b) => a.broker.localeCompare(b.broker) || a.tf.localeCompare(b.tf, undefined, { numeric: true }));
-    const built = bars.filter((b) => b.files > 0);
-    const notes: string[] = [];
+    // bars in a folder qkt does not read (e.g. 1440m, which qkt calls 1d) exist on disk but can never be used
+    const unreadable = bars.filter((b) => b.files > 0 && b.qktReads);
+    const built = bars.filter((b) => b.files > 0 && !b.qktReads);
+    const notes: string[] = unreadable.map((b) => `The ${b.tf} bars (${b.broker}) are not read by qkt, which looks for "${b.qktReads}". Rename the folder bars/${b.broker}/${symbol}/${b.tf} to ${b.qktReads}, or rebuild them as ${b.qktReads}.`);
     let status: SymbolReport["status"];
     if (built.length) status = built.reduce((best, b) => (RANK[b.status] > RANK[best] ? b.status : best), "empty" as Completeness);
     else if (ticks) { status = "ticks-only"; notes.push("Ticks are present but no bars are built. Bars runs need them: use Build bars."); }
-    else status = "empty";
+    else status = unreadable.length ? "incomplete" : "empty";
     if (ticks && built.length && ticks.last && built.every((b) => b.last && b.last < ticks.last!)) notes.push("Ticks extend past the last built bar. Rebuild bars to include the newest days.");
     const market: SymbolReport["market"] = [...built, ...(ticks ? [ticks] : [])].some((x) => x.always) ? "24/7" : "Mon-Fri";
     const yrs = [...built.map((b) => b.years), ...(ticks ? [ticks.years] : [])];
@@ -287,7 +292,9 @@ export function readinessFor(report: ScanReport, strategy: string, source: strin
   const barsPick = (s: StreamDecl) => {
     const sym = bySymbol.get(s.symbol);
     if (!sym) return { blocked: "symbol is not in the data source", fix: "fetch" as const };
-    const tf = sym.bars.find((b) => b.broker === s.broker && b.tf === s.tf && b.files > 0);
+    const tf = sym.bars.find((b) => b.broker === s.broker && b.tf === s.tf && b.files > 0 && !b.qktReads);
+    const misnamed = sym.bars.find((b) => b.broker === s.broker && b.qktReads === s.tf && b.files > 0);
+    if (!tf && misnamed) return { blocked: `the ${s.tf} bars are in a folder named "${misnamed.tf}", which qkt does not read: rename it to ${s.tf}`, fix: "build-bars" as const };
     if (tf) return { ranges: tf.usable };
     return sym.ticks ? { blocked: `no ${s.tf} bars built for ${s.broker}`, fix: "build-bars" as const } : { blocked: `no ${s.tf} bars for ${s.broker}`, fix: "fetch" as const };
   };

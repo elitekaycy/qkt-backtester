@@ -71,3 +71,23 @@ describe("usesIntrabarOrders", () => {
     expect(usesIntrabarOrders("")).toBe(false);
   });
 });
+
+import { canonicalTf } from "../src/strategy.js";
+describe("canonicalTf mirrors qkt's TimeWindow.canonicalSpec", () => {
+  it("names a duration in its largest whole unit", () => {
+    expect(canonicalTf("1440m")).toBe("1d");
+    expect(canonicalTf("60m")).toBe("1h");
+    expect(canonicalTf("120m")).toBe("2h");
+    expect(canonicalTf("90m")).toBe("90m");
+    expect(canonicalTf("15m")).toBe("15m");
+    expect(canonicalTf("3600s")).toBe("1h");
+    expect(canonicalTf("24h")).toBe("1d");
+    expect(canonicalTf("1d")).toBe("1d");
+    expect(canonicalTf("0m")).toBeNull();
+    expect(canonicalTf("5w")).toBeNull(); // qkt accepts s/m/h/d only
+  });
+  it("stream timeframes are stored as qkt resolves them", () => {
+    const i = parseStrategyInfo("STRATEGY s VERSION 1\n\nSYMBOLS\n    a = BACKTEST:CL EVERY 1440m\n    b = BACKTEST:XAUUSD EVERY 60m\n\nRULES\n");
+    expect(i.streams.map((s) => s.tf)).toEqual(["1d", "1h"]);
+  });
+});

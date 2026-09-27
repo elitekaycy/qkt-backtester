@@ -15,6 +15,11 @@ export interface TfReport {
   years: YearRow[];
   /** The market trades on Saturdays (crypto): a weekend or empty day is a hole here, not a closure. */
   always: boolean;
+  /**
+   * Set when qkt cannot read this folder because it is not qkt's name for the timeframe: the name qkt looks for instead
+   * (a `1440m` folder is invisible to qkt, which reads `1d`). Such bars never count as available.
+   */
+  qktReads?: string;
 }
 
 export interface TickReport {
