@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { strategyAlias } from "@qkt-studio/core/strategy";
 import type { ExitReason, RoundTrip } from "../api/types.js";
 import { FilterBar } from "../journal/FilterBar.js";
 import { useStore } from "../state/store.js";
 import { fmtDur, fmtMoney, fmtNum, fmtPrice, fmtTs } from "../util/format.js";
+import { strategyColor } from "../util/strategyColor.js";
 
 const ROW = 27;
 const EXIT_GLYPH: Record<ExitReason, string> = { target: "◆", stop: "✕", signal: "●", open: "○" };
@@ -13,6 +15,7 @@ export function TradesTab({ rows, selectedId, onSelect, truncated, total }: { ro
   const host = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0), [h, setH] = useState(300);
   const multi = useMemo(() => new Set(rows.map((r) => r.symbol)).size > 1, [rows]);
+  const strat = useMemo(() => new Set(rows.map((r) => r.strategy)).size > 1, [rows]);
   const active = Object.values(filters).some((v) => v !== undefined);
 
   useEffect(() => {
@@ -38,12 +41,12 @@ export function TradesTab({ rows, selectedId, onSelect, truncated, total }: { ro
   );
 
   return (
-    <div className={`trades-tab${multi ? " multi" : ""}`}>
+    <div className={`trades-tab${multi ? " multi" : ""}${strat ? " strat" : ""}`}>
       <div className="trades-filters">
         <FilterBar compact count={{ shown: rows.length, total: truncated ? total : rows.length }} />
       </div>
       <div className="trades-head" role="row">
-        <span>#</span><span>Side</span>{multi && <span>Symbol</span>}<span>Entry (UTC)</span><span className="r" title="Position size in lots">Size</span><span className="r" title="Money at stake at entry: distance to the stop × size">Risk</span><span className="r">Entry px</span><span className="r">Exit px</span><span className="r">Held</span><span>Exit</span><span className="r">P&amp;L</span><span className="r">R</span>
+        <span>#</span><span>Side</span>{multi && <span>Symbol</span>}{strat && <span>Strategy</span>}<span>Entry (UTC)</span><span className="r" title="Position size in lots">Size</span><span className="r" title="Money at stake at entry: distance to the stop × size">Risk</span><span className="r">Entry px</span><span className="r">Exit px</span><span className="r">Held</span><span>Exit</span><span className="r">P&amp;L</span><span className="r">R</span>
       </div>
       {rows.length === 0 ? <div className="empty" style={{ flex: 1 }}><b>No trades match</b>{active ? "Clear the filters to see every trade." : "This run made no trades."}</div> : (
         <div className="trades-scroll" ref={host} onScroll={(e) => setTop(e.currentTarget.scrollTop)} role="grid" aria-rowcount={rows.length}>
@@ -55,6 +58,7 @@ export function TradesTab({ rows, selectedId, onSelect, truncated, total }: { ro
                   <span className="muted num">{i + 1}</span>
                   <span className={t.side}>{t.side === "long" ? "▲ Long" : "▼ Short"}</span>
                   {multi && <span className="ink2">{t.symbol.split(":").pop()}</span>}
+                  {strat && <span className="strat-tag" style={{ color: strategyColor(t.strategy) }}>{strategyAlias(t.strategy)}</span>}
                   <span className="num">{fmtTs(t.entryTs)}</span>
                   <span className="r num">{fmtNum(t.qty, 2)}</span>
                   <span className={`r num${t.risk === undefined ? " muted" : ""}`} title={t.risk === undefined ? "No stop was set on this entry, so its risk is not measured" : undefined}>{t.risk === undefined ? "no stop" : fmtMoney(t.risk).replace("+", "")}</span>

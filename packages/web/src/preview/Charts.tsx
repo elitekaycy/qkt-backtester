@@ -9,7 +9,10 @@ import { useStore } from "../state/store.js";
 import { Maximize2, Minimize2 } from "../ui/icons.js";
 import { Tip } from "../ui/Tip.js";
 import { fmtDur, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
+import { strategyAlias } from "@qkt-studio/core/strategy";
+import { strategyColor } from "../util/strategyColor.js";
 import { ChartToolbar } from "./ChartToolbar.js";
+import { StrategyLegend } from "./StrategyLegend.js";
 import { TradeStrip } from "./TradeStrip.js";
 import { TradesTab } from "./TradesTab.js";
 import { firstTradesRange, type Range } from "./initialView.js";
@@ -85,6 +88,8 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
   cb.current = { onSelect };
   const sym = `${stream.broker}:${stream.symbol}`;
   const mine = useMemo(() => trips.filter((t) => t.symbol === sym || t.symbol === stream.symbol), [trips, sym, stream.symbol]);
+  // colour entry markers by strategy only when this chart actually has more than one, so a plain strategy's chart never changes
+  const stratColor = useMemo(() => (new Set(mine.map((t) => t.strategy)).size > 1 ? strategyColor : null), [mine]);
 
   useEffect(() => {
     if (!plot.current) return;
@@ -161,8 +166,8 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
   useEffect(() => {
     const p = parts.current;
     if (!p || !p.tfMs) return;
-    p.prim.set(mine, p.tfMs, selected?.id ?? null, colors(), win.to - 1);
-  }, [mine, selected?.id, ready, theme, win.to]);
+    p.prim.set(mine, p.tfMs, selected?.id ?? null, colors(), win.to - 1, stratColor);
+  }, [mine, selected?.id, ready, theme, win.to, stratColor]);
 
   useEffect(() => {
     const p = parts.current;
@@ -176,7 +181,7 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
     p.chart.applyOptions({ layout: { background: { type: ColorType.Solid, color: cssVar("--main") }, textColor: cssVar("--ink-2") }, grid: { vertLines: { color: cssVar("--grid") }, horzLines: { color: cssVar("--grid") } }, rightPriceScale: { borderColor: cssVar("--axis") }, timeScale: { borderColor: cssVar("--axis") } });
     const up = cssVar("--ck-up"), dn = cssVar("--ck-dn");
     p.series.applyOptions({ upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn });
-    p.prim.set(mine, p.tfMs || 60_000, selected?.id ?? null, colors(), win.to - 1);
+    p.prim.set(mine, p.tfMs || 60_000, selected?.id ?? null, colors(), win.to - 1, stratColor);
   }, [theme]);
 
   const t = tip?.trip;
@@ -196,7 +201,7 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
       <div ref={plot} className="plot" />
       {t && tip && (
         <div className="trade-tip" role="tooltip" style={{ left: Math.min(tip.x + 14, (plot.current?.clientWidth ?? 600) - 210), top: Math.max(30, tip.y - 8) }}>
-          <b>{t.side === "long" ? "▲ Long" : "▼ Short"} {t.symbol.split(":").pop()} · {t.qty} lots</b>
+          <b>{t.side === "long" ? "▲ Long" : "▼ Short"} {t.symbol.split(":").pop()} · {t.qty} lots{stratColor && <span style={{ color: strategyColor(t.strategy) }}> · {strategyAlias(t.strategy)}</span>}</b>
           <span>{fmtTs(t.entryTs)} → {t.open ? "open" : fmtTs(t.exitTs)}</span>
           <span>{fmtPrice(t.entryPx)} → {t.exitPx === null ? "—" : fmtPrice(t.exitPx)} · {t.open ? "open" : t.exit}</span>
           <span className={t.pnl >= 0 ? "gain" : "loss"}>{fmtMoney(t.pnl)}{t.r !== undefined ? ` · ${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}R` : ""} · held {fmtDur(t.holdMs)}</span>
@@ -289,6 +294,7 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
         onAdd={(s) => setExtra((x) => [...x, s])} onRemoveExtra={(k) => setExtra((x) => x.filter((y) => keyOf(y) !== k))}
         onPrev={() => step(-1)} onNext={() => step(1)} onFirst={goFirst} onFit={fitAll}
       />
+      {meta.strategies.length > 1 && <StrategyLegend ids={meta.strategies} />}
       <div className="chart-area" data-layout={prefs.layout} style={{ display: inChartTab ? undefined : "none" }}>
         {shown.length === 0 && <div className="empty" style={{ flex: 1 }}><b>All charts are hidden</b>Turn one on from <em>Charts</em> in the toolbar.</div>}
         {visible.map((s) => (
@@ -298,7 +304,7 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
         ))}
       </div>
       {!inChartTab && <TradesTab rows={rows} selectedId={selected?.id ?? null} onSelect={(t) => pick(t, false)} truncated={trips.truncated} total={trips.total} />}
-      <TradeStrip trip={selected} index={idx} count={rows.length} startBalance={results.equity.equity[0] ?? 0} onPrev={() => step(-1)} onNext={() => step(1)} onClose={() => selectTrip(null)} />
+      <TradeStrip trip={selected} index={idx} count={rows.length} startBalance={results.equity.equity[0] ?? 0} multi={meta.strategies.length > 1} onPrev={() => step(-1)} onNext={() => step(1)} onClose={() => selectTrip(null)} />
       <span hidden>{String(!!onOpenJournal)}</span>
     </div>
   );

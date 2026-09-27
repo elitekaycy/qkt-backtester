@@ -5,7 +5,7 @@ import { useUi } from "../state/ui.js";
 import { Menu, Popover, type MenuEntry } from "../ui/Popover.js";
 import { Tip } from "../ui/Tip.js";
 import { addDays, daysBetween, fmtDur } from "../util/format.js";
-import { CalendarDays, ChevronDown, ChevronRight, CircleAlert, CircleCheck, OctagonX, Play, Search, SlidersHorizontal, TriangleAlert, Zap, Database } from "../ui/icons.js";
+import { CalendarDays, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Layers, OctagonX, Play, Search, SlidersHorizontal, TriangleAlert, Zap, Database } from "../ui/icons.js";
 import { RunSettings } from "./RunSettings.js";
 
 const fmtChip = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -78,6 +78,11 @@ export function TopBar() {
         {parts.length > 1 && <><span className="hide-md">{parts.slice(0, -1).join(" / ")}</span><ChevronRight size={14} className="hide-md" /></>}
         <b title={strategy ?? ""}>{parts[parts.length - 1] || "No strategy open"}</b>
         {file && file.content !== file.saved && <span className="dot" title="Unsaved changes" style={{ background: "var(--ink-2)" }} />}
+        {ready?.kind === "portfolio" && (
+          <Tip label={`Portfolio of ${ready.members?.length ?? 0} strategies: ${ready.members?.map((m) => m.alias).join(", ")}`} side="bottom">
+            <span className="badge hide-md" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Layers size={12} />{ready.members?.length ?? 0} strategies</span>
+          </Tip>
+        )}
       </div>
 
       <div className="seg" role="group" aria-label="Data used to run">

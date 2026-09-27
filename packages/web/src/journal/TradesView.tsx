@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { strategyAlias } from "@qkt-studio/core/strategy";
 import { api } from "../api/client.js";
 import type { RoundTrip, TripQuery } from "../api/types.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { DASH, fmtDur, fmtMoney, fmtNum, fmtPrice, fmtTs, glyph } from "../util/format.js";
 import { ArrowUpRight } from "../ui/icons.js";
+import { strategyColor } from "../util/strategyColor.js";
 import { useAnalytics } from "./useAnalytics.js";
 import { SignedBars, Widget } from "./widgets.js";
 
 const ROW = 34, PAGE = 200, OVERSCAN = 6;
 type SortKey = NonNullable<TripQuery["sort"]>;
-const COLS: Array<{ key: string; label: string; w: string; sort?: SortKey; right?: boolean }> = [
+const BASE_COLS: Array<{ key: string; label: string; w: string; sort?: SortKey; right?: boolean }> = [
   { key: "id", label: "#", w: "52px", right: true }, { key: "symbol", label: "Symbol", w: "112px" }, { key: "side", label: "Side", w: "82px" },
   { key: "entry", label: "Entry (UTC)", w: "144px", sort: "entryTs" }, { key: "entryPx", label: "Entry", w: "88px", right: true },
   { key: "exit", label: "Exit (UTC)", w: "144px", sort: "exitTs" }, { key: "exitPx", label: "Exit", w: "88px", right: true },
@@ -18,14 +20,18 @@ const COLS: Array<{ key: string; label: string; w: string; sort?: SortKey; right
   { key: "how", label: "Ended by", w: "92px" }, { key: "r", label: "R", w: "64px", right: true },
   { key: "pnl", label: "P&L", w: "108px", sort: "pnl", right: true }, { key: "hold", label: "Held", w: "84px", sort: "holdMs", right: true },
 ];
-const TEMPLATE = COLS.map((c) => c.w).join(" ");
+/** A portfolio run (more than one strategy) inserts a Strategy column right after Symbol; a plain run's columns are untouched. */
+const STRAT_COL: (typeof BASE_COLS)[number] = { key: "strategy", label: "Strategy", w: "96px" };
+const colsFor = (strat: boolean) => (strat ? [BASE_COLS[0]!, BASE_COLS[1]!, STRAT_COL, ...BASE_COLS.slice(2)] : BASE_COLS);
 const H = 3_600_000;
 
-function TradeCells({ t }: { t: RoundTrip }) {
+function TradeCells({ t, strat }: { t: RoundTrip; strat: boolean }) {
   const c = (v: React.ReactNode, right?: boolean, cls = "") => <div className={`${cls}${right ? " num" : ""} nowrap`} style={{ padding: "0 var(--s3)", overflow: "hidden", textOverflow: "ellipsis", textAlign: right ? "right" : "left" }}>{v}</div>;
   return (
     <>
-      {c(t.id, true, "muted")}{c(t.symbol.split(":").pop())}{c(t.side === "long" ? "▲ Long" : "▼ Short")}
+      {c(t.id, true, "muted")}{c(t.symbol.split(":").pop())}
+      {strat && c(<span style={{ color: strategyColor(t.strategy), fontWeight: 600 }}>{strategyAlias(t.strategy)}</span>)}
+      {c(t.side === "long" ? "▲ Long" : "▼ Short")}
       {c(fmtTs(t.entryTs), false, "mono")}{c(fmtPrice(t.entryPx), true)}{c(t.open ? <span className="badge">open</span> : fmtTs(t.exitTs), false, "mono")}{c(t.open ? DASH : fmtPrice(t.exitPx), true)}
       {c(fmtNum(t.qty, 2), true)}{c(t.risk === undefined ? <span title="No stop was set on this entry, so its risk is not measured">no stop</span> : fmtMoney(t.risk).replace("+", ""), true, t.risk === undefined ? "muted" : "")}
       {c(<span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{t.exit === "signal" ? "signal" : t.exit}</span>)}
@@ -38,6 +44,9 @@ function TradeCells({ t }: { t: RoundTrip }) {
 /** Server-paged, virtualised trade table. Rows are fetched by the page as you scroll, so a million trades cost nothing. */
 export function TradesTable() {
   const runId = useStore((s) => s.results?.runId ?? null), filters = useStore((s) => s.filters), selected = useStore((s) => s.selectedTrip), selectTrip = useStore((s) => s.selectTrip);
+  const strat = useStore((s) => (s.results?.meta.strategies.length ?? 0) > 1);
+  const cols = useMemo(() => colsFor(strat), [strat]);
+  const template = useMemo(() => cols.map((c) => c.w).join(" "), [cols]);
   const ui = useUi();
   const [sort, setSort] = useState<SortKey>("entryTs"), [dir, setDir] = useState<"asc" | "desc">("desc");
   const [total, setTotal] = useState(0), [, tick] = useState(0), [err, setErr] = useState<string | null>(null);
@@ -64,9 +73,9 @@ export function TradesTable() {
     <Widget title="Trades" className="flush" right={<>
       {selected && <button className="btn sm primary" onClick={() => { selectTrip(selected, true); ui.set({ journalOpen: false }); }}><ArrowUpRight size={14} />Show #{selected.id} on the chart</button>}
       <span className="muted">{total.toLocaleString()} round trips · one row per entry-to-exit</span></>} style={{ padding: 0 }}>
-      <div style={{ overflowX: "auto" }}><div style={{ minWidth: 1220 }}>
-      <div style={{ display: "grid", gridTemplateColumns: TEMPLATE, borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", background: "var(--card)", paddingRight: 10 }} role="row">
-        {COLS.map((c) => (
+      <div style={{ overflowX: "auto" }}><div style={{ minWidth: strat ? 1316 : 1220 }}>
+      <div style={{ display: "grid", gridTemplateColumns: template, borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", background: "var(--card)", paddingRight: 10 }} role="row">
+        {cols.map((c) => (
           <div key={c.key} role="columnheader" aria-sort={c.sort === sort ? (dir === "asc" ? "ascending" : "descending") : undefined} tabIndex={c.sort ? 0 : undefined}
             style={{ padding: "8px var(--s3)", textAlign: c.right ? "right" : "left", cursor: c.sort ? "pointer" : "default", color: "var(--ink-3)", fontSize: "var(--fs-xs)", textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 500, userSelect: "none" }}
             onClick={() => { if (!c.sort) return; if (sort === c.sort) setDir(dir === "asc" ? "desc" : "asc"); else { setSort(c.sort); setDir("desc"); } }}
@@ -80,7 +89,7 @@ export function TradesTable() {
         {total === 0 && !err && <div className="empty">No trades match these filters.</div>}
         <div style={{ height: total * ROW, position: "relative" }}>
           {rows.map(([i, t]) => (
-            <div key={i} className="vrow" role="row" data-row={i} tabIndex={i === first || (!!t && selected?.id === t.id) ? 0 : -1} aria-selected={!!t && selected?.id === t.id} style={{ top: i * ROW, height: ROW, gridTemplateColumns: TEMPLATE }} onClick={() => t && selectTrip(t, false)} onDoubleClick={() => { if (t) { selectTrip(t, true); ui.set({ journalOpen: false }); } }}
+            <div key={i} className="vrow" role="row" data-row={i} tabIndex={i === first || (!!t && selected?.id === t.id) ? 0 : -1} aria-selected={!!t && selected?.id === t.id} style={{ top: i * ROW, height: ROW, gridTemplateColumns: template }} onClick={() => t && selectTrip(t, false)} onDoubleClick={() => { if (t) { selectTrip(t, true); ui.set({ journalOpen: false }); } }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && t) { e.preventDefault(); selectTrip(t, true); ui.set({ journalOpen: false }); }
                 else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -91,7 +100,7 @@ export function TradesTable() {
                   requestAnimationFrame(() => el?.querySelector<HTMLElement>(`[data-row="${n}"]`)?.focus({ preventScroll: true }));
                 }
               }}>
-              {t ? <TradeCells t={t} /> : <div style={{ gridColumn: "1 / -1", padding: "0 var(--s3)" }} className="muted">…</div>}
+              {t ? <TradeCells t={t} strat={strat} /> : <div style={{ gridColumn: "1 / -1", padding: "0 var(--s3)" }} className="muted">…</div>}
             </div>
           ))}
         </div>
