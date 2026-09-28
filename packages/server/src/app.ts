@@ -38,6 +38,15 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
   //    always send Origin there, so a random web page can never open the terminal or submit a run);
   //  - without a token, only a loopback Host (or one listed in STUDIO_ALLOWED_HOSTS) is served, so DNS rebinding cannot turn an
   //    attacker's page into "same origin".
+  // Browser hardening on every response: no framing (clickjacking), no MIME sniffing, no referrer leaks, and a CSP that only
+  // runs the studio's own bundle (Monaco injects <style> tags and runs its worker from a same-origin file or blob).
+  const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; " +
+    "worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+  app.addHook("onSend", async (_req, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff").header("X-Frame-Options", "DENY").header("Referrer-Policy", "no-referrer").header("Content-Security-Policy", CSP);
+    return payload;
+  });
+
   app.addHook("onRequest", async (req, reply) => {
     const url = req.url;
     if (!url.startsWith("/api") && !url.startsWith("/ws")) return;

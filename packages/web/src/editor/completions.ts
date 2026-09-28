@@ -1,6 +1,7 @@
 import { STREAM_FIELDS } from "@qkt-studio/core/lint";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import type { ScanReport } from "../api/types.js";
+import { declSnippets, fileSnippets, orderSnippets, ruleSnippets, streamSnippet, type Snippet } from "./snippets.js";
 
 /**
  * Completions the studio adds to qkt's own. qkt's language server answers with the same ~250 keywords and functions
@@ -8,7 +9,7 @@ import type { ScanReport } from "../api/types.js";
  * ones come from here and are sorted first: stream fields, stream aliases, the symbols and timeframes in the data
  * source, sizing and bracket forms.
  */
-export interface LocalItem { label: string; insert: string; detail: string; doc?: string; kind: "field" | "alias" | "symbol" | "timeframe" | "keyword" | "snippet"; sort: string; snippet?: boolean }
+export interface LocalItem { label: string; insert: string; detail: string; doc?: string; kind: "field" | "alias" | "symbol" | "timeframe" | "keyword" | "snippet"; sort: string; snippet?: boolean; /** What typing matches against (defaults to the label). */ filter?: string }
 
 const FIELD_DOC: Record<string, string> = {
   close: "Close of the latest completed bar", open: "Open of the latest completed bar", high: "High of the latest completed bar", low: "Low of the latest completed bar",
@@ -45,6 +46,19 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
   const aliases = [...new Set(info.streams.map((s) => s.alias))];
   const out: LocalItem[] = [];
   const add = (i: Omit<LocalItem, "sort"> & { sort?: string }) => out.push({ sort: "0", ...i });
+  const addSnippets = (xs: Snippet[], from = 0) => xs.forEach((x, i) => add({ label: x.label, insert: x.body, detail: x.detail, kind: "snippet", sort: `0${String(from + i).padStart(2, "0")}`, snippet: true, filter: x.filter }));
+  const lineStart = /^\s*\w*$/.test(before);
+  const lines = text.split(/\r?\n/);
+
+  // an empty file: the whole thing, from the data source
+  if (info.kind === "unknown" && lineStart && lines.slice(0, line - 1).every((l) => /^\s*(#.*)?$/.test(l))) { addSnippets(fileSnippets(scan)); return out; }
+  // before RULES, at the left margin: PARAM and LET (qkt refuses them inside RULES)
+  const rulesAbove = lines.slice(0, line - 1).some((l) => /^RULES\b/.test(l));
+  if (info.kind === "strategy" && section !== "rules" && !rulesAbove && /^\w*$/.test(before) && lines.slice(0, line - 1).some((l) => /^SYMBOLS\b/.test(l))) {
+    addSnippets(declSnippets(aliases[0] ?? "px"));
+    ["RULES", "PARAM", "LET"].forEach((k, i) => add({ label: k, insert: k === "RULES" ? "RULES\n    " : `${k} `, detail: k === "RULES" ? "Start the rules" : "", kind: "keyword", sort: `1${i}` }));
+    return out;
+  }
 
   // a portfolio's own vocabulary: IMPORT '<path>' and RUN <alias>
   if (info.kind === "portfolio") {
@@ -78,6 +92,7 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
 
   // SYMBOLS:  alias = BROKER:SYMBOL EVERY tf
   if (section === "symbols") {
+    if (/^\s+\w*$/.test(before)) { addSnippets([streamSnippet(scan)]); return out; }
     const every = /=\s*([A-Za-z0-9_]+):([A-Za-z0-9_.]+)\s+EVERY\s+(\w*)$/.exec(before);
     if (every) {
       const sym = scan?.symbols.find((s) => s.symbol === every[2]);
@@ -112,18 +127,32 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
   const thenNow = /(^|\s)THEN$/.test(stem) || /;$/.test(stem);
   if (thenNow) {
     ACTIONS.forEach(([a, d], i) => add({ label: a, insert: a, detail: d, kind: "keyword", sort: `0${i}` }));
+    addSnippets(orderSnippets(aliases), ACTIONS.length);
     return out;
   }
-  const act = /\b(BUY|SELL|CLOSE)$/.exec(stem);
+  if (section === "rules" && lineStart && info.kind === "strategy") {
+    const prev = [...lines.slice(0, line - 1)].reverse().find((l) => l.trim() !== "") ?? "";
+    const openWhen = /\bWHEN\b/.test(block) && !/\bTHEN\b/.test(block);
+    if (openWhen) {
+      [["THEN", "What to do when the condition holds"], ["AND", "Another condition that must also hold"], ["OR", "An alternative condition"]].forEach(([k, d], i) => add({ label: k!, insert: `${k} `, detail: d!, kind: "keyword", sort: `0${i}` }));
+      return out;
+    }
+    if (/^RULES\b/.test(prev) || lines[line - 2]?.trim() === "") {
+      add({ label: "WHEN", insert: "WHEN ", detail: "Start a rule", kind: "keyword", sort: "00" });
+      addSnippets(ruleSnippets(aliases), 1);
+      return out;
+    }
+  }
+  const act = /\b(BUY|SELL|CLOSE|CANCEL)$/.exec(stem);
   if (act && act[1] !== "CLOSE") { aliases.forEach((a, i) => add({ label: a, insert: a, detail: `${a}: ${info.streams.find((s) => s.alias === a)?.symbol ?? ""}`, kind: "alias", sort: `0${i}` })); return out; }
-  if (act) { aliases.forEach((a, i) => add({ label: a, insert: a, detail: `Close ${a}`, kind: "alias", sort: `0${i}` })); return out; }
+  if (act) { aliases.forEach((a, i) => add({ label: a, insert: a, detail: `${act[1] === "CANCEL" ? "Cancel the pending orders of" : "Close"} ${a}`, kind: "alias", sort: `0${i}` })); return out; }
   if (/\b(BUY|SELL)\s+\w+$/.test(stem)) {
     add({ label: "SIZING", insert: "SIZING ", detail: "Order size", kind: "keyword", sort: "00" });
     return out;
   }
   if (/\bSIZING$/.test(stem)) {
     add({ label: "0.1", insert: "0.1", detail: "0.1 lots", kind: "snippet", sort: "00" });
-    add({ label: "0.5 PCT RISK", insert: "0.5 PCT RISK", detail: "Size so a stop-out loses 0.5% of equity (needs a BRACKET)", kind: "snippet", sort: "01" });
+    add({ label: "0.5 PCT RISK", insert: "0.5 PCT RISK", detail: "Size so a stop-out loses 0.5% of equity: needs a BRACKET with a STOP_LOSS", kind: "snippet", sort: "01" });
     add({ label: "1 PCT OF EQUITY", insert: "1 PCT OF EQUITY", detail: "1% of equity as position value", kind: "snippet", sort: "02" });
     return out;
   }
