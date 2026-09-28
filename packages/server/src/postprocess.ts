@@ -12,9 +12,10 @@ export const STUDIO_VERSION = "0.1.0";
  * Bump when a derived value changes meaning (2: exit reasons read from the closing order's class; trip-based loss streak;
  * 3: each stream's bar base, so charts and checks read the bars qkt read; 4: the account currency money is reported in;
  * 5: the orders qkt rejected, summarised by reason; 6: no Sharpe/Sortino/Calmar for a blown account;
- * 7: a tick run's charts read the dividing bar folder that covers the window best).
+ * 7: a tick run's charts read the dividing bar folder that covers the window best; 8: an aggregated chart drops the
+ * final candle qkt never closed).
  */
-export const DERIVED_VERSION = 7;
+export const DERIVED_VERSION = 8;
 /** Above this many fills the round-trip file is too large to page from memory. */
 export const MAX_FILLS = 2_000_000;
 

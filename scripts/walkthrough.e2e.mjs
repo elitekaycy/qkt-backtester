@@ -63,6 +63,10 @@ async function verify(run, label, streams) {
     ok(`${label}: chart "${c.cap.slice(0, 22).trim()}" marks all ${trips.total} trades`, shown === trips.total, `chart says ${shown}`);
   }
   ok(`${label}: chart streams are the run's streams`, meta.streams.length === streams, JSON.stringify(meta.streams.map((x) => x.key)));
+  // the studio's own cross-checks (P&L reconciles, chart candles = qkt's candles, fills inside bars, checksums) all pass
+  const ig = await api(`/api/runs/${run.id}/derived/integrity`);
+  const badge = await p.evaluate(() => [...document.querySelectorAll("section[aria-label='Chart'] .pane-head .badge")].map((b) => b.textContent).join(" | "));
+  ok(`${label}: integrity checks pass and the header says so`, ig.ok && /matches engine|approximate/.test(badge) && !/integrity/.test(badge), `${badge} ${ig.checks.filter((c) => c.ok === false).map((c) => c.detail).join("; ")}`);
   return { s, run };
 }
 

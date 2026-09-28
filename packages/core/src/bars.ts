@@ -176,7 +176,21 @@ export function resampleTo(b: BarCols, tfMs: number): BarCols {
 /** Bars of `tf` built from the `base` folder (resampled on qkt's UTC-aligned windows when base is finer). */
 export async function readBarsVia(dataRoot: string, broker: string, symbol: string, tf: string, base: string, fromMs: number, toMs: number): Promise<ReadBarsResult> {
   const r = await readBars(dataRoot, broker, symbol, base, fromMs, toMs);
-  return base === tf ? r : { ...r, cols: resampleTo(r.cols, tfToMs(tf)) };
+  return base === tf ? r : { ...r, cols: dropUnclosedTail(resampleTo(r.cols, tfToMs(tf)), r.cols) };
+}
+
+/**
+ * qkt closes an aggregated candle when the data it replays reaches the candle's end. The last candle of a range whose
+ * source bars stop short of its end (Friday's 20:00 4h candle when the market closes at 21:00 and the run ends before
+ * Monday) is never closed, so no strategy ever sees it; drop it so the chart shows exactly the candles qkt evaluated.
+ */
+export function dropUnclosedTail(agg: BarCols, src: BarCols): BarCols {
+  const n = agg.ts.length, m = src.ts.length;
+  if (!n || !m) return agg;
+  const sourceEnd = src.ts[m - 1]! + src.tfMs, candleEnd = agg.ts[n - 1]! + agg.tfMs;
+  if (sourceEnd >= candleEnd) return agg;
+  const cut = (a: Float64Array) => a.slice(0, n - 1);
+  return { ...agg, ts: cut(agg.ts), open: cut(agg.open), high: cut(agg.high), low: cut(agg.low), close: cut(agg.close), volume: cut(agg.volume) };
 }
 
 /** Serialise to a compact binary payload for the browser: [n:u32][tfMs:f64] then 6 Float64 columns. */
