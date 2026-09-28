@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client.js";
 import type { PortfolioListing } from "../api/client.js";
 import { useStore } from "../state/store.js";
-import { CONFIG_TEMPLATE, QKT_TEMPLATE } from "../editor/monaco.js";
+import { QKT_TEMPLATE } from "../editor/monaco.js";
 import type { TreeEntry } from "../api/client.js";
 import { navigate, siblingInfo, typeahead, type NavRow } from "../util/treeNav.js";
 import { Tip } from "../ui/Tip.js";
@@ -45,7 +45,7 @@ export function newStrategy(dir = "strategies") {
   const raw = window.prompt("Name of the new strategy", "my_strategy");
   if (!raw) return;
   const name = raw.replace(/\.qkt$/i, "").replace(/[^\w.-]+/g, "_");
-  void useStore.getState().createEntry(`${dir}/${name}.qkt`, "file", QKT_TEMPLATE(name));
+  void useStore.getState().createEntry(`${dir}/${name}.qkt`, "file", QKT_TEMPLATE(name, useStore.getState().scan));
 }
 
 /** IMPORT + RUN lines for each ticked strategy, relative to `dir` (portfolio.qkt lives beside its children by default). */

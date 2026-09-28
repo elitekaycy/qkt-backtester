@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  availableTimeframes, barBases, barBaseTf, bookInfo, canonicalTf, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBarsVia, strategyBreakdown, summarize, summarizeRejections, verifyManifest,
+  availableTimeframes, barBases, barBaseTf, bookInfo, canonicalTf, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBarsVia, strategyBreakdown, summarize, summarizeRejections, tfToMs, verifyManifest,
   type BarCols, type IntegrityReport, type RunJson, type Summary,
 } from "@qkt-studio/core";
 
@@ -11,9 +11,10 @@ export const STUDIO_VERSION = "0.1.0";
  * run derived by an older version is re-derived on first access instead of serving numbers computed by old rules.
  * Bump when a derived value changes meaning (2: exit reasons read from the closing order's class; trip-based loss streak;
  * 3: each stream's bar base, so charts and checks read the bars qkt read; 4: the account currency money is reported in;
- * 5: the orders qkt rejected, summarised by reason; 6: no Sharpe/Sortino/Calmar for a blown account).
+ * 5: the orders qkt rejected, summarised by reason; 6: no Sharpe/Sortino/Calmar for a blown account;
+ * 7: a tick run's charts read the dividing bar folder that covers the window best).
  */
-export const DERIVED_VERSION = 6;
+export const DERIVED_VERSION = 7;
 /** Above this many fills the round-trip file is too large to page from memory. */
 export const MAX_FILLS = 2_000_000;
 
@@ -70,6 +71,12 @@ const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return
 
 export interface PostprocessResult { summary: Summary; integrity: IntegrityReport; fills: number; trips: number; warnings: string[] }
 
+/** Day files of a bar folder inside [from, to). */
+async function daysWithFiles(dataRoot: string, broker: string, symbol: string, tf: string, from: string, to: string): Promise<number> {
+  const names = await fs.readdir(path.join(dataRoot, "bars", broker, symbol, tf)).catch(() => [] as string[]);
+  return names.filter((n) => n.endsWith(".bin") && n.slice(0, 10) >= from && n.slice(0, 10) < to).length;
+}
+
 export async function postprocess(args: { runDir: string; run: RunJson; dataRoot: string }): Promise<PostprocessResult> {
   const { runDir, run, dataRoot } = args;
   const engineDir = path.join(runDir, "engine"), derivedDir = path.join(runDir, "derived");
@@ -100,7 +107,20 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   for (const s of streams) if (!built.has(`${s.broker}:${s.symbol}`)) built.set(`${s.broker}:${s.symbol}`, await availableTimeframes(dataRoot, s.broker, s.symbol));
   const builtOf = (b: string, sy: string) => built.get(`${b}:${sy}`) ?? [];
   const draftBases = run.tier === "draft" ? barBases(streams, builtOf) : null;
-  for (const s of streams) s.base = draftBases ? draftBases.get(`${s.broker}:${s.symbol}`) ?? null : builtOf(s.broker, s.symbol).includes(s.tf) && canonicalTf(s.tf) === s.tf ? s.tf : barBaseTf(builtOf(s.broker, s.symbol), s.tf);
+  // a bars run reads exactly qkt's folder; a tick run builds its candles from ticks, so the chart shows the built folder that
+  // covers the most of the window among those that divide the stream (the coarsest on a tie): a coarse folder with a hole
+  // in the window would draw an empty chart where a finer one has every day
+  for (const s of streams) {
+    if (draftBases) { s.base = draftBases.get(`${s.broker}:${s.symbol}`) ?? null; continue; }
+    const want = tfToMs(s.tf);
+    const cands = builtOf(s.broker, s.symbol).filter((tf) => canonicalTf(tf) === tf && want % tfToMs(tf) === 0).sort((a, b) => tfToMs(b) - tfToMs(a));
+    let best: string | null = null, bestDays = -1;
+    for (const tf of cands) {
+      const days = await daysWithFiles(dataRoot, s.broker, s.symbol, tf, run.from, run.to);
+      if (days > bestDays) { best = tf; bestDays = days; }
+    }
+    s.base = best ?? barBaseTf(builtOf(s.broker, s.symbol), s.tf);
+  }
   const barCounts: Record<string, number> = {};
   const bars: Record<string, BarCols> = {};
   const streamNotes: string[] = [];

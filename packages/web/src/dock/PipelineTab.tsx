@@ -3,7 +3,6 @@ import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import { api, type Job } from "../api/client.js";
 import type { StepRecord } from "../api/types.js";
 import { revealAt } from "../editor/EditorPane.js";
-import { CONFIG_TEMPLATE } from "../editor/monaco.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { addDays, fmtDur, fmtWindow } from "../util/format.js";
@@ -90,7 +89,7 @@ export function PipelineTab() {
             <div><b>{err.kind.replace(/_/g, " ")}</b>: {err.message}</div>
             <div className="row" style={{ flexWrap: "wrap" }}>
               {err.file && err.line && <button className="btn sm" onClick={() => revealAt(err.file!, err.line!, err.col ?? 1)}>Show {err.file}:{err.line}</button>}
-              {err.kind === "missing_config" && <button className="btn sm primary" onClick={() => void store().createEntry("qkt.config.yaml", "file", CONFIG_TEMPLATE)}>Create qkt.config.yaml</button>}
+              {err.kind === "missing_config" && <button className="btn sm primary" onClick={async () => { await api.scaffold(["qkt.config.yaml"]).catch((e) => store().toast("error", (e as Error).message)); await store().refreshTree(""); void store().openFile("qkt.config.yaml"); }}>Create qkt.config.yaml</button>}
               {(err.kind === "missing_data" || err.kind === "incomplete_data") && (
                 <>
                   <button className="btn sm primary" onClick={() => void buildBars()}><Hammer size={14} />Build bars</button>

@@ -38,27 +38,38 @@ export function setupMonaco(): Promise<Monaco> {
 
 export const languageFor = (path: string): string => (path.endsWith(".qkt") ? "qkt" : /\.ya?ml$/.test(path) ? "yaml" : "plaintext");
 
-export const QKT_TEMPLATE = (name: string) => `STRATEGY ${name} VERSION 1
+/**
+ * A new strategy's text, on a stream the data source really has: the first of XAUUSD, EURUSD, BTCUSD, DEMOUSD with bars qkt
+ * can read, else any such symbol; 15m when built, else its finest timeframe. A template on a symbol the user has no data
+ * for would fail its very first run.
+ */
+export const QKT_TEMPLATE = (name: string, scan?: import("../api/types.js").ScanReport | null) => {
+  const usable = (scan?.symbols ?? []).filter((x) => x.bars.some((b) => b.files > 0 && !b.qktReads));
+  const sym = ["XAUUSD", "EURUSD", "BTCUSD", "DEMOUSD"].map((n) => usable.find((x) => x.symbol === n)).find(Boolean) ?? usable[0];
+  const bars = sym?.bars.filter((b) => b.files > 0 && !b.qktReads) ?? [];
+  const ms = (tf: string) => { const m = /^(\d+)([smhd])$/.exec(tf); return m ? Number(m[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[m[2] as "s"] : Infinity; };
+  const tf = bars.some((b) => b.tf === "15m") ? "15m" : [...bars].sort((x, y) => ms(x.tf) - ms(y.tf))[0]?.tf ?? "15m";
+  const broker = bars.find((b) => b.tf === tf)?.broker ?? "BACKTEST";
+  const symbol = sym?.symbol ?? "XAUUSD";
+  const size = symbol === "DEMOUSD" ? "10" : "0.1";
+  return `STRATEGY ${name} VERSION 1
 
 SYMBOLS
-    gold = BACKTEST:XAUUSD EVERY 15m
+    px = ${broker}:${symbol} EVERY ${tf}
 
 PARAM fast = 9
 PARAM slow = 21
 
 RULES
-    WHEN ema(gold.close, fast) CROSSES ABOVE ema(gold.close, slow)
-     AND POSITION.gold = 0
-    THEN BUY gold SIZING 0.1 ; LOG "long entry"
+    WHEN ema(px.close, fast) CROSSES ABOVE ema(px.close, slow)
+     AND POSITION.px = 0
+    THEN BUY px SIZING ${size} ; LOG "long entry"
 
-    WHEN ema(gold.close, fast) CROSSES BELOW ema(gold.close, slow)
-     AND POSITION.gold > 0
-    THEN CLOSE gold ; LOG "exit"
+    WHEN ema(px.close, fast) CROSSES BELOW ema(px.close, slow)
+     AND POSITION.px > 0
+    THEN CLOSE px ; LOG "exit"
 `;
-
-export const CONFIG_TEMPLATE = `# qkt.config.yaml. qkt reads this file from the working directory of every run.
-starting_balance: 10000
-`;
+};
 
 export interface VimHandlers { save(): Promise<boolean> | boolean; saveAll(): Promise<unknown> | unknown; close(force: boolean): void; run(): void; say(msg: string): void }
 

@@ -537,3 +537,6 @@ export function flattenProblems(problems: State["problems"]): Array<Diagnostic &
   for (const [path, bySource] of Object.entries(problems)) for (const d of fileProblems(bySource)) out.push({ ...d, path });
   return out.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
 }
+
+// handle for automated tests (like __qktEditor): lets an end-to-end script set the window as the date picker does
+if (typeof window !== "undefined") (window as unknown as { __qktStore?: typeof useStore }).__qktStore = useStore;
