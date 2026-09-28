@@ -81,7 +81,7 @@ export function CommandPalette() {
 const KEYS: Array<[string, string]> = [
   ["Ctrl Enter", "Run the open strategy"], ["Ctrl .", "Stop everything and clean up"], ["Ctrl ,", "Run settings"], ["Ctrl K", "Command palette"],
   ["Ctrl J", "Open or close the Journal"], ["Ctrl B", "Show or hide the sidebar"], ["Ctrl 1 · 2 · 3", "Files · Data · Runs"], ["Ctrl `", "Show or hide the output panel"],
-  ["Ctrl S", "Save the file"], ["Ctrl M", "In the editor: make Tab move focus out of it instead of indenting (again to undo)"], ["Esc", "Close the journal, a dialog or a menu; put the cursor back in a full-screen editor (it stays full screen)"],
+  ["F6 · Shift F6", "Move between areas: sections, side panel, editor, chart, output"], ["Ctrl S", "Save the file"], ["Ctrl M", "In the editor: make Tab move focus out of it instead of indenting (again to undo)"], ["Esc", "Close the journal, a dialog or a menu; put the cursor back in a full-screen editor (it stays full screen)"],
   ["Ctrl Z · Ctrl Y", "Undo / redo in the editor (also Ctrl Shift Z)"], ["?", "This list"], ["← → · Shift", "Resize a focused divider (Shift for larger steps)"],
 ];
 const TREE_KEYS: Array<[string, string]> = [

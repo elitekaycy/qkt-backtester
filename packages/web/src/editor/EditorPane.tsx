@@ -6,6 +6,12 @@ import { LspClient, toMarkers } from "./lsp.js";
 import { enableVim, languageFor, setupMonaco, themeFor, type Monaco } from "./monaco.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
+import { cycleRegion } from "../util/regions.js";
+
+// A file shown before the user has pressed a key or clicked (the one restored on page load) does not take focus: a keyboard
+// user starts outside the editor, where Tab moves between controls. Any file they open themselves is focused as usual.
+let userActed = false;
+for (const ev of ["keydown", "pointerdown"] as const) window.addEventListener(ev, () => { userActed = true; }, { capture: true, once: true });
 import { newStrategy } from "../sections/FilesSection.js";
 import { FileCode2, FileCog, FileText, Plus, X } from "../ui/icons.js";
 
@@ -72,6 +78,8 @@ export function EditorPane() {
         const on = (tabMoves = !tabMoves);
         store.setState({ announce: on ? "Tab now moves focus out of the editor. Ctrl+M to indent with Tab again." : "Tab indents again. Ctrl+M to move focus with Tab." });
       });
+      ed.addCommand(K.F6, () => cycleRegion(1));
+      ed.addCommand(m.KeyMod.Shift | K.F6, () => cycleRegion(-1));
       ([K.Digit1, K.Digit2, K.Digit3] as const).forEach((k, i) => ed.addCommand(C | k, () => ui().set({ section: (["files", "data", "runs"] as const)[i]! })));
       // Esc with a completion popup open: in vim mode it closes the popup AND leaves insert mode in the same press (one Esc is all a
       // vim user should ever need); without vim it only closes the popup, as in any Monaco editor.
@@ -143,13 +151,14 @@ export function EditorPane() {
   }, [openFiles, booted, info]);
 
   const shown = useRef<string | null>(null);
+
   useEffect(() => {
     const s = S.current;
     if (!s || !booted) return;
     if (shown.current && shown.current !== activePath) s.views.set(shown.current, s.ed.saveViewState());
     const model = activePath ? s.models.get(activePath) : null;
     const swapped = !!model && s.ed.getModel() !== model;
-    if (model && swapped) { s.ed.setModel(model); const v = s.views.get(activePath!); if (v) s.ed.restoreViewState(v); s.ed.focus(); }
+    if (model && swapped) { s.ed.setModel(model); const v = s.views.get(activePath!); if (v) s.ed.restoreViewState(v); if (userActed) s.ed.focus(); }
     if (!model) s.ed.setModel(null);
     shown.current = activePath;
     if (swapped && useUi.getState().vim) syncVim();

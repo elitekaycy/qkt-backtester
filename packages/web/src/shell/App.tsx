@@ -15,6 +15,7 @@ import { ChevronLeft } from "../ui/icons.js";
 import { CommandPalette, Shortcuts } from "./CommandPalette.js";
 import { Rail } from "./Rail.js";
 import { StatusBar } from "./StatusBar.js";
+import { cycleRegion } from "../util/regions.js";
 import { TopBar } from "./TopBar.js";
 
 function Toasts() {
@@ -90,6 +91,7 @@ function Shell() {
         const ed = (window as unknown as { __qktEditor?: { focus(): void; trigger(s: string, id: string, a: unknown): void } }).__qktEditor;
         if (ed) { e.preventDefault(); ed.focus(); ed.trigger("keyboard", e.key === "z" && !e.shiftKey ? "undo" : "redo", null); return; }
       }
+      if (e.key === "F6" && !mod && !e.altKey) { e.preventDefault(); cycleRegion(e.shiftKey ? -1 : 1); return; }
       if (mod && e.key === "k") { e.preventDefault(); u.set({ palette: !u.palette }); }
       else if (mod && e.key === "j") { e.preventDefault(); u.set({ journalOpen: !u.journalOpen }); }
       else if (mod && e.key === "b") { e.preventDefault(); u.toggleCollapse("sidebar"); }
