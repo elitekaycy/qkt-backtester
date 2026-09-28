@@ -82,6 +82,7 @@ export const api = {
   scan: (refresh = false) => req<ScanReport>(`/api/data/scan${refresh ? "?refresh=1" : ""}`),
   readiness: (refresh = false) => req<{ scannedAt: string; strategies: Readiness[] }>(`/api/data/readiness${refresh ? "?refresh=1" : ""}`),
   scaffoldMissing: () => req<{ missing: string[] }>("/api/workspace/missing"),
+  completeConfig: (content: string) => req<{ content: string }>("/api/workspace/config-complete", { method: "POST", body: JSON.stringify({ content }) }),
   scaffold: (files?: string[]) => req<{ created: string[]; skipped: string[]; missing: string[] }>("/api/workspace/scaffold", { method: "POST", body: JSON.stringify({ files }) }),
   addSource: (path: string) => req<SettingsView & { warnings: string[] }>("/api/settings/sources", { method: "POST", body: JSON.stringify({ path }) }),
   removeSource: (path: string) => req<SettingsView>("/api/settings/sources", { method: "DELETE", body: JSON.stringify({ path }) }),

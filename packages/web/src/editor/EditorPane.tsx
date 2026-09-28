@@ -8,12 +8,15 @@ import { fileProblems, useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { cycleRegion } from "../util/regions.js";
 
+/** Top-level settings a config file lists, written or commented: a near-empty file gets the offer to show every option. */
+const configKeyCount = (text: string) => new Set([...text.matchAll(/^(?:#\s?)?([a-z_]+):/gm)].map((m) => m[1])).size;
+
 // A file shown before the user has pressed a key or clicked (the one restored on page load) does not take focus: a keyboard
 // user starts outside the editor, where Tab moves between controls. Any file they open themselves is focused as usual.
 let userActed = false;
 for (const ev of ["keydown", "pointerdown"] as const) window.addEventListener(ev, () => { userActed = true; }, { capture: true, once: true });
 import { newStrategy } from "../sections/FilesSection.js";
-import { FileCode2, FileCog, FileText, Plus, X } from "../ui/icons.js";
+import { FileCode2, FileCog, FileText, Info, Plus, X } from "../ui/icons.js";
 
 export const REVEAL_EVENT = "qkt:reveal";
 export const revealAt = (path: string, line: number, col: number) => window.dispatchEvent(new CustomEvent(REVEAL_EVENT, { detail: { path, line, col } }));
@@ -241,6 +244,20 @@ export function EditorPane() {
       {!active && booted && (
         <div className="empty" style={{ flex: 1, justifyContent: "center" }}><FileCode2 className="ico-big" /><b>No file open</b>Pick one from Files, or start a new strategy.
           <button className="btn primary" onClick={() => newStrategy()}><Plus size={15} />New strategy</button></div>
+      )}
+      {active?.path === "qkt.config.yaml" && configKeyCount(active.content) < 8 && (
+        <div className="banner info editor-banner" role="status">
+          <Info size={14} aria-hidden="true" />
+          <span>This file shows {configKeyCount(active.content)} of qkt's settings. Show every option, commented, around your own values (nothing you set changes; undo with Ctrl+Z).</span>
+          <button className="btn sm" onClick={async () => {
+            const s = S.current; if (!s) return;
+            try {
+              const { content } = await api.completeConfig(s.ed.getValue());
+              const model = s.ed.getModel(); if (!model) return;
+              s.ed.pushUndoStop(); s.ed.executeEdits("complete-config", [{ range: model.getFullModelRange(), text: content }]); s.ed.pushUndoStop();
+            } catch (e) { store.getState().toast("error", (e as Error).message); }
+          }}>Show every option</button>
+        </div>
       )}
       <div ref={host} id="editor" className="monaco-host" style={{ display: active ? "block" : "none" }} />
       <div className="editor-status">

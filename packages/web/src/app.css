@@ -299,3 +299,5 @@ table.tbl th.num, table.tbl td.num { text-align: right; }
 .pkpi .kd.down { color: var(--loss-ink, var(--loss)); }
 .auto-toggle[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent-soft); }
 .auto-toggle[aria-pressed="false"] { color: var(--ink-3); }
+.editor-banner { margin: 6px 8px 0; font-size: var(--fs-xs); line-height: 1.4; align-items: center; }
+.editor-banner .btn { margin-left: auto; flex: none; }
