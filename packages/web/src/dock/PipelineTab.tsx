@@ -6,7 +6,7 @@ import { revealAt } from "../editor/EditorPane.js";
 import { CONFIG_TEMPLATE } from "../editor/monaco.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
-import { addDays, fmtDur } from "../util/format.js";
+import { addDays, fmtDur, fmtWindow } from "../util/format.js";
 import { Circle, CircleCheck, CircleDashed, CircleX, Copy, Hammer, OctagonX, Play, TriangleAlert } from "../ui/icons.js";
 
 const LABEL: Record<string, string> = { project: "Project", config: "Config", parse: "Parse", coverage: "Data check", backtest: "Backtest", postprocess: "Post-process", render: "Render" };
@@ -72,7 +72,7 @@ export function PipelineTab() {
       <div className="row" style={{ padding: "var(--s2) var(--s4)", borderBottom: "1px solid var(--line)", flex: "none" }}>
         {run ? <>
           <span className={`badge ${run.tier === "full" ? "accent" : ""}`}>{run.tier === "full" ? "Ran on ticks" : "Ran on bars"}</span>
-          <span className="muted mono" title={run.id} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{run.id.slice(-24)}</span>
+          <span className="ink2 nowrap" title={`Run ${run.id}`} style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}><b>{run.strategy.split("/").pop()}</b> <span className="muted">· {fmtWindow(run.from, run.to)}</span></span>
           {run.options && Object.keys(run.options).length > 0 && <span className="badge" title={JSON.stringify(run.options)}>{Object.keys(run.options).length} option{Object.keys(run.options).length > 1 ? "s" : ""}</span>}
         </> : <span className="muted">Nothing has run yet</span>}
         <span className="grow" />

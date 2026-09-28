@@ -234,7 +234,7 @@ export function EditorPane() {
         <span>{active ? `Ln ${cursor.line}, Col ${cursor.col}` : ""}</span>
         <span>{active ? (active.path.endsWith(".qkt") ? "qkt" : "YAML") : ""}</span>
         <span className="row" style={{ gap: 6 }}><span className={`dot ${lspStatus === "ready" ? "ok" : "warn"}`} />LSP {lspStatus === "ready" ? "connected" : lspStatus === "connecting" ? "connecting…" : "reconnecting…"}</span>
-        <span style={{ marginLeft: "auto" }}><span className="kbd">Ctrl</span> <span className="kbd">S</span> save · <span className="kbd">Ctrl</span> <span className="kbd">Enter</span> run</span>
+        <span className="editor-hints" style={{ marginLeft: "auto" }}><span className="kbd">Ctrl</span> <span className="kbd">S</span> save · <span className="kbd">Ctrl</span> <span className="kbd">Enter</span> run</span>
       </div>
     </>
   );

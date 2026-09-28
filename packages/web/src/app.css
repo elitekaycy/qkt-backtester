@@ -288,3 +288,6 @@ table.tbl th.num, table.tbl td.num { text-align: right; }
 
 .widget.kcard { padding: var(--s3) var(--s4); }
 .bar-row.compact { grid-template-columns: 58px 1fr 52px !important; gap: var(--s2); }
+/* the save/run hints only when the editor is wide enough to show them whole (they are also in the shortcuts list, ?) */
+.editor-status { container-type: inline-size; }
+@container (max-width: 560px) { .editor-hints { display: none; } }
