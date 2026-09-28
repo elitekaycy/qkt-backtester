@@ -83,5 +83,35 @@ export async function enableVim(editor: import("monaco-editor/editor/editor.api.
     Vim.defineEx("run", "ru", () => H().run());
   } else if (h) (window as unknown as { __vimHandlers: { h: VimHandlers } }).__vimHandlers.h = h;
   const vim = initVimMode(editor, statusEl);
-  return () => vim.dispose();
+  const stopGuard = guardAgainstEscBlur(editor, vim, VimMode as unknown as VimApi);
+  return () => { stopGuard(); vim.dispose(); };
+}
+
+type VimApi = { Vim: { exitInsertMode(cm: unknown): void; exitVisualMode(cm: unknown): void } };
+
+/**
+ * Browser extensions with their own vim keys (Vimium, Surfingkeys, Tridactyl) take Esc in any editable element: they swallow
+ * the key and blur it. In a vim editor that Esc was meant for vim, so without this the editor loses focus AND stays in insert
+ * mode. The key never reaches the page, so the blur is recognised by what it leaves behind: focus dropped to nothing (the
+ * page body) with no click, no Tab and the window still focused, which only a script's blur() does. The editor then takes
+ * focus back and leaves insert/visual mode, as the Esc intended. A click, Tab or Ctrl+M still moves focus out as usual.
+ */
+function guardAgainstEscBlur(editor: import("monaco-editor/editor/editor.api.js").editor.IStandaloneCodeEditor, vim: unknown, api: VimApi): () => void {
+  let userMovedAt = 0;
+  const moved = () => { userMovedAt = performance.now(); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Tab" || e.key === "F6") moved(); };
+  window.addEventListener("pointerdown", moved, true);
+  window.addEventListener("keydown", onKey, true);
+  const sub = editor.onDidBlurEditorText(() => {
+    if (performance.now() - userMovedAt < 400) return;
+    setTimeout(() => {
+      const a = document.activeElement;
+      if (!document.hasFocus() || (a && a !== document.body && a !== document.documentElement)) return;
+      editor.focus();
+      const st = (vim as { state?: { vim?: { insertMode?: boolean; visualMode?: boolean } } }).state?.vim;
+      if (st?.insertMode) api.Vim.exitInsertMode(vim);
+      else if (st?.visualMode) api.Vim.exitVisualMode(vim);
+    }, 0);
+  });
+  return () => { sub.dispose(); window.removeEventListener("pointerdown", moved, true); window.removeEventListener("keydown", onKey, true); };
 }

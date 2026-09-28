@@ -123,6 +123,8 @@ jobs:
           BASE=http://127.0.0.1:8080/ STRATEGY=strategies/brk.qkt FROM=2024-01-01 TO=2024-03-30 OPTIONS='{}' node scripts/display-truth.e2e.mjs
           BASE=http://127.0.0.1:8080/ STRATEGY=strategies/book.qkt FROM=2024-01-01 TO=2024-03-30 OPTIONS='{}' node scripts/display-truth.e2e.mjs
           BASE=http://127.0.0.1:8080/ STRATEGY=strategies/slow.qkt FROM=2024-01-01 TO=2024-03-30 OPTIONS='{}' node scripts/display-truth.e2e.mjs
+      - name: Esc in the vim editor survives browser extensions that blur on Esc
+        run: BASE=http://127.0.0.1:8080/ STRATEGY=ema_cross.qkt node scripts/vim-esc.e2e.mjs
       - name: token mode stays healthy
         run: |
           mkdir -p ws2
