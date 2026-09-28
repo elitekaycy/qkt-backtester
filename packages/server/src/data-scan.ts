@@ -330,13 +330,29 @@ export { rangeDays };
 
 let cache: { root: string; at: number; report: ScanReport } | null = null;
 /** Scans are cheap but not free; reuse one for 30 s unless forced or invalidated by a data job. */
-export async function scanCached(dataRoot: string, refresh = false): Promise<ScanReport> {
-  if (!refresh && cache && cache.root === dataRoot && Date.now() - cache.at < 30_000) return cache.report;
-  const report = await scanStore(dataRoot);
-  cache = { root: dataRoot, at: Date.now(), report };
-  return report;
+/**
+ * The store scan, shared: concurrent callers (a grid's runs starting together) wait for one scan instead of each walking
+ * every file, and a report up to 10 minutes old is served at once while a fresh one runs in the background (older than
+ * 30 s). Everything that changes the data here (bar builds, fetches, a new source) calls invalidateScan, so a run never
+ * reads a report older than the data it was changed by; files changed outside the studio show up on the next refresh.
+ */
+let inflight: { root: string; p: Promise<ScanReport> } | null = null;
+let generation = 0;
+function rescan(dataRoot: string): Promise<ScanReport> {
+  if (inflight && inflight.root === dataRoot) return inflight.p;
+  const gen = generation;
+  const p = scanStore(dataRoot).then((report) => { if (gen === generation) cache = { root: dataRoot, at: Date.now(), report }; return report; })
+    .finally(() => { if (inflight?.p === p) inflight = null; });
+  inflight = { root: dataRoot, p };
+  return p;
 }
-export const invalidateScan = () => { cache = null; };
+export async function scanCached(dataRoot: string, refresh = false): Promise<ScanReport> {
+  const age = cache && cache.root === dataRoot ? Date.now() - cache.at : Infinity;
+  if (!refresh && age < 30_000) return cache!.report;
+  if (!refresh && age < 10 * 60_000) { void rescan(dataRoot).catch(() => undefined); return cache!.report; }
+  return rescan(dataRoot);
+}
+export const invalidateScan = () => { cache = null; inflight = null; generation++; };
 
 /** One symbol's report from one source folder (null when the source has nothing for it). Uses the source's market holidays when a full scan of it is cached. */
 export async function scanSymbolIn(dataRoot: string, symbol: string): Promise<SymbolReport | null> {

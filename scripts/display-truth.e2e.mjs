@@ -64,14 +64,18 @@ const kpis = await p.evaluate(() => Object.fromEntries([...document.querySelecto
 ok("KPI Net P&L", kpis["Net P&L"]?.v === `${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`, JSON.stringify(kpis["Net P&L"]));
 const runMeta = await api(`/api/runs/${runId}/derived/meta`);
 // orders qkt rejected: the chart pane says how many, exactly as the run's summary counts them, and says nothing when none
-const rjText = await text(".banner.rejections");
+// a blown account: the chart pane says so, and shows no ratios (qkt's are meaningless below zero equity)
+const blownText = await p.evaluate(() => [...document.querySelectorAll(".banner.rejections")].map((b) => b.textContent).join(" "));
+if (s.blown) has("blown account is announced", blownText, "The account went below zero");
+else ok("no blown banner for a solvent account", !blownText.includes("went below zero"), blownText);
+const rjText = await p.evaluate(() => [...document.querySelectorAll(".banner.rejections")].map((b) => b.textContent).find((t) => t.startsWith("qkt rejected")) ?? "");
 if (runMeta.rejections?.count) has("rejections banner shows qkt's count", rjText, `qkt rejected ${runMeta.rejections.count.toLocaleString("en-US")} order`);
 else ok("no rejections banner when qkt rejected nothing", rjText === "", rjText);
 ok("run records its account currency", typeof runMeta.currency === "string" && /^[A-Z]{3}$/.test(runMeta.currency), JSON.stringify(runMeta.currency));
 has("KPI Net P&L names the currency", kpis["Net P&L"]?.s ?? "", `on ${fmtNum(start, 0)} ${runMeta.currency}`);
 if (s.unrealized !== 0) has("KPI Net P&L shows the open part", kpis["Net P&L"]?.s ?? "", `incl. ${fmtMoney(s.unrealized)} open`);
 ok("KPI Win rate", kpis["Win rate"]?.v === (s.trades ? fmtPct(s.winRate, 1) : DASH) && kpis["Win rate"].s === `${s.wins}W · ${s.losses}L`, JSON.stringify(kpis["Win rate"]));
-ok("KPI Profit factor", kpis["Profit factor"]?.v === (s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)) && kpis["Profit factor"].s === `Sharpe ${fmtRatio(s.sharpe)}`, JSON.stringify(kpis["Profit factor"]));
+ok("KPI Profit factor", kpis["Profit factor"]?.v === (s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)) && kpis["Profit factor"].s === (s.blown ? "Sharpe: account blown" : `Sharpe ${fmtRatio(s.sharpe)}`), JSON.stringify(kpis["Profit factor"]));
 ok("KPI Trades", kpis["Trades"]?.v === String(s.trades) && kpis["Trades"].s.startsWith(`${s.fills} fills`), JSON.stringify(kpis["Trades"]));
 ok("KPI Max drawdown", kpis["Max drawdown"]?.v === fmtPct(s.maxDrawdown) && kpis["Max drawdown"].s === `expectancy ${fmtMoney(s.expectancy)}`, JSON.stringify(kpis["Max drawdown"]));
 

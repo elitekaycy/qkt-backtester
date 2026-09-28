@@ -185,13 +185,15 @@ export class Jobs {
           row.status = run.status;
           if (run.status === "done") {
             const s = JSON.parse(await fs.readFile(path.join(this.runner.runDir(runId), "derived", "summary.json"), "utf8"));
-            row.summary = { totalPnL: s.totalPnl, sharpe: s.sharpe, calmar: s.calmar, profitFactor: s.profitFactor ?? 0, winRate: s.winRate, trades: s.trades, maxDrawdown: s.maxDrawdown };
+            // a blown account (equity at or below zero) has no meaningful ratios: they stay null and the row ranks last
+            row.summary = { totalPnL: s.totalPnl, sharpe: s.sharpe, calmar: s.calmar, profitFactor: s.profitFactor ?? 0, winRate: s.winRate, trades: s.trades, maxDrawdown: s.maxDrawdown, blown: s.blown ? 1 : 0 };
           } else if (run.error) this.pushLog(job, `${JSON.stringify(row.params)}: ${run.error.message}`);
         } catch (e) { row.status = "failed"; this.pushLog(job, `${JSON.stringify(row.params)}: ${(e as Error).message}`); }
         finally { job.progress!.done++; }
       }));
       const key = rank as string;
-      rows.sort((a, b) => (b.summary?.[key] ?? -Infinity) - (a.summary?.[key] ?? -Infinity));
+      const score = (r: (typeof rows)[number]) => (!r.summary || r.summary.blown ? -Infinity : r.summary[key] ?? -Infinity);
+      rows.sort((a, b) => (score(a) === score(b) ? 0 : score(b) > score(a) ? 1 : -1));
       if (this.cancelled.has(job.id)) return this.finish(job, "cancelled", { kind: "cancelled", message: "Cancelled" });
       const failed = rows.filter((r) => r.status === "failed").length;
       this.finish(job, failed === rows.length ? "failed" : "done", failed === rows.length ? { kind: "internal", message: "Every grid point failed" } : undefined);

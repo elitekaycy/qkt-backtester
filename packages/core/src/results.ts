@@ -70,7 +70,14 @@ export interface Summary {
   /** qkt's own count, per closing fill: differs from the trip count when legs scale in or out. */
   engineMaxConsecutiveLosses: number;
   long: { trades: number; pnl: number; winRate: number }; short: { trades: number; pnl: number; winRate: number };
-  sharpe: number; sortino: number; calmar: number; maxDrawdown: number; maxDailyDrawdown: number;
+  /**
+   * Null when the account was blown (equity reached zero or below, a drawdown of 100% or more): returns on a negative
+   * balance flip sign, so qkt's ratios can read positive for the worst runs. `engineRatios` keeps qkt's values.
+   */
+  sharpe: number | null; sortino: number | null; calmar: number | null; maxDrawdown: number; maxDailyDrawdown: number;
+  /** Equity reached zero or below at some point in the run. */
+  blown: boolean;
+  engineRatios: { sharpe: number; sortino: number; calmar: number };
   engineWinRate: number; engineProfitFactor: number;
 }
 
@@ -96,7 +103,8 @@ export function summarize(result: QktResult, trips: RoundTrip[]): Summary {
     avgHoldMs: holds.length ? holds.reduce((a, b) => a + b, 0) / holds.length : null,
     maxConsecutiveLosses: lossStreak(closed), engineMaxConsecutiveLosses: g.maxConsecutiveLosses,
     long: side("long"), short: side("short"),
-    sharpe: n(g.sharpeRatio), sortino: n(g.sortinoRatio), calmar: n(g.calmarRatio),
+    sharpe: n(g.maxDrawdown) >= 1 ? null : n(g.sharpeRatio), sortino: n(g.maxDrawdown) >= 1 ? null : n(g.sortinoRatio), calmar: n(g.maxDrawdown) >= 1 ? null : n(g.calmarRatio),
+    blown: n(g.maxDrawdown) >= 1, engineRatios: { sharpe: n(g.sharpeRatio), sortino: n(g.sortinoRatio), calmar: n(g.calmarRatio) },
     maxDrawdown: n(g.maxDrawdown), maxDailyDrawdown: n(g.maxDailyDrawdown),
     engineWinRate: n(g.winRate), engineProfitFactor: n(g.profitFactor),
   };

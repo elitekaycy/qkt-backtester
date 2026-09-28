@@ -54,11 +54,12 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
         <div className={`preview-kpis${stale ? " dim" : ""}`}>
           <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : cur ?? "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} d={delta(s.totalPnl, prev?.totalPnl, (x) => fmtMoney(x).replace("+", ""), true)} onClick={() => open()} />
           <Kpi l="Win rate" v={s.trades ? fmtPct(s.winRate, 1) : DASH} s={`${s.wins}W · ${s.losses}L`} d={delta(s.trades ? s.winRate * 100 : null, prev?.trades ? prev.winRate * 100 : null, (x) => `${x.toFixed(1)} pts`, true)} onClick={() => open("trades")} />
-          <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} d={delta(s.profitFactor, prev?.profitFactor, (x) => x.toFixed(2), true)} s={`Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
+          <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} d={delta(s.profitFactor, prev?.profitFactor, (x) => x.toFixed(2), true)} s={s.blown ? "Sharpe: account blown" : `Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
           <Kpi l="Trades" v={String(s.trades)} d={delta(s.trades, prev?.trades, (x) => String(x), true) && { ...delta(s.trades, prev?.trades, (x) => String(x), true)!, better: null }} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />
           <Kpi l="Max drawdown" v={fmtPct(s.maxDrawdown)} d={delta(Math.abs(s.maxDrawdown) * 100, prev ? Math.abs(prev.maxDrawdown) * 100 : null, (x) => `${x.toFixed(2)} pts`, false)} s={`expectancy ${fmtMoney(s.expectancy)}`} tone="loss" onClick={() => open("monthly")} />
         </div>
       )}
+      {s?.blown && !stale && <div className="banner bad rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>The account went below zero in this run</b> (max drawdown {fmtPct(s.maxDrawdown, 0)}): it lost more than the starting balance, so Sharpe, Sortino and Calmar mean nothing here and are not shown. Trade a smaller size or raise the starting balance.</span></div>}
       {autoSkipped && <div className="banner warn rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>{autoSkipped}</b>. The results below are from the last version that ran; saving a fix runs it again.</span></div>}
       {meta?.rejections && meta.rejections.count > 0 && !stale && (() => {
         const rj = meta.rejections, top = rj.reasons[0]!, all = s ? s.fills === 0 : false;

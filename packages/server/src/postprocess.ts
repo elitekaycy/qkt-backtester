@@ -11,9 +11,9 @@ export const STUDIO_VERSION = "0.1.0";
  * run derived by an older version is re-derived on first access instead of serving numbers computed by old rules.
  * Bump when a derived value changes meaning (2: exit reasons read from the closing order's class; trip-based loss streak;
  * 3: each stream's bar base, so charts and checks read the bars qkt read; 4: the account currency money is reported in;
- * 5: the orders qkt rejected, summarised by reason).
+ * 5: the orders qkt rejected, summarised by reason; 6: no Sharpe/Sortino/Calmar for a blown account).
  */
-export const DERIVED_VERSION = 5;
+export const DERIVED_VERSION = 6;
 /** Above this many fills the round-trip file is too large to page from memory. */
 export const MAX_FILLS = 2_000_000;
 

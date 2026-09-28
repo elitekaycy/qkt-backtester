@@ -112,7 +112,7 @@ def verify(rid):
                  ("openTrades", len(R) - len(closed)), ("wins", len(wins)), ("losses", len(losses)), ("winRate", len(wins) / len(closed) if closed else 0),
                  ("profitFactor", gw / -gl if gl < 0 else None), ("expectancy", sum(t["pnl"] for t in closed) / len(closed) if closed else 0),
                  ("largestWin", max([0] + [t["pnl"] for t in closed])), ("largestLoss", min([0] + [t["pnl"] for t in closed])), ("maxConsecutiveLosses", mx),
-                 ("sharpe", f(g["sharpeRatio"])), ("maxDrawdown", f(g["maxDrawdown"]))):
+                 ("sharpe", None if f(g["maxDrawdown"]) >= 1 else f(g["sharpeRatio"])), ("blown", f(g["maxDrawdown"]) >= 1), ("maxDrawdown", f(g["maxDrawdown"]))):
         check(f"summary.{k}", s.get(k), v)
     check("round trips reconcile with the engine's realised P&L", sum(t["pnl"] for t in R), f(g["realizedTotal"]))
     daily, monthly, wd, hr, ex = defaultdict(float), defaultdict(float), [0.0] * 7, [0.0] * 24, defaultdict(int)

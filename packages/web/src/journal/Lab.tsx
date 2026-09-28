@@ -137,6 +137,70 @@ function McView({ r }: { r: McResult }) {
   );
 }
 
+const METRIC_LABEL: Record<string, string> = { sharpe: "Sharpe", calmar: "Calmar", profitFactor: "Profit factor", totalPnL: "Net P&L", winRate: "Win rate" };
+const fmtMetric = (c: string, v: number | null | undefined) => (v === null || v === undefined ? DASH : c === "totalPnL" ? fmtMoney(v) : c === "winRate" ? fmtPct(v, 1) : fmtRatio(v));
+type GridRow = { params: Record<string, string>; runId?: string; status: string; summary?: Record<string, number | null> };
+
+/** Write parameter values into the strategy's PARAM lines, in the editor, as one undoable edit (auto-run then re-runs it). */
+async function applyParams(strategy: string, params: Record<string, string>) {
+  const st = useStore.getState();
+  await st.openFile(strategy);
+  const f = useStore.getState().openFiles.find((x) => x.path === strategy);
+  if (!f) return;
+  let text = f.content;
+  for (const [k, v] of Object.entries(params)) text = text.replace(new RegExp(`^(\\s*PARAM\\s+${k}\\s*=\\s*)(\\S+)`, "m"), `$1${v}`);
+  const ed = (window as unknown as { __qktEditor?: { getModel(): { getFullModelRange(): unknown; uri: { path: string } } | null; executeEdits(s: string, e: unknown[]): void; pushUndoStop(): void } }).__qktEditor;
+  const model = ed?.getModel();
+  if (ed && model && model.uri.path.endsWith("/" + strategy)) { ed.pushUndoStop(); ed.executeEdits("apply-params", [{ range: model.getFullModelRange(), text }]); ed.pushUndoStop(); }
+  else st.setContent(strategy, text);
+  st.toast("ok", `Applied ${Object.entries(params).map(([k, v]) => `${k}=${v}`).join(" ")} to ${strategy.split("/").pop()}${st.cfg.autoRun ? ": it re-runs when saved" : ""}`);
+}
+
+/**
+ * Two swept parameters as a map: each cell colored by the ranked metric (green better, red worse, gray for a blown
+ * account). A best cell among good neighbours is a robust setting; a lone bright cell among poor ones is likely luck.
+ */
+function GridHeat({ rows, rank, axes }: { rows: GridRow[]; rank: string; axes: [string, string[]][] }) {
+  const results = useStore((s) => s.results);
+  const [[ya, yv], [xa, xv]] = axes as [[string, string[]], [string, string[]]];
+  const at = (y: string, x: string) => rows.find((r) => r.params[ya] === y && r.params[xa] === x);
+  const vals = rows.filter((r) => r.summary && !r.summary.blown).map((r) => r.summary![rank]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  const tone = (v: number) => { const t = hi > lo ? (v - lo) / (hi - lo) : 0.5; return `color-mix(in srgb, ${t >= 0.5 ? "var(--gain)" : "var(--loss)"} ${Math.round(Math.abs(t - 0.5) * 2 * 55 + 8)}%, var(--card))`; };
+  return (
+    <div className="gridheat-wrap">
+      <table className="gridheat" aria-label={`${METRIC_LABEL[rank]} for each ${ya} and ${xa}`}>
+        <thead><tr><th className="corner">{ya} ↓ · {xa} →</th>{xv.map((x) => <th key={x} className="num">{x}</th>)}</tr></thead>
+        <tbody>
+          {yv.map((y) => (
+            <tr key={y}><th className="num">{y}</th>
+              {xv.map((x) => {
+                const r = at(y, x), v = r?.summary?.[rank];
+                const blown = !!r?.summary?.blown;
+                return (
+                  <td key={x}>
+                    <button className={`gh-cell${results?.runId === r?.runId ? " sel" : ""}${blown ? " blown" : ""}`} disabled={!r?.runId || r.status !== "done"}
+                      style={!blown && typeof v === "number" ? { background: tone(v) } : undefined}
+                      title={`${ya}=${y} ${xa}=${x}: ${blown ? "account blown" : `${METRIC_LABEL[rank]} ${fmtMetric(rank, v)}`}${r?.summary ? `, net ${fmtMoney(r.summary.totalPnL ?? 0)}, ${r.summary.trades} trades` : ""}. Click to open this run`}
+                      onClick={() => r?.runId && void useStore.getState().selectRun(r.runId)}>{blown ? "blown" : fmtMetric(rank, v)}</button>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="legend muted gh-legend">
+        <span>worse {METRIC_LABEL[rank]}</span>
+        <span className="gh-scale" aria-hidden="true">{[0, 0.25, 0.5, 0.75, 1].map((t) => <i key={t} style={{ background: tone(lo + t * (hi - lo)) }} />)}</span>
+        <span>better</span>
+        <span className="gh-sw blown" aria-hidden="true" /><span>lost more than the starting balance</span>
+        <span>· Prefer a good cell with good neighbours over a lone best one.</span>
+      </div>
+    </div>
+  );
+}
+
 // ---- Parameter grid ------------------------------------------------------------------------------------------
 function Grid() {
   const { cfg, results } = useStore();
@@ -156,13 +220,14 @@ function Grid() {
       void useStore.getState().refreshRuns();
     } catch (e) { setErr((e as Error).message); }
   };
-  const rows = (job?.result?.rows ?? []) as Array<{ params: Record<string, string>; runId?: string; status: string; summary?: Record<string, number> }>;
+  const rows = (job?.result?.rows ?? []) as GridRow[];
+  const sweptAxes = Object.entries(ax.parsed).filter(([, v]) => v.length > 1);
   const cols = ["sharpe", "calmar", "profitFactor", "totalPnL", "winRate"] as const;
   return (
     <>
       <AxesEditor ax={ax} />
       <div className="form-row">
-        <label className="field">rank by <select className="input" value={rank} onChange={(e) => setRank(e.target.value)}>{cols.map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
+        <label className="field">rank by <select className="input" value={rank} onChange={(e) => setRank(e.target.value)}>{cols.map((c) => <option key={c} value={c}>{METRIC_LABEL[c]}</option>)}</select></label>
         <span className="muted">{cfg.tier === "draft" ? "Draft" : "Full"} · {cfg.from} → {cfg.to} · every point is a full run with its own charts and trades</span>
         <span className="grow" style={{ flex: 1 }} />
         {running ? <button className="btn danger" onClick={() => job && void api.cancelJob(job.id)}>Cancel</button>
@@ -172,18 +237,21 @@ function Grid() {
       {job?.progress && <div className="progress"><i style={{ width: `${(job.progress.done / job.progress.total) * 100}%` }} /></div>}
       {job && <div className="muted" style={{ padding: "4px 10px" }}>{job.status}{job.progress ? ` · ${job.progress.done}/${job.progress.total}` : ""}</div>}
       {(job?.result?.warnings as string[] | undefined)?.map((w, i) => <div key={i} className="banner warn">⚠ {w}</div>)}
+      {rows.length > 0 && sweptAxes.length === 2 && job?.status !== "running" && <GridHeat rows={rows} rank={rank} axes={sweptAxes} />}
       {rows.length > 0 && (
         <table className="tbl">
-          <thead><tr><th>#</th><th>Parameters</th>{cols.map((c) => <th key={c} className="num" style={c === rank ? { color: "var(--accent)" } : undefined}>{c}{c === rank ? " ▼" : ""}</th>)}<th className="num">trades</th><th className="num">max DD</th><th><span className="sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th>#</th><th>Parameters</th>{cols.map((c) => <th key={c} className="num" style={c === rank ? { color: "var(--accent)" } : undefined}>{METRIC_LABEL[c]}{c === rank ? " ▼" : ""}</th>)}<th className="num">trades</th><th className="num">max DD</th><th><span className="sr-only">Actions</span></th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={`click${results?.runId === r.runId ? " sel" : ""}`} onClick={() => r.runId && r.status === "done" && void useStore.getState().selectRun(r.runId)} title={r.status === "done" ? "Open this run's charts and trades" : r.status}>
                 <td className="muted">{i + 1}</td>
                 <td className="mono">{Object.entries(r.params).map(([k, v]) => `${k}=${v}`).join(" ")}</td>
-                {cols.map((c) => <td key={c} className="num">{r.summary ? (c === "totalPnL" ? fmtMoney(r.summary[c]) : c === "winRate" ? fmtPct(r.summary[c], 1) : fmtRatio(r.summary[c])) : DASH}</td>)}
+                {cols.map((c) => <td key={c} className="num">{r.summary ? fmtMetric(c, r.summary[c]) : DASH}</td>)}
                 <td className="num">{r.summary?.trades ?? DASH}</td>
-                <td className="num">{r.summary ? fmtPct(r.summary.maxDrawdown, 1) : DASH}</td>
-                <td className="muted">{r.status === "done" ? "" : r.status}</td>
+                <td className="num">{r.summary ? fmtPct(r.summary.maxDrawdown ?? 0, 1) : DASH}{r.summary?.blown ? <span className="badge bad" style={{ marginLeft: 6 }} title="Equity went below zero: lost more than the starting balance. Ranked last.">blown</span> : null}</td>
+                <td>{r.status === "done"
+                  ? <button className="btn ghost sm" title={`Write ${Object.entries(r.params).map(([k, v]) => `${k}=${v}`).join(" ")} into the strategy's PARAM lines (undo with Ctrl+Z)`} onClick={(e) => { e.stopPropagation(); void applyParams(ax.strategy!, r.params); }}>Apply</button>
+                  : <span className="muted">{r.status}</span>}</td>
               </tr>
             ))}
           </tbody>
