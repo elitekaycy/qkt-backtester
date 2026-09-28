@@ -88,6 +88,12 @@ export function relocate(source: string, message: string): Range | null {
   if (m) re = new RegExp(`(?<![\\w.])(${m[1]})\\s*\\(`);
   else if ((m = /^Unknown stream alias:\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})(?=\\.|\\b)`);
   else if ((m = /^Unknown (?:function|constant):\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})\\b`);
+  // qkt reports these without a position: point at the text they are about
+  else if ((m = /^Unknown stream field for (\w+):\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]}\\.${m[2]})\\b`);
+  else if ((m = /^Indicator (\w+) expects/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})\\s*\\(`);
+  else if (/SIZING RISK|PCT RISK/i.test(message)) re = /\b(SIZING\s+[\w.]+\s+PCT\s+RISK)\b/;
+  else if (/BRACKET requires/i.test(message)) re = /\b(BRACKET)\b/;
+  else if ((m = /(?:^|\/|Imported file not found: )([\w.-]+\.qkt)$/.exec(message))) re = new RegExp(`\\b(IMPORT\\s+'[^']*${m[1]!.replace(/\./g, "\\.")}')`);
   if (!re) return null;
   for (let i = 0; i < lines.length; i++) {
     const l = scrub(lines[i]!);

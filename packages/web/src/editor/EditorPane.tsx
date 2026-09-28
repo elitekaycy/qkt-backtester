@@ -4,7 +4,7 @@ import type { editor } from "monaco-editor/editor/editor.api.js";
 import { api } from "../api/client.js";
 import { LspClient, toMarkers } from "./lsp.js";
 import { enableVim, languageFor, setupMonaco, themeFor, type Monaco } from "./monaco.js";
-import { useStore } from "../state/store.js";
+import { fileProblems, useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { cycleRegion } from "../util/regions.js";
 
@@ -52,8 +52,6 @@ export function EditorPane() {
         const prefix = `file://${info.workspace}/`;
         const path = uri.startsWith(prefix) ? uri.slice(prefix.length) : null;
         if (!path) return;
-        const model = S.current?.models.get(path);
-        if (model) m.editor.setModelMarkers(model, "qkt-lsp", toMarkers(m, diags));
         store.getState().setDiagnostics(path, "lsp", diags);
       });
       lsp.onStatus = setLspStatus;
@@ -61,6 +59,7 @@ export function EditorPane() {
       lsp.connect();
       S.current = { m, ed, models: new Map(), views: new Map(), lsp, suppress: false };
       (window as unknown as { __qktEditor?: editor.IStandaloneCodeEditor }).__qktEditor = ed; // handle for automated tests
+      (window as unknown as { __qktMarkers?: () => unknown }).__qktMarkers = () => m.editor.getModelMarkers({}).map((x) => ({ owner: x.owner, sev: x.severity, line: x.startLineNumber, col: x.startColumn, msg: x.message, file: x.resource.path })); // for automated tests
       ed.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.KeyS, () => { const p = store.getState().activePath; if (p) void store.getState().saveFile(p); });
       ed.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.Enter, () => void store.getState().startRun());
       // Monaco owns these chords while the editor has focus; forward them to the app so shortcuts work everywhere.
@@ -150,6 +149,14 @@ export function EditorPane() {
     for (const [p, model] of s.models) if (!want.has(p)) { if (p.endsWith(".qkt")) s.lsp.close(p); model.dispose(); s.models.delete(p); s.views.delete(p); store.getState().setDiagnostics(p, "check", []); store.getState().setDiagnostics(p, "lsp", []); }
   }, [openFiles, booted, info]);
 
+  // the squiggles are the Problems panel's list, per file: one normalised source, so both always agree
+  const problems = useStore((st) => st.problems);
+  useEffect(() => {
+    const s = S.current;
+    if (!s) return;
+    for (const [path, model] of s.models) s.m.editor.setModelMarkers(model, "qkt", toMarkers(s.m, fileProblems(problems[path] ?? {})));
+  }, [problems, booted, activePath]);
+
   const shown = useRef<string | null>(null);
 
   useEffect(() => {
@@ -182,8 +189,6 @@ export function EditorPane() {
       try {
         const { diagnostics } = await api.check(kind, text, path);
         if (seq !== timers.current.seq) return;
-        const s = S.current, model = s?.models.get(path);
-        if (s && model) s.m.editor.setModelMarkers(model, "qkt-check", toMarkers(s.m, diagnostics));
         store.getState().setDiagnostics(path, kind === "config" ? "config" : "check", diagnostics);
       } catch { /* checker busy or offline: keep the last markers */ }
     }, 600);

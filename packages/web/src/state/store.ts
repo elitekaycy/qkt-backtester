@@ -1,4 +1,4 @@
-import { anchorParseError } from "@qkt-studio/core/lint";
+import { anchorParseError, relocate } from "@qkt-studio/core/lint";
 import { create } from "zustand";
 import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
@@ -497,7 +497,15 @@ export const useStore = create<State>((set, get) => ({
   setDiagnostics(path, source, list) {
     if (path.endsWith(".qkt") && list.length) {
       const text = get().openFiles.find((f) => f.path === path)?.content;
-      if (text !== undefined) list = list.map((d) => (d.severity === "error" ? { ...d, ...anchorParseError(text, d) } : d));
+      const ws = get().info?.workspace;
+      if (text !== undefined) list = list.map((d) => {
+        let x = { ...d };
+        // qkt names a missing import by its absolute path alone
+        if (/^\/.*\.qkt$/.test(x.message)) x.message = `Imported file not found: ${ws && x.message.startsWith(ws + "/") ? x.message.slice(ws.length + 1) : x.message}`;
+        // reported without a position (line 1, col 1): point at the text the message is about
+        if (x.line <= 1 && x.col <= 1) { const at = relocate(text, x.message); if (at) x = { ...x, line: at.line, col: at.col, endCol: at.endCol }; }
+        return x.severity === "error" ? { ...x, ...anchorParseError(text, x) } : x;
+      });
     }
     set((s) => {
       const cur = { ...(s.problems[path] ?? {}) };
@@ -510,8 +518,22 @@ export const useStore = create<State>((set, get) => ({
 }));
 
 /** Flatten diagnostics for the Problems list. */
+/**
+ * The problems of one file as shown everywhere (the editor's squiggles and the Problems panel read this same list): the
+ * same message at the same place from qkt's language server and from the check after a pause is one problem, not two.
+ */
+export function fileProblems(bySource: Partial<Record<DiagSource, Diagnostic[]>>): Array<Diagnostic & { source: DiagSource }> {
+  const out: Array<Diagnostic & { source: DiagSource }> = [], seen = new Set<string>();
+  for (const source of ["lsp", "check", "config", "run"] as DiagSource[]) for (const d of bySource[source] ?? []) {
+    const k = `${d.line}:${d.message}`;
+    if (seen.has(k)) continue;
+    seen.add(k); out.push({ ...d, source });
+  }
+  return out;
+}
+
 export function flattenProblems(problems: State["problems"]): Array<Diagnostic & { path: string; source: DiagSource }> {
   const out: Array<Diagnostic & { path: string; source: DiagSource }> = [];
-  for (const [path, bySource] of Object.entries(problems)) for (const [source, list] of Object.entries(bySource)) for (const d of list ?? []) out.push({ ...d, path, source: source as DiagSource });
+  for (const [path, bySource] of Object.entries(problems)) for (const d of fileProblems(bySource)) out.push({ ...d, path });
   return out.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
 }
