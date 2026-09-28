@@ -43,7 +43,9 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
   const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; " +
     "worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
   app.addHook("onSend", async (_req, reply, payload) => {
-    reply.header("X-Content-Type-Options", "nosniff").header("X-Frame-Options", "DENY").header("Referrer-Policy", "no-referrer").header("Content-Security-Policy", CSP);
+    reply.header("X-Content-Type-Options", "nosniff").header("Referrer-Policy", "no-referrer");
+    // a route with its own policy keeps it (engine HTML reports are served sandboxed, to be framed by the studio itself)
+    if (!reply.hasHeader("Content-Security-Policy")) reply.header("Content-Security-Policy", CSP).header("X-Frame-Options", "DENY");
     return payload;
   });
 
