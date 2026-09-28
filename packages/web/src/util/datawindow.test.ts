@@ -78,3 +78,14 @@ describe("monthGrids", () => {
     expect(g[0]!.months[0]!.lead).toBe(1);   // Jan 30 2024 is a Tuesday: Monday-first offset 1
   });
 });
+
+import { fillableDays } from "./datawindow.js";
+describe("fillableDays", () => {
+  it("counts only the missing bar days that ticks cover", () => {
+    // bars missing Mar 1-10; ticks from Mar 5 to Mar 31 with Mar 8 missing: 5, 6, 7, 9, 10
+    expect(fillableDays([{ from: "2024-03-01", to: "2024-03-11" }], { first: "2024-03-05", last: "2024-03-31", gaps: [{ from: "2024-03-08", to: "2024-03-09" }] })).toBe(5);
+    expect(fillableDays([{ from: "2024-03-01", to: "2024-03-11" }], null)).toBe(0);
+    expect(fillableDays([{ from: "2024-01-01", to: "2024-01-05" }], { first: "2024-03-05", last: "2024-03-31", gaps: [] })).toBe(0);
+    expect(fillableDays([{ from: "2024-03-30", to: "2024-04-03" }], { first: "2024-03-05", last: "2024-03-31", gaps: [] })).toBe(2);
+  });
+});

@@ -70,3 +70,57 @@ button.hc:hover { outline: 2px solid var(--ink); outline-offset: 0; position: re
 
 /* the series table sits in a modal: let the status cell wrap instead of clipping */
 .modal td:last-child { white-space: normal; }
+
+/* readiness card: can the open strategy run, over which dates, and the fix */
+.ready-card { display: flex; flex-direction: column; gap: 6px; padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card); font-size: var(--fs-sm); }
+.ready-card.ok { box-shadow: inset 3px 0 0 var(--ok); }
+.ready-card.bad { box-shadow: inset 3px 0 0 var(--danger); }
+.rc-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.rc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rc-verdict { display: flex; align-items: flex-start; gap: 6px; line-height: 1.4; }
+.rc-verdict > svg { flex: none; margin-top: 2px; }
+.rc-note { font-size: var(--fs-xs); line-height: 1.4; }
+.rc-window { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-xs); }
+.rc-fit { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); }
+.rc-streams, .rc-others ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rc-stream { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 26px; padding: 2px 6px; border: 0; border-radius: var(--r-sm); background: transparent; color: inherit; font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.rc-stream:hover { background: var(--hover); }
+.rc-stream:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
+.rc-fix { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 6px 6px 25px; font-size: var(--fs-xs); line-height: 1.4; }
+.rc-members { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: var(--fs-xs); }
+.rc-other { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: var(--fs-xs); padding-top: 6px; border-top: 1px solid var(--line); }
+.rc-other .btn { margin-left: auto; }
+.rc-others { margin-top: var(--s2); }
+.rc-toggle { padding-left: 2px; }
+
+/* one line per symbol; details live in its dialog */
+.sym-filter { margin: 2px 0 6px; }
+.symline { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 6px 6px; border: 0; border-radius: var(--r-sm); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; min-height: 24px; }
+.symline:hover { background: var(--hover); }
+.symline:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
+.sl-top { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--fs-sm); }
+.sl-top > svg { flex: none; }
+.sl-tfs { display: inline-flex; gap: 4px; color: var(--ink-3); font-size: var(--fs-xs); overflow: hidden; white-space: nowrap; min-width: 0; }
+.sl-tfs .unread { color: var(--danger); text-decoration: line-through; }
+.sl-years { font-size: var(--fs-xs); flex: none; }
+.sl-bottom { display: flex; flex-direction: column; gap: 2px; padding-left: 20px; min-width: 0; }
+.sl-why { font-size: var(--fs-xs); line-height: 1.35; }
+.sl-why.warn { color: var(--warn); }
+.sl-why.bad { color: var(--loss-ink); }
+.miniyears { display: flex; gap: 2px; height: 6px; }
+.miniyears i { flex: 1 1 0; max-width: 14px; min-width: 3px; border-radius: 1px; background: var(--card-3); }
+.miniyears i.t-ok { background: color-mix(in srgb, var(--ok) 70%, transparent); }
+.miniyears i.t-warn { background: var(--warn); }
+.miniyears i.t-bad { background: var(--danger); }
+.miniyears i.partial { opacity: 0.55; }
+
+/* the data source, set once: a footer, not the headline */
+.data-foot { display: flex; flex-direction: column; gap: 4px; margin-top: var(--s4); padding-top: var(--s3); border-top: 1px solid var(--line); font-size: var(--fs-xs); }
+.df-path { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (forced-colors: active) {
+  .ready-card.ok, .ready-card.bad { box-shadow: none; border: 2px solid CanvasText; }
+  .miniyears i { forced-color-adjust: none; border: 1px solid CanvasText; }
+}
+.rc-cmd { color: var(--ink-2); }
+.rc-cmd .mono { font-size: var(--fs-xs); background: var(--card-2); padding: 0 3px; border-radius: 3px; word-break: break-all; }
+.rc-fit.warn { color: var(--warn); }

@@ -68,6 +68,22 @@ export function gapDaysIn(gaps: DayRange[], from: string, to: string): number {
 }
 
 /**
+ * Missing bar days that tick files can rebuild: bar gaps inside the tick span, minus the days ticks are missing too.
+ * e.g. bars missing Mar 1–10, ticks from Mar 5 with Mar 8 missing: 5 fillable days (5, 6, 7, 9, 10).
+ */
+export function fillableDays(barGaps: DayRange[], ticks: { first: string | null; last: string | null; gaps: DayRange[] } | null): number {
+  if (!ticks?.first || !ticks.last) return 0;
+  const end = addIso(ticks.last, 1);
+  let n = 0;
+  for (const g of barGaps) {
+    const f = g.from > ticks.first ? g.from : ticks.first, t = g.to < end ? g.to : end;
+    if (f < t) n += rangeDays({ from: f, to: t }) - gapDaysIn(ticks.gaps, f, t);
+  }
+  return Math.max(0, n);
+}
+const addIso = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+
+/**
  * Strategy readiness recomputed on the client from the scan: the server's answer knows only the default source, so a symbol
  * pointed at another source (or windowed) must be re-evaluated against the report it actually reads.
  */
