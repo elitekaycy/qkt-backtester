@@ -5,6 +5,8 @@ import type { ScanReport } from "../api/types.js";
  * of RULES, LET inside RULES, `FOR EACH s IN a, b` without the brackets qkt requires), so those are dropped and these are
  * offered instead: only where the result is valid, built from the file's own aliases and the data source's symbols and
  * timeframes, and each one checked by `qkt parse` in snippets.test.ts.
+ * The same bugs are fixed at the source in elitekaycy/qkt#1274 (scoped, parse-checked LSP snippets); the studio keeps its
+ * own set either way, because it can use the data source and the file's aliases, which the language server cannot see.
  */
 export interface Snippet { label: string; detail: string; body: string; filter?: string }
 
