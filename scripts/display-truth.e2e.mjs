@@ -63,10 +63,14 @@ const has = (name, hay, needle) => ok(name, hay.includes(needle), `expected ${JS
 const kpis = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".preview-kpis .pkpi")].map((k) => [k.querySelector(".l")?.textContent, { v: k.querySelector(".v")?.textContent, s: k.querySelector(".s")?.textContent ?? "" }])));
 ok("KPI Net P&L", kpis["Net P&L"]?.v === `${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`, JSON.stringify(kpis["Net P&L"]));
 const runMeta = await api(`/api/runs/${runId}/derived/meta`);
+// orders qkt rejected: the chart pane says how many, exactly as the run's summary counts them, and says nothing when none
+const rjText = await text(".banner.rejections");
+if (runMeta.rejections?.count) has("rejections banner shows qkt's count", rjText, `qkt rejected ${runMeta.rejections.count.toLocaleString("en-US")} order`);
+else ok("no rejections banner when qkt rejected nothing", rjText === "", rjText);
 ok("run records its account currency", typeof runMeta.currency === "string" && /^[A-Z]{3}$/.test(runMeta.currency), JSON.stringify(runMeta.currency));
 has("KPI Net P&L names the currency", kpis["Net P&L"]?.s ?? "", `on ${fmtNum(start, 0)} ${runMeta.currency}`);
 if (s.unrealized !== 0) has("KPI Net P&L shows the open part", kpis["Net P&L"]?.s ?? "", `incl. ${fmtMoney(s.unrealized)} open`);
-ok("KPI Win rate", kpis["Win rate"]?.v === fmtPct(s.winRate, 1) && kpis["Win rate"].s === `${s.wins}W · ${s.losses}L`, JSON.stringify(kpis["Win rate"]));
+ok("KPI Win rate", kpis["Win rate"]?.v === (s.trades ? fmtPct(s.winRate, 1) : DASH) && kpis["Win rate"].s === `${s.wins}W · ${s.losses}L`, JSON.stringify(kpis["Win rate"]));
 ok("KPI Profit factor", kpis["Profit factor"]?.v === (s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)) && kpis["Profit factor"].s === `Sharpe ${fmtRatio(s.sharpe)}`, JSON.stringify(kpis["Profit factor"]));
 ok("KPI Trades", kpis["Trades"]?.v === String(s.trades) && kpis["Trades"].s.startsWith(`${s.fills} fills`), JSON.stringify(kpis["Trades"]));
 ok("KPI Max drawdown", kpis["Max drawdown"]?.v === fmtPct(s.maxDrawdown) && kpis["Max drawdown"].s === `expectancy ${fmtMoney(s.expectancy)}`, JSON.stringify(kpis["Max drawdown"]));
@@ -74,7 +78,8 @@ ok("KPI Max drawdown", kpis["Max drawdown"]?.v === fmtPct(s.maxDrawdown) && kpis
 // the chart's Trades tab: same trades, same order and P&L as the API
 await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => /^Trades\s*\d+$/.test(x.textContent.trim()))?.click()); await sleep(900);
 const tabRows = await p.evaluate(() => [...document.querySelectorAll(".trades-tab .trow")].slice(0, 5).map((r) => r.textContent));
-ok("chart Trades tab lists trades", tabRows.length > 0);
+if (trades.total > 0) ok("chart Trades tab lists trades", tabRows.length > 0);
+else has("chart Trades tab says the run made no trades", await text(".trades-tab"), "This run made no trades");
 
 // Journal
 await key("j"); await sleep(1500);

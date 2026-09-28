@@ -37,12 +37,24 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
       {s && (
         <div className={`preview-kpis${stale ? " dim" : ""}`}>
           <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : cur ?? "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} onClick={() => open()} />
-          <Kpi l="Win rate" v={fmtPct(s.winRate, 1)} s={`${s.wins}W · ${s.losses}L`} onClick={() => open("trades")} />
+          <Kpi l="Win rate" v={s.trades ? fmtPct(s.winRate, 1) : DASH} s={`${s.wins}W · ${s.losses}L`} onClick={() => open("trades")} />
           <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} s={`Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
           <Kpi l="Trades" v={String(s.trades)} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />
           <Kpi l="Max drawdown" v={fmtPct(s.maxDrawdown)} s={`expectancy ${fmtMoney(s.expectancy)}`} tone="loss" onClick={() => open("monthly")} />
         </div>
       )}
+      {meta?.rejections && meta.rejections.count > 0 && !stale && (() => {
+        const rj = meta.rejections, top = rj.reasons[0]!, all = s ? s.fills === 0 : false;
+        return (
+          <div className="banner warn rejections" role="status" title={rj.reasons.map((x) => `${x.count.toLocaleString()} × ${x.example}`).join("\n")}>
+            <TriangleAlert size={14} aria-hidden="true" />
+            <span><b>qkt rejected {rj.count.toLocaleString()} order{rj.count === 1 ? "" : "s"}{all ? ", so this run made no trades" : ""}</b>
+              {" "}· {rj.reasons.slice(0, 2).map((x) => `${x.count.toLocaleString()} × ${x.label}`).join(", ")}{rj.reasons.length > 2 ? ", …" : ""}
+              {top.hint && <span className="ink2">. {top.hint}</span>}
+              {" "}<button className="link" onClick={() => void useStore.getState().openFile("qkt.config.yaml")}>Open qkt.config.yaml</button></span>
+          </div>
+        );
+      })()}
       <ChartsBody onOpenJournal={() => open()} />
       <span hidden>{run?.id}</span>
     </section>

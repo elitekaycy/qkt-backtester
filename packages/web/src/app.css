@@ -291,3 +291,5 @@ table.tbl th.num, table.tbl td.num { text-align: right; }
 /* the save/run hints only when the editor is wide enough to show them whole (they are also in the shortcuts list, ?) */
 .editor-status { container-type: inline-size; }
 @container (max-width: 560px) { .editor-hints { display: none; } }
+.banner.rejections { margin: var(--s2) var(--s3) 0; font-size: var(--fs-xs); line-height: 1.45; }
+.banner.rejections button.link { display: inline; background: none; border: 0; padding: 0; color: var(--accent-ink); text-decoration: underline; cursor: pointer; font: inherit; }

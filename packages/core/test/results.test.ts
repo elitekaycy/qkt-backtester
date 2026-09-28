@@ -144,3 +144,25 @@ describe("summarize on very large runs", () => {
     expect(s.engineMaxConsecutiveLosses).toBe(res.global.maxConsecutiveLosses);
   });
 });
+
+import { summarizeRejections } from "../src/rejections.js";
+describe("summarizeRejections", () => {
+  it("groups qkt's rejections by reason, with the fix for known ones", () => {
+    const csv = [
+      "timestamp,reason,strategy,symbol",
+      "1672701300000,order notional 365423.20000000 exceeds cap 250000 (qty=2 ref=1827.116 contractSize=100 currency=USD),m_short,BACKTEST:XAUUSD",
+      "1672702200000,order notional 365640.20000000 exceeds cap 250000 (qty=2 ref=1828.201 contractSize=100 currency=USD),m_short,BACKTEST:XAUUSD",
+      '1672703100000,"halted: daily loss 1012.5 exceeds max 1000",m_short,BACKTEST:XAUUSD',
+      "1672704000000,venue said no,m_short,BACKTEST:XAUUSD",
+    ].join("\n");
+    const r = summarizeRejections(csv);
+    expect(r.count).toBe(4);
+    expect(r.reasons.map((x) => [x.kind, x.count])).toEqual([["notional-cap", 2], ["daily-loss-halt", 1], ["other", 1]]);
+    expect(r.reasons[0]!.label).toBe("order notional exceeds cap");
+    expect(r.reasons[0]!.hint).toContain("risk.max_order_notional");
+    expect(r.reasons[1]!.example).toBe("halted: daily loss 1012.5 exceeds max 1000");
+    expect(r.reasons[2]!.hint).toBeUndefined();
+    expect(summarizeRejections("timestamp,reason,strategy,symbol\n")).toEqual({ count: 0, reasons: [] });
+    expect(summarizeRejections("")).toEqual({ count: 0, reasons: [] });
+  });
+});

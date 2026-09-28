@@ -50,7 +50,9 @@ export interface SettingsView { sources: string[]; symbolPrefs: Record<string, S
 export interface DirList { path: string; parent: string | null; store: boolean; dirs: Array<{ name: string; store: boolean }> }
 export interface Overlay { total: number; truncated: boolean; rows: RoundTrip[] }
 export interface Equity { ts: number[]; equity: number[]; drawdown: number[] }
-export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string; base?: string | null }>; strategies: string[]; fills: number; trips: number; qktVersion: string; /** Account currency every money figure is in; null on runs from before it was recorded. */ currency?: string | null }
+export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string; base?: string | null }>; strategies: string[]; fills: number; trips: number; qktVersion: string; /** Account currency every money figure is in; null on runs from before it was recorded. */ currency?: string | null;
+  /** Orders qkt refused (risk caps, halts), by reason; absent on runs from before it was recorded. */
+  rejections?: { count: number; reasons: Array<{ kind: string; label: string; count: number; example: string; hint?: string }> } }
 export interface DayCoverage { day: string; bars: number; status: "ok" | "thin" | "closed" | "missing" }
 export interface Coverage { broker: string; symbol: string; tf: string; days: DayCoverage[]; summary: Record<string, number> }
 export interface SymbolRow { broker: string; symbol: string; timeframes: string[] }

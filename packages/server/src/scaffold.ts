@@ -65,7 +65,9 @@ risk:
   # daily_dd_basis: balance         # balance | equity
   # max_round_trips_10m: 10         # 0 disables the runaway-loop breaker
   # max_broker_rejections_1m: 5
-  # (live) max_order_qty, max_order_notional, price_collar_pct, margin_floor_pct, measured_usage_hours, measured_usage_max_qty
+  # max_order_notional: "250000"   # per-order value cap (size x price x contract size); applies to backtests too
+  # max_order_qty: "100"            # per-order size cap; applies to backtests too
+  # (live) price_collar_pct, margin_floor_pct, measured_usage_hours, measured_usage_max_qty
   # per_strategy:
   #   my_strategy:                  # the STRATEGY name in the .qkt file
   #     max_daily_loss: "300"

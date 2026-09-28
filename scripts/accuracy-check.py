@@ -9,6 +9,9 @@ buckets, R, streaks, equity drawdown) and compares with what the studio serves. 
   scripts/accuracy-check.py BASE STRATEGY FROM TO [draft|full] [OPTIONS_JSON] [REPEAT]
 
 REPEAT > 1 also forces that many identical runs and checks every artifact is byte-identical (determinism).
+PARAMS='{"fast":"7"}' overrides strategy PARAMs. CLI_REPLAY=<qkt data home> (studio on this machine only) re-runs the exact
+command the studio recorded with the plain qkt CLI and requires the same trades, equity and totals: the studio passes qkt
+exactly what it says, and changes nothing qkt computes.
 """
 import csv, datetime as dt, hashlib, io, json, sys, time, urllib.parse, urllib.request
 from collections import defaultdict
@@ -19,6 +22,8 @@ TIER = sys.argv[5] if len(sys.argv) > 5 else "draft"
 OPTIONS = json.loads(sys.argv[6]) if len(sys.argv) > 6 and sys.argv[6] else None
 REPEAT = int(sys.argv[7]) if len(sys.argv) > 7 else 1
 TOKEN = __import__("os").environ.get("STUDIO_TOKEN")
+PARAMS = json.loads(__import__("os").environ.get("PARAMS") or "null")
+CLI_REPLAY = __import__("os").environ.get("CLI_REPLAY")
 
 STOP_FAMILY = {"Stop", "StopLimit", "TrailingStop", "ArmedTrailingStop", "SteppedStop", "TimeTighteningStop", "TrailingStopLimit"}
 TARGET_FAMILY = {"Limit", "IfTouched"}
@@ -33,6 +38,7 @@ def http(path, body=None, raw=False):
 def run(force):
     body = {"strategy": STRATEGY, "from": FROM, "to": TO, "tier": TIER, "force": force}
     if OPTIONS: body["options"] = OPTIONS
+    if PARAMS: body["params"] = PARAMS
     rid = http("/api/runs", body)["runId"]
     for _ in range(3600):
         r = http(f"/api/runs/{rid}")
@@ -137,6 +143,16 @@ def verify(rid):
     for b in a["hold"]:
         q = f"minHold={b['minMs']}" + (f"&maxHold={b['maxMs']}" if b["maxMs"] is not None and b["maxMs"] < 1e15 else "")
         check(f"hold bucket {b['label']} lists what it counts", http(f"/api/runs/{rid}/analytics?{q}")["closed"], b["trades"])
+    # orders qkt rejected: the studio's summary counts exactly the rows qkt wrote, grouped without losing any
+    try: rej = list(csv.DictReader(io.StringIO(art(rid, "engine/rejections.csv").decode())))
+    except Exception: rej = []
+    meta = http(f"/api/runs/{rid}/derived/meta"); rs = meta.get("rejections") or {"count": 0, "reasons": []}
+    check("rejections: count", rs["count"], len(rej))
+    check("rejections: reasons add up", sum(x["count"] for x in rs["reasons"]), len(rej))
+    check("rejections: every example is a reason qkt wrote", all(x["example"] in {r["reason"] for r in rej} for x in rs["reasons"]), True)
+    runj = http(f"/api/runs/{rid}")
+    if len(R) == 0 and rej: check("no-trade run names the rejections", any("rejected" in w for w in runj["warnings"]), True)
+    if len(R) == 0 and not rej: check("no-trade run says the conditions never held", any("never held" in w for w in runj["warnings"]), True)
     return len(R)
 
 def fingerprint(rid):
@@ -145,8 +161,28 @@ def fingerprint(rid):
         out[p] = hashlib.sha256(art(rid, p)).hexdigest()
     return out
 
+def replay(rid):
+    """Run the recorded qkt command again with the CLI alone, into a scratch folder, and compare what qkt wrote."""
+    import os, shlex, subprocess, tempfile
+    runj = http(f"/api/runs/{rid}")
+    cmd = next((st.get("command") for st in runj["steps"] if (st.get("command") or "").startswith("qkt backtest")), None)
+    if not cmd: problems.append("replay: no recorded qkt backtest command"); return
+    args = shlex.split(cmd)
+    out = tempfile.mkdtemp(prefix="qkt-replay-")
+    args[args.index("--report-dir") + 1] = out
+    p = subprocess.run(args, env={**os.environ, "QKT_DATA_HOME": CLI_REPLAY}, capture_output=True, text=True, timeout=1800)
+    if p.returncode != 0: problems.append(f"replay: qkt exited {p.returncode}: {p.stderr[-400:]}"); return
+    for f in ("trades.csv", "equity_global.csv"):
+        mine = open(os.path.join(out, f), "rb").read()
+        if hashlib.sha256(mine).hexdigest() != hashlib.sha256(art(rid, f"engine/{f}")).hexdigest(): problems.append(f"replay: {f} differs from the plain qkt CLI")
+    a, b = json.load(open(os.path.join(out, "result.json")))["global"], json.loads(art(rid, "engine/result.json"))["global"]
+    for k in ("realizedTotal", "unrealizedTotal", "totalPnL", "tradeCount", "maxDrawdown", "sharpeRatio", "winRate", "profitFactor", "commissionPaid", "swapPaid"):
+        if a.get(k) != b.get(k): problems.append(f"replay: result.global.{k} studio={b.get(k)!r} cli={a.get(k)!r}")
+    print(f"cli replay: {' '.join(args[:2])} ... reproduces trades, equity and totals" if not any(x.startswith("replay") for x in problems) else "cli replay: DIFFERS")
+
 rid = run(force=False)
 n = verify(rid)
+if CLI_REPLAY: replay(rid)
 print(f"{STRATEGY} {FROM}..{TO} {TIER}: {n} trades compared with an independent implementation")
 if REPEAT > 1:
     base = fingerprint(rid)

@@ -3,6 +3,7 @@ import { prepareDataView, allowedWindow } from "./data-view.js";
 import { configStartingBalance } from "@qkt-studio/core";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
+import { scanCached, seriesDays } from "./data-scan.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
@@ -52,6 +53,9 @@ class Cancelled extends Error {}
 
 interface Active {
   run: RunJson;
+  /** Rejects with Cancelled the moment the run is cancelled: raced against the steps that wait without a child process. */
+  cancelWait: Promise<never>;
+  rejectCancel(): void;
   /** Data folder qkt reads for this run: the source itself, or a folder of symlinks when symbols come from different sources. */
   dataRoot: string;
   wsEnv: WorkspaceEnv;
@@ -78,6 +82,33 @@ interface Active {
 const RUN_ID = /^[0-9A-Za-z][0-9A-Za-z_.-]{0,120}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
+
+/**
+ * Kill engine processes whose `--report-dir` is inside `runsDir`: left behind when the studio itself was killed. Linux only
+ * (reads /proc); elsewhere it does nothing. Returns how many were stopped.
+ */
+async function stopOrphanEngines(runsDir: string): Promise<number> {
+  const prefix = path.resolve(runsDir) + path.sep;
+  let n = 0;
+  for (const pid of await fs.readdir("/proc").catch(() => [] as string[])) {
+    if (!/^\d+$/.test(pid) || Number(pid) === process.pid) continue;
+    const args = (await fs.readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => "")).split("\0");
+    const i = args.indexOf("--report-dir");
+    if (i < 0 || !(args[i + 1] ?? "").startsWith(prefix)) continue;
+    try { process.kill(Number(pid), "SIGKILL"); n++; } catch { /* gone, or not ours to kill */ }
+  }
+  return n;
+}
+
+/** A promise that rejects with Cancelled when the run is cancelled (handled, so an unraced one never counts as unhandled). */
+function cancelHandle(): { cancelWait: Promise<never>; rejectCancel(): void } {
+  let reject!: (e: unknown) => void;
+  const cancelWait = new Promise<never>((_, rej) => { reject = rej; });
+  cancelWait.catch(() => undefined);
+  return { cancelWait, rejectCancel: () => reject(new Cancelled()) };
+}
+/** Wait for `p`, or stop waiting as soon as the run is cancelled. */
+const orCancel = <T>(a: { cancelWait: Promise<never> }, p: Promise<T>): Promise<T> => Promise.race([p, a.cancelWait]);
 const MAX_RANGE_DAYS = 3660;
 const MAX_LOG_EVENTS = 300;
 
@@ -110,6 +141,10 @@ export class Runner {
   async init(): Promise<void> {
     await fs.mkdir(this.runsDir, { recursive: true });
     await fs.mkdir(path.join(this.cfg.workspace, ".qkt-studio"), { recursive: true });
+    // a studio killed outright (SIGKILL, OOM) cannot stop its engines: any still writing into this workspace's runs is ours
+    // and its run is about to be marked interrupted, so stop it first
+    const orphans = await stopOrphanEngines(this.runsDir);
+    if (orphans) console.error(`stopped ${orphans} engine process${orphans === 1 ? "" : "es"} left running by a previous studio`);
     for (const d of await fs.readdir(this.runsDir).catch(() => [] as string[])) {
       const file = path.join(this.runsDir, d, "run.json");
       try {
@@ -245,7 +280,8 @@ export class Runner {
     if (options.startingBalance === undefined) { const sb = configStartingBalance(configText, childEnv(this.cfg, wsEnv)); if (sb !== undefined) options.startingBalance = sb; }
     const hashInput: RunHashInput = {
       strategySources: sources, config: configText, params, from: req.from, to: req.to, tier: req.tier, engine,
-      flags: [...(req.allowIncomplete ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
+      // "window-check:1": runs made before the studio refused windows with missing days are not reused (see checkWindowData)
+      flags: ["window-check:1", ...(req.allowIncomplete ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
     };
     const hash = runHash(hashInput);
 
@@ -283,7 +319,7 @@ export class Runner {
     let resolve!: (r: RunJson) => void;
     const finished = new Promise<RunJson>((r) => { resolve = r; });
     const a: Active = {
-      run, dir, dataRoot: this.cfg.dataRoot, wsEnv, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
+      ...cancelHandle(), run, dir, dataRoot: this.cfg.dataRoot, wsEnv, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
       finished, resolve, request: req, stratAbs, stratSource: sources[stratRel] ?? "", cfgAbs, info: { streams },
     };
     this.active.set(id, a);
@@ -399,6 +435,7 @@ export class Runner {
     if (!a) return false;
     a.cancelled = true;
     if (opts.purge) a.purge = true;
+    a.rejectCancel();
     const qi = this.queue.indexOf(a);
     if (qi >= 0) { this.queue.splice(qi, 1); await this.finishCancelled(a); return true; }
     await a.proc?.kill();
@@ -475,8 +512,9 @@ export class Runner {
       await this.setStatus(a, "checking");
       await this.stepProject(a); this.guardCancel(a);
       await this.stepConfig(a); this.guardCancel(a);
-      a.dataRoot = (await prepareDataView(this.cfg, a.info.streams.map((s) => s.symbol))).root;
+      a.dataRoot = (await orCancel(a, prepareDataView(this.cfg, a.info.streams.map((s) => s.symbol)))).root;
       await this.stepParse(a); this.guardCancel(a);
+      await orCancel(a, this.checkWindowData(a)); this.guardCancel(a);
       await this.stepEngine(a); this.guardCancel(a);
       await this.stepPostprocess(a);
       r.status = transition(r.status, "done");
@@ -564,7 +602,7 @@ export class Runner {
   private async stepParse(a: Active): Promise<void> {
     const cmd = `${this.cfg.qktBin} parse ${quote(a.run.strategy)}`;
     await this.startStep(a, "parse", cmd);
-    const r = await execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 });
+    const r = await orCancel(a, execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 }));
     this.guardCancel(a);
     if (r.code !== 0) {
       const err = normalizeError(r.stderr || r.stdout, r.code);
@@ -631,6 +669,7 @@ export class Runner {
     if (holes.length) r.holes = holes;
     const hint = parseBuildBarsHint(exit.stderr);
     if (hint) r.buildBarsHint = hint;
+    if (req.allowIncomplete && holes.length) r.waivedDays = [...new Set([...r.waivedDays, ...holes.map((h) => h.day)])].sort();
     if (req.allowIncomplete && holes.length) r.warnings.push(`Ran with ${holes.length} incomplete/missing day(s) waived: ${holes.slice(0, 5).map((h) => h.day).join(", ")}${holes.length > 5 ? "…" : ""}`);
 
     if (exit.timedOut) throw new StepFailure(covDone ? "backtest" : "coverage", { kind: "engine_crash", message: "The run exceeded its time limit and was stopped." });
@@ -645,6 +684,52 @@ export class Runner {
     }
     if (!covDone) { await this.endStep(a, "coverage", "ok", "no coverage report from qkt"); await this.startStep(a, "backtest"); }
     await this.endStep(a, "backtest", "ok", `${r.counts!.fills} fills`);
+  }
+
+  /**
+   * The same day-by-day rule the Data section shows, applied before the engine starts. qkt's own coverage check accepts any
+   * day that has a file, so an empty file on a 24/7 market (a Saturday with no bars) would pass and the run would silently
+   * trade through a day with no data, while the Data section calls that window incomplete. Such days refuse the run like
+   * qkt's own holes do; with "run anyway" they are recorded as waived. Reads what the run reads: in a bars run the folder qkt
+   * aggregates from, in a tick run the tick files. Days before `from` are warm-up and are not checked.
+   */
+  private async checkWindowData(a: Active): Promise<void> {
+    const r = a.run, req = a.request;
+    const report = await scanCached(a.dataRoot).catch(() => null);
+    if (!report) return;
+    const bySym = new Map(report.symbols.map((s) => [s.symbol, s]));
+    const bases = barBases(a.info.streams, (broker, symbol) => bySym.get(symbol)?.bars.filter((b) => b.broker === broker && b.files > 0 && !b.qktReads).map((b) => b.tf) ?? []);
+    const found: Array<{ what: string; days: string[] }> = [];
+    const seen = new Set<string>();
+    for (const s of a.info.streams) {
+      const key = r.tier === "draft" ? `${s.broker}:${s.symbol}` : s.symbol;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const base = r.tier === "draft" ? bases.get(key) : null;
+      if (r.tier === "draft" && !base) continue; // nothing qkt can read: its own coverage step names the missing folder
+      const series = await seriesDays(a.dataRoot, s.symbol, r.tier === "draft" ? { broker: s.broker, tf: base! } : "ticks").catch(() => null);
+      if (!series) continue; // no files at all: qkt reports it with the exact fix
+      const days: string[] = [];
+      const t0 = Date.parse(`${series.first}T00:00:00Z`);
+      for (let i = 0; i < series.days.length; i++) {
+        if (series.days[i] !== "m") continue;
+        const day = new Date(t0 + i * DAY_MS).toISOString().slice(0, 10);
+        if (day >= r.from && day < r.to) days.push(day);
+      }
+      if (days.length) found.push({ what: r.tier === "draft" ? `${s.symbol} ${base} bars` : `${s.symbol} ticks`, days });
+    }
+    if (!found.length) return;
+    const all = [...new Set(found.flatMap((f) => f.days))].sort();
+    const list = found.map((f) => `${f.what}: ${f.days.slice(0, 6).join(", ")}${f.days.length > 6 ? ` and ${f.days.length - 6} more` : ""}`).join("; ");
+    if (req.allowIncomplete) {
+      r.waivedDays = [...new Set([...r.waivedDays, ...all])].sort();
+      r.warnings.push(`Ran with ${all.length} day${all.length === 1 ? "" : "s"} of missing data waived (${list}): the engine sees no ${r.tier === "draft" ? "bars" : "ticks"} on them.`);
+      return;
+    }
+    throw new StepFailure("coverage", {
+      kind: "incomplete_data",
+      message: `The window has days with no data: ${list}. qkt would run through them as if the market were closed. Pick a window without them (Data shows the complete stretches), fill them, or turn on "run anyway" to waive them.`,
+    });
   }
 
   private async stepPostprocess(a: Active): Promise<void> {
