@@ -1,6 +1,6 @@
 import { useUi, type Pane } from "../state/ui.js";
 import { Tip } from "./Tip.js";
-import { Maximize2, Minimize2, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen } from "./icons.js";
+import { Maximize2, Minimize2, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PanelBottomClose, PanelBottomOpen, PanelTopClose, PanelTopOpen } from "./icons.js";
 
 const NAMES: Record<Pane, string> = { sidebar: "sidebar", editor: "editor", chart: "chart", dock: "output panel" };
 
@@ -16,9 +16,10 @@ export function PaneControls({ pane, edge, size = "sm" }: { pane: Pane; edge?: "
   const maxed = ui.maxed === pane;
   const dir = edge ?? (pane === "sidebar" ? "left" : pane === "dock" ? "down" : pane === "chart" ? (ui.layout === "row" ? "right" : "down") : "up");
   // panel icons (not bare chevrons) so the collapse control is never mistaken for previous/next
-  const Fold = dir === "left" ? (collapsed ? PanelLeftOpen : PanelLeftClose) : dir === "right" ? (collapsed ? PanelRightOpen : PanelRightClose) : dir === "down" ? (collapsed ? PanelBottomOpen : PanelBottomClose) : (collapsed ? PanelBottomOpen : PanelBottomClose);
+  const Fold = dir === "left" ? (collapsed ? PanelLeftOpen : PanelLeftClose) : dir === "right" ? (collapsed ? PanelRightOpen : PanelRightClose) : dir === "down" ? (collapsed ? PanelBottomOpen : PanelBottomClose) : (collapsed ? PanelTopOpen : PanelTopClose);
   return (
-    <span className="pane-controls" role="group" aria-label={`${name} controls`}>
+    // shown on hover or keyboard focus of the pane; always shown while collapsed or full screen, so the way back is visible
+    <span className={`pane-controls${collapsed || maxed ? " pinned" : ""}`} role="group" aria-label={`${name} controls`}>
       <Tip label={collapsed ? `Expand ${name}` : `Collapse ${name}`} side="bottom">
         <button className={`btn ghost icon ${size}`} aria-label={collapsed ? `Expand ${name}` : `Collapse ${name}`} aria-expanded={!collapsed} onClick={() => ui.toggleCollapse(pane)}><Fold size={14} /></button>
       </Tip>

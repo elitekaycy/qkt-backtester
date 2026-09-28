@@ -293,7 +293,7 @@ table.tbl th.num, table.tbl td.num { text-align: right; }
 @container (max-width: 560px) { .editor-hints { display: none; } }
 .banner.rejections { margin: var(--s2) var(--s3) 0; font-size: var(--fs-xs); line-height: 1.45; }
 .banner.rejections button.link { display: inline; background: none; border: 0; padding: 0; color: var(--accent-ink); text-decoration: underline; cursor: pointer; font: inherit; }
-.pkpi .vrow { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.pkpi .kvrow { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
 .pkpi .kd { font-size: var(--fs-xs); font-weight: 500; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pkpi .kd.up { color: var(--gain-ink, var(--gain)); }
 .pkpi .kd.down { color: var(--loss-ink, var(--loss)); }

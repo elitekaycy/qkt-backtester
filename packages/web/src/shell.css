@@ -42,3 +42,13 @@
 /* the missing-files banner lives in a narrow sidebar: stack it instead of squeezing the text beside the button */
 .files-banner { flex-direction: column; align-items: stretch; gap: var(--s2); margin: var(--s2); }
 .files-banner .btn { align-self: flex-start; }
+
+/* Secondary controls appear when they are wanted: on hover of their pane, or when anything in it has keyboard focus.
+   Collapsed and full-screen panes keep them (the way back must stay visible); touch screens, which cannot hover, always show them. */
+@media (hover: hover) {
+  .pane-controls:not(.pinned) { opacity: 0; transition: opacity var(--t-fast, 120ms); }
+  :is(.pane, aside.sidebar, .dock, .dock-bar, .tabs-row):is(:hover, :focus-within) .pane-controls { opacity: 1; }
+  .chart-cell .cap-actions { opacity: 0; transition: opacity var(--t-fast, 120ms); }
+  .chart-cell:is(:hover, :focus-within) .cap-actions, .chart-cell.maximized .cap-actions { opacity: 1; }
+}
+.cap-actions { display: inline-flex; gap: 2px; }

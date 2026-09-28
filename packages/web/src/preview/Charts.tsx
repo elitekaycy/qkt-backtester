@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CandlestickSeries, ColorType, CrosshairMode, createChart, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
-import { EyeOff } from "lucide-react";
+import { X } from "lucide-react";
 import { api, type Coverage, type RunMeta } from "../api/client.js";
 import type { RoundTrip } from "../api/types.js";
 import { TradesPrimitive } from "../charts/TradesPrimitive.js";
@@ -195,8 +195,10 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
         <span className="badge" title="Trades shown on this chart (after the filters)">{mine.length.toLocaleString()} trade{mine.length === 1 ? "" : "s"}</span>
         <span className="mono muted ohlc">{hover}</span>
         <span style={{ flex: 1 }} />
-        <Tip label={maximized ? "Restore this chart" : "Expand this chart to the whole pane"} side="bottom"><button className="btn ghost icon sm" aria-label={maximized ? `Restore ${stream.symbol} ${stream.tf}` : `Expand ${stream.symbol} ${stream.tf}`} onClick={onMax}>{maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></Tip>
-        <Tip label="Hide this chart (bring it back from Charts)" side="bottom"><button className="btn ghost icon sm" aria-label={`Hide ${stream.symbol} ${stream.tf}`} onClick={onHide}><EyeOff size={14} /></button></Tip>
+        <span className="cap-actions">
+          <Tip label={maximized ? "Restore this chart" : "Expand this chart to the whole pane"} side="bottom"><button className="btn ghost icon sm" aria-label={maximized ? `Restore ${stream.symbol} ${stream.tf}` : `Expand ${stream.symbol} ${stream.tf}`} onClick={onMax}>{maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></Tip>
+          <Tip label="Close this chart (reopen it from Charts)" side="bottom"><button className="btn ghost icon sm" aria-label={`Close ${stream.symbol} ${stream.tf} chart`} onClick={onHide}><X size={14} /></button></Tip>
+        </span>
       </div>
       <div ref={plot} className="plot" />
       {t && tip && (

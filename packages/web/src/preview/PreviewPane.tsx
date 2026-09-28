@@ -11,7 +11,7 @@ function Kpi({ l, v, s, tone, d, onClick }: { l: string; v: string; s?: string; 
   return (
     <button className="pkpi" onClick={onClick} title="Open in the Journal">
       <span className="l">{l}</span>
-      <span className="vrow"><span className={`v ${tone ?? ""}`}>{v}</span>{d && <span className={`kd ${d.better === null ? "" : d.better ? "up" : "down"}`} title="Change since your previous run of this strategy">{d.text}</span>}</span>
+      <span className="kvrow"><span className={`v ${tone ?? ""}`}>{v}</span>{d && <span className={`kd ${d.better === null ? "" : d.better ? "up" : "down"}`} title="Change since your previous run of this strategy">{d.text}</span>}</span>
       {s && <span className="s" title={s}>{s}</span>}
     </button>
   );
