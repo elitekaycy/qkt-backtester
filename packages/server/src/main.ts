@@ -57,6 +57,8 @@ async function main() {
   await app.listen({ port: cfg.port, host: cfg.host });
   console.log(`qkt-backtester listening on http://${cfg.host}:${cfg.port}  workspace=${cfg.workspace}  data=${cfg.dataRoot}  terminal=${cfg.terminal}${cfg.token ? "  (token required)" : ""}`);
   const stop = () => { void app.close().then(() => process.exit(0)); };
+  // a bug in one request or run must be logged, never take the whole studio (and every other run) down with it
+  process.on("unhandledRejection", (e) => console.error("unhandled rejection:", e instanceof Error ? e.stack : e));
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
 }

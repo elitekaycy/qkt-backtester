@@ -87,6 +87,8 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 export class Runner {
   readonly index: RunIndex;
   private active = new Map<string, Active>();
+  /** Final states of runs whose run.json could not be written (disk full): served instead of the stale file. */
+  private readonly unsaved = new Map<string, RunJson>();
   private queue: Active[] = [];
   private running = 0;
   private engine: { version: string; gitSha?: string } | null = null;
@@ -334,6 +336,8 @@ export class Runner {
   async getRun(id: string): Promise<RunJson | null> {
     const a = this.active.get(id);
     if (a) return a.run;
+    const unsaved = this.unsaved.get(id);
+    if (unsaved) return unsaved;
     try { return JSON.parse(await fs.readFile(path.join(this.runDir(id), "run.json"), "utf8")) as RunJson; }
     catch { return null; }
   }
@@ -349,13 +353,15 @@ export class Runner {
     if (this.active.has(id)) return;
     const pending = this.rederiving.get(id);
     if (pending) return pending;
+    // registered before the first await, so concurrent callers (the UI loads several derived files at once) share one
+    // re-derivation instead of each parsing the run again
     const dir = this.runDir(id);
-    const meta = JSON.parse(await fs.readFile(path.join(dir, "derived", "meta.json"), "utf8").catch(() => "null")) as { derivedVersion?: number } | null;
-    if (!meta || meta.derivedVersion === DERIVED_VERSION) return;
-    if (!(await fs.stat(path.join(dir, "engine", "result.json")).then(() => true, () => false))) return;
-    const run = await this.getRun(id);
-    if (!run || run.status !== "done") return;
     const job = (async () => {
+      const meta = JSON.parse(await fs.readFile(path.join(dir, "derived", "meta.json"), "utf8").catch(() => "null")) as { derivedVersion?: number } | null;
+      if (!meta || meta.derivedVersion === DERIVED_VERSION) return;
+      if (!(await fs.stat(path.join(dir, "engine", "result.json")).then(() => true, () => false))) return;
+      const run = await this.getRun(id);
+      if (!run || run.status !== "done") return;
       const { root } = await prepareDataView(this.cfg, uniqueStreams(Object.values(await this.sourcesOf(dir, run.strategy)).flatMap((t) => parseStrategyInfo(t).streams)).map((s) => s.symbol));
       await postprocess({ runDir: dir, run, dataRoot: root });
     })().finally(() => this.rederiving.delete(id));
@@ -403,7 +409,9 @@ export class Runner {
     while (this.running < this.cfg.maxParallel && this.queue.length) {
       const a = this.queue.shift()!;
       this.running++;
-      void this.execute(a).finally(() => { this.running--; void this.pump(); });
+      void this.execute(a)
+        .catch((e) => console.error(`run ${a.run.id}: ${(e as Error).stack ?? e}`))
+        .finally(() => { this.running--; void this.pump(); });
     }
   }
 
@@ -416,6 +424,19 @@ export class Runner {
     await fs.rename(tmp, file);
     // Snapshot, not a reference: history and slow SSE writers must see the state as of this event.
     this.emit(a, { t: "run", run: structuredClone(a.run) });
+  }
+
+  /**
+   * For the terminal paths (failed, cancelled): a write that fails (disk full, a read-only folder) must not throw out of the
+   * error handler, or the whole server exits and takes every other run with it. The run's final state stays in memory, in
+   * the index and in the event stream; only its run.json is stale, and startup marks such a run interrupted.
+   */
+  private async persistFinal(a: Active): Promise<void> {
+    try { await this.persist(a); this.unsaved.delete(a.run.id); } catch (e) {
+      console.error(`run ${a.run.id}: could not write run.json (${(e as Error).message}); its state is kept in memory`);
+      this.unsaved.set(a.run.id, structuredClone(a.run));
+      this.emit(a, { t: "run", run: structuredClone(a.run) });
+    }
   }
 
   private step(a: Active, id: StepId): StepRecord { return a.run.steps.find((s) => s.id === id)!; }
@@ -470,14 +491,17 @@ export class Runner {
         ? new StepFailure("postprocess", { kind: "internal", message: e.message })
         : new StepFailure(this.currentStep(a), this.unexpected(e));
       const st = this.step(a, failure.step);
-      if (st.status !== "failed") await this.endStep(a, failure.step, "failed", failure.error.message);
+      if (st.status !== "failed") {
+        st.status = "failed"; st.message = failure.error.message;
+        if (st.startedAt) st.ms = Date.now() - Date.parse(st.startedAt);
+      }
       for (const s of r.steps) if (s.status === "pending") s.status = "skipped";
       r.error = failure.error;
       try { r.status = transition(r.status, "failed"); } catch { r.status = "failed"; }
       r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
-      await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true });
-      await this.persist(a);
-      this.index.upsert(r);
+      await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true }).catch(() => undefined);
+      await this.persistFinal(a);
+      try { this.index.upsert(r); } catch (ie) { console.error(`run ${r.id}: index update failed: ${(ie as Error).message}`); }
     } finally {
       this.active.delete(r.id);
       a.resolve(r);
@@ -498,11 +522,11 @@ export class Runner {
     r.error = { kind: "cancelled", message: "Cancelled" };
     try { r.status = transition(r.status, "cancelled"); } catch { r.status = "cancelled"; }
     r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
-    await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true });
-    await this.persist(a);
-    this.index.upsert(r);
+    await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true }).catch(() => undefined);
+    await this.persistFinal(a);
+    try { this.index.upsert(r); } catch (ie) { console.error(`run ${r.id}: index update failed: ${(ie as Error).message}`); }
     this.active.delete(r.id);
-    if (a.purge) { await fs.rm(a.dir, { recursive: true, force: true }); this.index.remove(r.id); }
+    if (a.purge) { await fs.rm(a.dir, { recursive: true, force: true }).catch(() => undefined); this.index.remove(r.id); }
     a.resolve(r);
   }
 
