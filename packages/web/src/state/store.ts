@@ -10,7 +10,7 @@ import type { SymbolReport } from "../api/types.js";
 
 export interface OpenFile { path: string; content: string; saved: string; etag: string; conflict?: boolean }
 export interface Progress { phase: string; fills: number; orders: number; elapsedMs: number; etaMs: number | null }
-export interface Results { runId: string; summary: Summary; integrity: IntegrityReport; monthly: MonthRow[]; equity: Equity; meta: RunMeta }
+export interface Results { runId: string; summary: Summary; integrity: IntegrityReport; monthly: MonthRow[]; equity: Equity; meta: RunMeta; strategy: string }
 export interface Toast { id: number; kind: "info" | "error" | "ok"; text: string }
 export type DiagSource = "lsp" | "check" | "run" | "config";
 
@@ -73,6 +73,10 @@ interface State {
   runs: RunRow[];
 
   results: Results | null;
+  /** The previous result of the same strategy, for "what did my change do" deltas; null after switching strategy. */
+  previous: Results | null;
+  /** Why the last save did not auto-run (a syntax error), or null. */
+  autoSkipped: string | null;
   resultsStale: boolean;
 
   filters: TripQuery;
@@ -135,10 +139,10 @@ export const useStore = create<State>((set, get) => ({
   theme: prefs.theme === "light" ? "light" : "dark",
   toasts: [],
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
-  cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun === true, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
+  cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun !== false, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
   settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
   runId: null, run: null, progress: null, logs: [], running: false, runs: [],
-  results: null, resultsStale: false,
+  results: null, previous: null, autoSkipped: null, resultsStale: false,
   filters: {}, selectedTrip: null, focus: null,
   problems: {},
 
@@ -219,7 +223,13 @@ export const useStore = create<State>((set, get) => ({
       set((s) => ({ openFiles: s.openFiles.map((x) => (x.path === path ? { ...x, saved: f.content, etag: r.etag, conflict: false } : x)) }));
       if (get().cfg.autoRun && (isStrategy(path) || path === CONFIG)) {
         if (autoTimer) clearTimeout(autoTimer);
-        autoTimer = setTimeout(() => void get().startRun({ auto: true, tier: "draft" }), 300);
+        // a file with a syntax error would only produce a failed run: keep the last good result and say why instead
+        const target = isStrategy(path) ? path : get().strategyPath();
+        const errs = target ? Object.entries(get().problems[target] ?? {}).filter(([src]) => src !== "run").flatMap(([, l]) => l ?? []).filter((d) => d.severity === "error") : [];
+        if (errs.length) { const e0 = errs[0]!; set({ autoSkipped: `Not run: line ${e0.line}: ${e0.message}` }); return true; }
+        set({ autoSkipped: null });
+        // a short pause only to gather files saved together (Save all)
+        autoTimer = setTimeout(() => void get().startRun({ auto: true, tier: "draft" }), 150);
       }
       return true;
     } catch (e) {
@@ -460,9 +470,11 @@ export const useStore = create<State>((set, get) => ({
   },
   async loadResults(id) {
     try {
-      const [summary, integrity, monthly, equity, meta] = await Promise.all([api.summary(id), api.integrity(id), api.monthly(id), api.equity(id), api.meta(id)]);
+      const [summary, integrity, monthly, equity, meta, run] = await Promise.all([api.summary(id), api.integrity(id), api.monthly(id), api.equity(id), api.meta(id), api.run(id)]);
       if (get().runId !== id) return;
-      set({ results: { runId: id, summary, integrity, monthly, equity, meta }, resultsStale: false, selectedTrip: null });
+      const prev = get().results;
+      const previous = prev && prev.runId !== id && prev.strategy === run.strategy ? prev : prev?.runId === id ? get().previous : null;
+      set({ results: { runId: id, summary, integrity, monthly, equity, meta, strategy: run.strategy }, previous, resultsStale: false, selectedTrip: null });
     } catch (e) {
       set({ resultsStale: false });
       get().toast("error", `Cannot load results: ${(e as Error).message}`);

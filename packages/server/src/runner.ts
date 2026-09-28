@@ -4,6 +4,7 @@ import { configStartingBalance } from "@qkt-studio/core";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
 import { scanCached, seriesDays } from "./data-scan.js";
+import { knownParsed, rememberParsed } from "./parse-cache.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
@@ -98,6 +99,19 @@ async function stopOrphanEngines(runsDir: string): Promise<number> {
     try { process.kill(Number(pid), "SIGKILL"); n++; } catch { /* gone, or not ours to kill */ }
   }
   return n;
+}
+
+/**
+ * STUDIO_CDS_DIR set (the Docker image does): backtest JVMs share a class-data archive that the JVM creates on first use,
+ * about 10% off every run's start-up with identical results. Backtests only, in their own file, so the archive holds what a
+ * backtest loads rather than whatever JVM happened to start first.
+ */
+function withCds(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const dir = process.env.STUDIO_CDS_DIR;
+  if (!dir) return env;
+  try { mkdirSync(dir, { recursive: true }); } catch { return env; }
+  const opt = `-XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=${path.join(dir, "backtest.jsa")}`;
+  return { ...env, QKT_OPTS: [env.QKT_OPTS, opt].filter(Boolean).join(" ") };
 }
 
 /** A promise that rejects with Cancelled when the run is cancelled (handled, so an unraced one never counts as unhandled). */
@@ -602,7 +616,9 @@ export class Runner {
   private async stepParse(a: Active): Promise<void> {
     const cmd = `${this.cfg.qktBin} parse ${quote(a.run.strategy)}`;
     await this.startStep(a, "parse", cmd);
-    const r = await orCancel(a, execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 }));
+    // the live check already ran qkt parse on exactly this text: skip the second JVM (a fast save-and-run loop)
+    const already = knownParsed(a.stratSource);
+    const r = already ? { code: 0, stdout: "", stderr: "" } : await orCancel(a, execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 }));
     this.guardCancel(a);
     if (r.code !== 0) {
       const err = normalizeError(r.stderr || r.stdout, r.code);
@@ -610,9 +626,10 @@ export class Runner {
       err.file = a.run.strategy;
       throw new StepFailure("parse", err);
     }
+    if (!already) rememberParsed(a.stratSource);
     const lint = lintAliases(a.stratSource).filter((d) => d.severity === "error");
     if (lint.length) { const d = lint[0]!; throw new StepFailure("parse", { kind: "unknown_alias", message: d.message, file: a.run.strategy, line: d.line, col: d.col }); }
-    await this.endStep(a, "parse", "ok", "syntax OK");
+    await this.endStep(a, "parse", "ok", already ? "syntax OK (checked while editing)" : "syntax OK");
   }
 
   private async stepEngine(a: Active): Promise<void> {
@@ -654,7 +671,7 @@ export class Runner {
     }, 250);
 
     const proc = spawnGroup(this.cfg.qktBin, args, {
-      cwd: this.cfg.workspace, env: this.env(a), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
+      cwd: this.cfg.workspace, env: withCds(this.env(a)), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
       logFiles: { out: path.join(a.dir, "logs", "stdout.log"), err: path.join(a.dir, "logs", "stderr.log") }, onLine,
     });
     a.proc = proc;

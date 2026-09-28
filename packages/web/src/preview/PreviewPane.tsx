@@ -6,8 +6,15 @@ import { ChartColumn, CircleCheck, TriangleAlert } from "../ui/icons.js";
 import { PaneControls } from "../ui/PaneControls.js";
 import { ChartsBody } from "./Charts.js";
 
-function Kpi({ l, v, s, tone, onClick }: { l: string; v: string; s?: string; tone?: "gain" | "loss"; onClick(): void }) {
-  return <button className="pkpi" onClick={onClick} title="Open in the Journal"><span className="l">{l}</span><span className={`v ${tone ?? ""}`}>{v}</span>{s && <span className="s" title={s}>{s}</span>}</button>;
+/** `d`: the change against the previous run of this strategy, with `better` saying whether it went the good way. */
+function Kpi({ l, v, s, tone, d, onClick }: { l: string; v: string; s?: string; tone?: "gain" | "loss"; d?: { text: string; better: boolean | null } | null; onClick(): void }) {
+  return (
+    <button className="pkpi" onClick={onClick} title="Open in the Journal">
+      <span className="l">{l}</span>
+      <span className="vrow"><span className={`v ${tone ?? ""}`}>{v}</span>{d && <span className={`kd ${d.better === null ? "" : d.better ? "up" : "down"}`} title="Change since your previous run of this strategy">{d.text}</span>}</span>
+      {s && <span className="s" title={s}>{s}</span>}
+    </button>
+  );
 }
 
 /** The chart pane: headline numbers, the charts and the trade list. Click any number to open the Journal on it. */
@@ -19,6 +26,15 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
   const soft = results?.integrity.checks.filter((c) => c.ok === false && c.soft) ?? [];
   const start = results?.equity.equity[0] ?? 0, cur = results?.meta.currency ?? undefined;
   const open = (sec: "overview" | "trades" | "monthly" = "overview") => ui.openJournal(sec);
+  const prev = useStore((st) => st.previous)?.summary ?? null;
+  const autoSkipped = useStore((st) => st.autoSkipped);
+  // change since the previous run of this strategy: the answer to "did my edit help?"
+  const delta = (cur: number | null, was: number | null | undefined, fmt: (x: number) => string, higherIsBetter: boolean) => {
+    if (!prev || stale || cur === null || was === null || was === undefined || !Number.isFinite(cur) || !Number.isFinite(was)) return null;
+    const dx = cur - was;
+    if (Math.abs(dx) < 1e-9) return { text: "no change", better: null };
+    return { text: `${dx > 0 ? "▲" : "▼"} ${fmt(Math.abs(dx))}`, better: higherIsBetter ? dx > 0 : dx < 0 };
+  };
 
   return (
     <section className="pane grow" aria-label="Chart" style={{ flex: "1 1 0" }}>
@@ -36,13 +52,14 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
       </div>
       {s && (
         <div className={`preview-kpis${stale ? " dim" : ""}`}>
-          <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : cur ?? "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} onClick={() => open()} />
-          <Kpi l="Win rate" v={s.trades ? fmtPct(s.winRate, 1) : DASH} s={`${s.wins}W · ${s.losses}L`} onClick={() => open("trades")} />
-          <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} s={`Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
-          <Kpi l="Trades" v={String(s.trades)} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />
-          <Kpi l="Max drawdown" v={fmtPct(s.maxDrawdown)} s={`expectancy ${fmtMoney(s.expectancy)}`} tone="loss" onClick={() => open("monthly")} />
+          <Kpi l="Net P&L" v={`${glyph(s.totalPnl)} ${fmtMoney(s.totalPnl)}`} s={[start ? `${fmtPct(s.totalPnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : cur ?? "", s.unrealized !== 0 ? `incl. ${fmtMoney(s.unrealized)} open` : ""].filter(Boolean).join(" · ") || undefined} tone={s.totalPnl >= 0 ? "gain" : "loss"} d={delta(s.totalPnl, prev?.totalPnl, (x) => fmtMoney(x).replace("+", ""), true)} onClick={() => open()} />
+          <Kpi l="Win rate" v={s.trades ? fmtPct(s.winRate, 1) : DASH} s={`${s.wins}W · ${s.losses}L`} d={delta(s.trades ? s.winRate * 100 : null, prev?.trades ? prev.winRate * 100 : null, (x) => `${x.toFixed(1)} pts`, true)} onClick={() => open("trades")} />
+          <Kpi l="Profit factor" v={s.profitFactor === null ? DASH : fmtRatio(s.profitFactor)} d={delta(s.profitFactor, prev?.profitFactor, (x) => x.toFixed(2), true)} s={`Sharpe ${fmtRatio(s.sharpe)}`} onClick={() => open()} />
+          <Kpi l="Trades" v={String(s.trades)} d={delta(s.trades, prev?.trades, (x) => String(x), true) && { ...delta(s.trades, prev?.trades, (x) => String(x), true)!, better: null }} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />
+          <Kpi l="Max drawdown" v={fmtPct(s.maxDrawdown)} d={delta(Math.abs(s.maxDrawdown) * 100, prev ? Math.abs(prev.maxDrawdown) * 100 : null, (x) => `${x.toFixed(2)} pts`, false)} s={`expectancy ${fmtMoney(s.expectancy)}`} tone="loss" onClick={() => open("monthly")} />
         </div>
       )}
+      {autoSkipped && <div className="banner warn rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>{autoSkipped}</b>. The results below are from the last version that ran; saving a fix runs it again.</span></div>}
       {meta?.rejections && meta.rejections.count > 0 && !stale && (() => {
         const rj = meta.rejections, top = rj.reasons[0]!, all = s ? s.fills === 0 : false;
         return (

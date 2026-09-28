@@ -43,7 +43,7 @@ RUN chmod +x /usr/local/bin/studio-entrypoint && mkdir -p /workspace /data /tmp/
 ENV NODE_ENV=production LANG=C.UTF-8 \
     HOST=0.0.0.0 PORT=8080 \
     WORKSPACE=/workspace QKT_DATA_HOME=/data WEB_ROOT=/app/web \
-    QKT_BIN=/opt/qkt/bin/qkt HOME=/tmp/home \
+    QKT_BIN=/opt/qkt/bin/qkt HOME=/tmp/home STUDIO_CDS_DIR=/tmp/home/cds \
     NODE_OPTIONS=--disable-warning=ExperimentalWarning
 EXPOSE 8080
 VOLUME ["/workspace", "/data"]

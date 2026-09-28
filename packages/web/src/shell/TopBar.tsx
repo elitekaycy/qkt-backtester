@@ -5,7 +5,7 @@ import { useUi } from "../state/ui.js";
 import { Menu, Popover, type MenuEntry } from "../ui/Popover.js";
 import { Tip } from "../ui/Tip.js";
 import { addDays, daysBetween, fmtDur } from "../util/format.js";
-import { CalendarDays, ChevronDown, ChevronRight, CircleAlert, CircleCheck, Layers, OctagonX, Play, Search, SlidersHorizontal, TriangleAlert, Zap, Database } from "../ui/icons.js";
+import { CalendarDays, ChevronDown, RefreshCw, ChevronRight, CircleAlert, CircleCheck, Layers, OctagonX, Play, Search, SlidersHorizontal, TriangleAlert, Zap, Database } from "../ui/icons.js";
 import { RunSettings } from "./RunSettings.js";
 
 const fmtChip = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -35,6 +35,7 @@ function RunControls({ openSettings }: { openSettings(): void }) {
   if (busy) {
     return (
       <div className="row">
+        <AutoToggle />
         <span className="ink2 nowrap hide-md row" style={{ gap: 6 }}>
           <span className="spin" />
           {running ? (progress ? `${progress.phase} · ${fmtDur(progress.elapsedMs)}${progress.etaMs ? ` · ~${fmtDur(progress.etaMs)} left` : ""}` : "starting…") : `${jobsRunning} data job${jobsRunning > 1 ? "s" : ""}`}
@@ -47,6 +48,7 @@ function RunControls({ openSettings }: { openSettings(): void }) {
   }
   return (
     <>
+      <AutoToggle />
       <div className="split-btn">
         <Tip label="Run the open strategy" kbd="Ctrl+Enter" side="bottom">
           <button className="btn primary" disabled={bad} onClick={() => void store().startRun()}><Play size={15} fill="currentColor" />Run</button>
@@ -55,6 +57,18 @@ function RunControls({ openSettings }: { openSettings(): void }) {
       </div>
       <Popover open={menu} onClose={() => setMenu(false)} anchor={chev} align="end" label="Run options"><Menu items={items} onDone={() => setMenu(false)} /></Popover>
     </>
+  );
+}
+
+/** Run on every save: the fast loop for iterating on a strategy (bars only; ticks are too slow to re-run per keystroke). */
+function AutoToggle() {
+  const on = useStore((s) => s.cfg.autoRun), setCfg = useStore((s) => s.setCfg);
+  return (
+    <Tip label={on ? "Auto-run is on: every save re-runs the strategy on bars. Click to turn off." : "Auto-run is off. Click to re-run on bars every time you save."} side="bottom">
+      <button className="btn ghost auto-toggle" aria-pressed={on} onClick={() => setCfg({ autoRun: !on })}>
+        <RefreshCw size={14} aria-hidden="true" />Auto
+      </button>
+    </Tip>
   );
 }
 

@@ -6,6 +6,7 @@ import path from "node:path";
 import { checkConfig, lintAliases, normalizeError, relocate, type Diagnostic } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
 import { execQkt } from "./proc.js";
+import { rememberParsed } from "./parse-cache.js";
 import { resolveInJail } from "./jail.js";
 
 const MAX_BYTES = 1024 * 1024;
@@ -50,6 +51,7 @@ export function registerCheckRoutes(app: FastifyInstance, cfg: ServerConfig): vo
         if (err.kind === "unknown_indicator") { const loc = relocate(content, err.message); if (loc) { line = loc.line; col = loc.col; endCol = loc.endCol; } }
         diagnostics.push({ severity: "error", code: err.kind, message: err.message, line: line ?? 1, col: col ?? 1, endCol });
       }
+      if (r.code === 0) rememberParsed(content);
       diagnostics.push(...lintAliases(content));
       return { diagnostics };
     } finally {
