@@ -524,7 +524,7 @@ describe("run housekeeping", () => {
   });
 });
 
-describe("live check of a portfolio resolves its imports from the file's own folder", () => {
+describe.skipIf(!haveQkt)("live check of a portfolio resolves its imports from the file's own folder", () => {
   it("a valid portfolio buffer has no diagnostics; a missing import names the workspace path", async () => {
     const dir = path.join(ws, "strategies");
     writeFileSync(path.join(dir, "child_a.qkt"), "STRATEGY child_a VERSION 1\n\nSYMBOLS\n    g = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN g.close > 0\n     AND POSITION.g = 0\n    THEN BUY g SIZING 0.1\n");
