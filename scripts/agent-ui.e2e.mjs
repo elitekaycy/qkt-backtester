@@ -26,6 +26,19 @@ const text = await p.evaluate(() => window.__qktEditor?.getModel()?.getValue() ?
 ok("Adopt puts the change in the editor", /STOP_LOSS BY 1 PCT/.test(text), text.slice(0, 200));
 await p.evaluate(() => window.__qktEditor.trigger("e2e", "undo", null)); await wait(300);
 ok("one undo takes the adoption back", !/STOP_LOSS BY 1 PCT/.test(await p.evaluate(() => window.__qktEditor.getModel().getValue())));
+// the user changes the file after a variant was made: Adopt keeps their newer text and adds only the variant's change
+// Adopt saved and re-ran the file: let that run of the user's end first (a variant never takes over a tab following the user's own run)
+const settled = async () => { for (let i = 0; i < 120; i++) { const busy = await p.evaluate(async () => window.__qktStore.getState().running || (await (await fetch("/api/runs?limit=20")).json()).runs.some((r) => ["queued", "checking", "running", "postprocessing"].includes(r.status))); if (!busy) return; await wait(500); } };
+await wait(2000); await settled();
+const r2 = await mcp.callTool({ name: "try_change", arguments: { changes: [{ op: "set_param", name: "e2e_marker", value: 7 }], label: "marker", from: "2024-01-02", to: "2024-02-01" } });
+ok("a second try_change succeeds", !r2.isError, r2.content?.[0]?.text?.slice(0, 200));
+await p.waitForFunction(() => /Variant: marker/.test(document.body.innerText), { timeout: 60_000 }).then(() => ok("the chart switches to the second variant", true), () => ok("the chart switches to the second variant", false));
+await p.evaluate(() => { const m = window.__qktEditor.getModel(); m.applyEdits([{ range: m.getFullModelRange().collapseToEnd(), text: "\n-- my newer edit\n" }]); }); await wait(500);
+await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Adopt")?.click()); await wait(3000);
+const merged = await p.evaluate(() => window.__qktEditor?.getModel()?.getValue() ?? "");
+ok("Adopt after an edit keeps the user's newer text", /-- my newer edit/.test(merged), merged.slice(-300));
+ok("... and adds the variant's change to it", /PARAM e2e_marker = 7/.test(merged), merged.slice(0, 300));
+ok("... and says so", /had changed; the variant's changes were applied to your current text/.test(await p.evaluate(() => document.body.innerText)));
 await mcp.callTool({ name: "set_split", arguments: { split: { test_pct: 25 } } });
 await b.close(); await mcp.close();
 console.log(failed ? `agent-ui: ${failed} failed` : "agent-ui: all passed"); process.exit(failed ? 1 : 0);

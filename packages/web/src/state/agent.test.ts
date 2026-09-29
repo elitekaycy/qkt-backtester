@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { decideAdoptAction, decideApplyProposalAction, shouldShowRun, viewReport } from "./agent.js";
+import { textHash } from "@qkt-studio/core/texthash";
+import { decideAdoptAction, decideAdoptPlan, decideApplyProposalAction, shouldShowRun, variantMayTakeOver, variantSide, viewReport } from "./agent.js";
 
 describe("viewReport", () => {
   it("maps what the user looks at into the server's view state", () => {
@@ -48,5 +49,51 @@ describe("decideApplyProposalAction", () => {
   });
   it("flags a conflict instead of discarding unsaved edits", () => {
     expect(decideApplyProposalAction({ content: "edited", saved: "same" })).toBe("conflict");
+  });
+});
+
+describe("decideAdoptPlan", () => {
+  const base = "STRATEGY ema VERSION 1\n", newer = "STRATEGY ema VERSION 1\n-- my edit\n";
+  it("adopts as is when neither the buffer nor the saved text changed since the variant was made", () => {
+    expect(decideAdoptPlan({ baseHash: textHash(base), current: base, saved: base, canRebase: true })).toBe("adopt");
+    expect(decideAdoptPlan({ baseHash: textHash(base), current: base, saved: null, canRebase: false })).toBe("adopt");
+  });
+  it("re-applies the variant's changes when the user saved newer text, or has unsaved edits", () => {
+    expect(decideAdoptPlan({ baseHash: textHash(base), current: newer, saved: newer, canRebase: true })).toBe("rebase");
+    expect(decideAdoptPlan({ baseHash: textHash(base), current: newer, saved: base, canRebase: true })).toBe("rebase");
+    expect(decideAdoptPlan({ baseHash: textHash(base), current: base, saved: newer, canRebase: true })).toBe("rebase");
+  });
+  it("asks when the text changed and the variant cannot be rebased (a whole-file replacement)", () => {
+    expect(decideAdoptPlan({ baseHash: textHash(base), current: newer, saved: newer, canRebase: false })).toBe("confirm");
+  });
+});
+
+describe("variantMayTakeOver", () => {
+  const showing = { runId: "v1", baseRunId: "b1" };
+  it("takes over an idle tab", () => {
+    expect(variantMayTakeOver({ running: false, runId: "x", showing: null })).toBe(true);
+  });
+  it("never takes over while the tab follows the user's own live run", () => {
+    expect(variantMayTakeOver({ running: true, runId: "mine", showing: null })).toBe(false);
+    expect(variantMayTakeOver({ running: true, runId: "mine", showing })).toBe(false);
+  });
+  it("may replace a variant run the tab was following", () => {
+    expect(variantMayTakeOver({ running: true, runId: "v1", showing })).toBe(true);
+  });
+});
+
+describe("variantSide", () => {
+  const fmt = (n: number) => `$${n}`;
+  it("says running and keeps polling until the run ends", () => {
+    expect(variantSide(null, null, fmt)).toEqual({ text: "running…", final: false });
+    expect(variantSide({ status: "running" }, null, fmt)).toEqual({ text: "running…", final: false });
+    expect(variantSide({ status: "done" }, null, fmt).final).toBe(false);
+  });
+  it("stops on a terminal status and says why", () => {
+    expect(variantSide({ status: "done" }, 12, fmt)).toEqual({ text: "$12", final: true });
+    expect(variantSide({ status: "done" }, "none", fmt)).toEqual({ text: "no trades", final: true });
+    expect(variantSide({ status: "failed", error: { message: "no bars for XAUUSD 15m" } }, null, fmt)).toEqual({ text: "failed: no bars for XAUUSD 15m", final: true });
+    expect(variantSide({ status: "cancelled" }, null, fmt)).toEqual({ text: "cancelled", final: true });
+    expect(variantSide("gone", null, fmt).final).toBe(true);
   });
 });

@@ -152,7 +152,9 @@ export const api = {
   cancelJob: (id: string) => req<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
 
   variants: () => req<{ variants: import("../state/agent.js").VariantInfo[] }>("/api/variants"),
-  variant: (id: string) => req<import("../state/agent.js").VariantInfo & { source: string | null }>(`/api/variants/${encodeURIComponent(id)}`),
+  variant: (id: string) => req<import("../state/agent.js").VariantInfo & { source: string | null; baseHash: string; canRebase: boolean }>(`/api/variants/${encodeURIComponent(id)}`),
+  /** The variant's changes re-applied to `text` (the base file's current buffer), checked. 409 when they no longer apply. */
+  rebaseVariant: (id: string, text: string) => req<{ source: string; notes: string[]; baseHash: string }>(`/api/variants/${encodeURIComponent(id)}/rebase`, { method: "POST", body: JSON.stringify({ text }) }),
   discardVariant: (id: string) => req<void>(`/api/variants/${encodeURIComponent(id)}`, { method: "DELETE" }),
   proposals: () => req<{ proposals: import("../state/agent.js").ProposalInfo[] }>("/api/proposals"),
   applyProposal: (id: string) => req<unknown>(`/api/proposals/${encodeURIComponent(id)}/apply`, { method: "POST" }),

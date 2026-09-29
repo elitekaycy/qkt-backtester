@@ -1,43 +1,50 @@
 import { useEffect, useState } from "react";
-import { api, type PartStats } from "../api/client.js";
-import { useAgent } from "../state/agent.js";
+import { api, ApiError, type PartStats } from "../api/client.js";
+import { useAgent, variantSide } from "../state/agent.js";
 import { fmtMoney } from "../util/format.js";
 
 type Parts = { first: PartStats; test: PartStats | null };
+type Side = { run: { status: string; error?: { message: string } } | null | "gone"; parts: Parts | "none" | null };
+const EMPTY: Side = { run: null, parts: null };
 
 /** Above the chart while a variant's run is shown: what changed, how it compares, and Adopt / Discard / Back.
- *  A variant's run (and its base's run) can still be going when this bar first appears: `runParts` 404s until
- *  the run has trades, so a failed or missing fetch means "still running", not "zero" — shown as such, and
- *  polled until it resolves. */
+ *  A variant's run (and its base's run) can still be going when this bar first appears. Each side's run status is read
+ *  with its parts: "running…" and polled while it runs; its net once done; "failed: <reason>" (or cancelled / gone)
+ *  when it ended without results — and then the polling stops. */
+async function loadSide(id: string): Promise<Side> {
+  const run = await api.run(id).catch((e: unknown) => (e instanceof ApiError && e.status === 404 ? ("gone" as const) : null));
+  // a finished run the server has no trades for answers 404 here: that is a final "no trades", not "still loading"
+  const parts = run && run !== "gone" && run.status === "done" ? await api.runParts(id).catch((e: unknown) => (e instanceof ApiError && e.status === 404 ? ("none" as const) : null)) : null;
+  return { run: run && run !== "gone" ? { status: run.status, error: run.error ? { message: run.error.message } : undefined } : run, parts };
+}
+const netOf = (p: Side["parts"]) => (p === "none" ? "none" : p ? p.first.net + (p.test?.net ?? 0) : null);
+
 export function VariantBar() {
   const showing = useAgent((s) => s.showing), variants = useAgent((s) => s.variants), split = useAgent((s) => s.split);
-  const [nums, setNums] = useState<{ v: Parts | null; b: Parts | null }>({ v: null, b: null });
+  const [sides, setSides] = useState<{ v: Side; b: Side }>({ v: EMPTY, b: EMPTY });
   useEffect(() => {
-    setNums({ v: null, b: null });
+    setSides({ v: EMPTY, b: EMPTY });
     if (!showing?.runId) return;
-    let stopped = false;
+    let stopped = false, timer: ReturnType<typeof setTimeout> | null = null;
     const load = () => {
-      void Promise.all([
-        api.runParts(showing.runId!).catch(() => null),
-        showing.baseRunId ? api.runParts(showing.baseRunId).catch(() => null) : Promise.resolve(null),
-      ]).then(([v, b]) => {
+      void Promise.all([loadSide(showing.runId!), showing.baseRunId ? loadSide(showing.baseRunId) : Promise.resolve(null)]).then(([v, b]) => {
         if (stopped) return;
-        setNums({ v, b });
-        // one or both sides are not done yet: try again shortly rather than showing a final-looking blank/zero
-        if (!v || (showing.baseRunId && !b)) setTimeout(() => { if (!stopped) load(); }, 2000);
+        setSides({ v, b: b ?? EMPTY });
+        const done = variantSide(v.run, netOf(v.parts), fmtMoney).final && (!b || variantSide(b.run, netOf(b.parts), fmtMoney).final);
+        if (!done) timer = setTimeout(() => { if (!stopped) load(); }, 2000);
       });
     };
     load();
-    return () => { stopped = true; };
+    return () => { stopped = true; if (timer) clearTimeout(timer); };
   }, [showing?.runId, showing?.baseRunId, split?.text]);
   if (!showing) return null;
   const siblings = variants.filter((x) => x.base === showing.base).slice(0, 6);
-  const net = (p: Parts | null) => (p ? p.first.net + (p.test?.net ?? 0) : null);
-  const side = (p: Parts | null, hasRun: boolean) => (!hasRun ? "not run yet" : p ? fmtMoney(net(p) ?? 0) : "running…");
+  const side = (x: Side, hasRun: boolean) => (!hasRun ? "not run yet" : variantSide(x.run, netOf(x.parts), fmtMoney).text);
+  const nums = { v: sides.v.parts === "none" ? null : sides.v.parts, b: sides.b.parts === "none" ? null : sides.b.parts };
   return (
     <div className="banner info variant-bar" role="status">
       <b>Variant: {showing.label}</b>
-      <span className="num">net {side(nums.v, !!showing.runId)} vs {side(nums.b, !!showing.baseRunId)}</span>
+      <span className="num">net {side(sides.v, !!showing.runId)} vs {side(sides.b, !!showing.baseRunId)}</span>
       {nums.v?.test && nums.b?.test && <span className="num muted">(test part {fmtMoney(nums.v.test.net)} vs {fmtMoney(nums.b.test.net)} · {split?.text})</span>}
       {siblings.length > 1 && (
         <select className="select sm" aria-label="Other variants" value={showing.id} onChange={(e) => { const v = siblings.find((x) => x.id === e.target.value); if (v) void useAgent.getState().show(v); }}>

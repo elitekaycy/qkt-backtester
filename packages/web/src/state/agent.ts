@@ -1,6 +1,8 @@
 import type { editor as MonacoEditorNS } from "monaco-editor/editor/editor.api.js";
 import { create } from "zustand";
+import { textHash } from "@qkt-studio/core/texthash";
 import { api, withToken } from "../api/client.js";
+import { askConfirm } from "../ui/Ask.js";
 import { useStore } from "./store.js";
 
 export interface VariantInfo { id: string; label: string; base: string; runId: string | null; baseRunId: string | null; diff: string; notes: string[]; created: string }
@@ -30,6 +32,38 @@ export type AdoptAction = "saveFailed" | "autoRun" | "startRun";
 export function decideAdoptAction(saved: boolean, autoRun: boolean): AdoptAction {
   if (!saved) return "saveFailed";
   return autoRun ? "autoRun" : "startRun";
+}
+
+export type AdoptPlan = "adopt" | "rebase" | "confirm";
+/** Pure: how Adopt treats the base file. The variant was made from text whose hash is `baseHash`. If the buffer (and the
+ *  saved text) still are that text, the variant replaces it as is. If the user has changed the file since, their newer
+ *  text must not be silently lost: the variant's changes are re-applied to it ("rebase") when the variant is a change
+ *  list, otherwise the user is asked ("confirm"). */
+export function decideAdoptPlan(a: { baseHash: string; current: string; saved: string | null; canRebase: boolean }): AdoptPlan {
+  const unchanged = textHash(a.current) === a.baseHash && (a.saved === null || textHash(a.saved) === a.baseHash);
+  if (unchanged) return "adopt";
+  return a.canRebase ? "rebase" : "confirm";
+}
+
+/** Pure: may a finished variant (the SSE `variant` event) take over this tab's chart? Not while the tab follows a live
+ *  run of the user's own (its progress and Stop button would vanish); following the shown variant's own runs is fine. */
+export function variantMayTakeOver(a: { running: boolean; runId: string | null; showing: { runId: string | null; baseRunId: string | null } | null }): boolean {
+  if (!a.running) return true;
+  return !!a.showing && a.runId !== null && (a.runId === a.showing.runId || a.runId === a.showing.baseRunId);
+}
+
+const TERMINAL = new Set(["done", "failed", "cancelled", "interrupted"]);
+export const isTerminalStatus = (status: string | undefined) => !!status && TERMINAL.has(status);
+export type SideView = { text: string; final: boolean };
+/** Pure: one side (variant or base) of the variant bar. `run` is the run's record, null while it cannot be read yet,
+ *  "gone" when the server no longer has it; `net` is its net P&L once its parts are loaded ("none": finished without trades). A failed, cancelled or purged
+ *  run is final (the bar stops polling) and says so, instead of "running…" forever. */
+export function variantSide(run: { status: string; error?: { message: string } } | null | "gone", net: number | "none" | null, fmt: (n: number) => string): SideView {
+  if (run === "gone") return { text: "gone (the run was removed)", final: true };
+  if (!run || !isTerminalStatus(run.status)) return { text: "running…", final: false };
+  if (run.status === "done") return net === "none" ? { text: "no trades", final: true } : net === null ? { text: "loading…", final: false } : { text: fmt(net), final: true };
+  if (run.status === "failed") return { text: `failed: ${run.error?.message ?? "see the run's pipeline"}`, final: true };
+  return { text: run.status, final: true };
 }
 
 export type ApplyProposalAction = "none" | "reload" | "conflict";
@@ -76,7 +110,12 @@ export const useAgent = create<{
     const src = (es = new EventSource(withToken("/api/events")));
     src.addEventListener("variant", (m) => {
       const e = JSON.parse((m as MessageEvent).data) as { variantId: string };
-      void get().refresh().then(() => { const v = get().variants.find((x) => x.id === e.variantId); if (v) void get().show(v); });
+      void get().refresh().then(() => {
+        const v = get().variants.find((x) => x.id === e.variantId);
+        const st = useStore.getState();
+        // the tab is following the user's own live run: the variant stays in the list, it does not take the chart
+        if (v && variantMayTakeOver({ running: st.running, runId: st.runId, showing: get().showing })) void get().show(v);
+      });
     });
     src.addEventListener("proposal", () => void get().refresh());
     src.addEventListener("split", () => void get().refresh());
@@ -99,7 +138,15 @@ export const useAgent = create<{
     const [v, p, s] = await Promise.all([api.variants(), api.proposals(), api.split()]);
     set({ variants: v.variants, proposals: p.proposals, split: s });
   },
-  async show(v) { set({ showing: v }); if (v.runId) await useStore.getState().selectRun(v.runId); },
+  /** Show a variant's run: a finished one is selected, one still going is followed live so its results load when it ends. */
+  async show(v) {
+    set({ showing: v });
+    if (!v.runId) return;
+    const run = await api.run(v.runId).catch(() => null);
+    if (get().showing?.id !== v.id) return;
+    if (run && !isTerminalStatus(run.status)) useStore.getState().attachRun(v.runId);
+    else await useStore.getState().selectRun(v.runId);
+  },
   async back() { const v = get().showing; set({ showing: null }); if (v?.baseRunId) await useStore.getState().selectRun(v.baseRunId); },
   async discard(id) { await api.discardVariant(id); if (get().showing?.id === id) await get().back(); await get().refresh(); },
   /** Adopt = the variant's text becomes the base file, as ONE edit (undoable with Ctrl+Z), then saved and re-run
@@ -109,6 +156,18 @@ export const useAgent = create<{
     const v = await api.variant(id);
     if (!v.source) throw new Error("the variant file is gone");
     await useStore.getState().openFile(v.base);
+    const name = v.base.split("/").pop();
+
+    // the user may have changed the base since the variant was made: never silently replace their newer text
+    const open = useStore.getState().openFiles.find((f) => f.path === v.base);
+    let text = v.source;
+    let plan = open ? decideAdoptPlan({ baseHash: v.baseHash, current: open.content, saved: open.saved, canRebase: v.canRebase }) : "adopt";
+    if (plan === "rebase" && open) {
+      const rebased = await api.rebaseVariant(id, open.content).catch(() => null);
+      if (rebased) { text = rebased.source; useStore.getState().toast("info", `${name} had changed; the variant's changes were applied to your current text`); }
+      else plan = "confirm";
+    }
+    if (plan === "confirm" && !(await askConfirm({ title: `${name} changed since this variant was made`, message: "Adopt anyway? This replaces your newer text; Ctrl+Z restores it.", confirmLabel: "Adopt anyway", danger: true }))) return;
 
     let editedInEditor = false;
     const workspace = useStore.getState().info?.workspace;
@@ -116,14 +175,14 @@ export const useAgent = create<{
       const model = await waitForModel(workspace, v.base);
       if (model) {
         model.pushStackElement();
-        model.pushEditOperations([], [{ range: model.getFullModelRange(), text: v.source }], () => null);
+        model.pushEditOperations([], [{ range: model.getFullModelRange(), text }], () => null);
         model.pushStackElement();
         editedInEditor = true;
       }
     }
     if (!editedInEditor) {
-      useStore.getState().setContent(v.base, v.source);
-      useStore.getState().toast("info", `Adopted ${v.base.split("/").pop()}: undo (Ctrl+Z) is not available for this change.`);
+      useStore.getState().setContent(v.base, text);
+      useStore.getState().toast("info", `Adopted ${name}: undo (Ctrl+Z) is not available for this change.`);
     }
 
     const saved = await useStore.getState().saveFile(v.base);
