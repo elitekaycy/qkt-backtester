@@ -10,6 +10,7 @@ import { loadConfig, type ServerConfig } from "./config.js";
 import { Jobs, registerJobRoutes } from "./jobs.js";
 import { registerLspBridge } from "./lsp-bridge.js";
 import { registerRunRoutes } from "./run-routes.js";
+import { RunData } from "./run-data.js";
 import { Runner } from "./runner.js";
 import { applySettings } from "./settings.js";
 import { registerTerminal } from "./terminal.js";
@@ -18,10 +19,11 @@ export async function createStudio(cfg: ServerConfig) {
   await applySettings(cfg);
   const runner = new Runner(cfg);
   await runner.init();
+  const data = new RunData(runner, cfg);
   const jobs = new Jobs(cfg, runner);
   await jobs.init();
   const app = await buildApp(cfg, (a) => {
-    registerRunRoutes(a, runner);
+    registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
     registerCheckRoutes(a, cfg);
     registerJobRoutes(a, jobs);
@@ -34,7 +36,7 @@ export async function createStudio(cfg: ServerConfig) {
     }));
   });
   app.addHook("onClose", async () => { await runner.close(); });
-  return { app, runner, jobs };
+  return { app, runner, jobs, data };
 }
 
 /**
