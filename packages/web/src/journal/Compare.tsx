@@ -40,7 +40,7 @@ export function Compare() {
             <table className="tbl"><thead><tr><th><span className="sr-only">Run</span></th><th className="r">Net P&L</th><th className="r">Sharpe</th><th className="r">Profit factor</th><th className="r">Win rate</th><th className="r">Trades</th><th className="r">Max DD</th></tr></thead>
               <tbody>{cmp.map((id, i) => {
                 const s = data[id]!.s, b = data[cmp[0]!]!.s;
-                const dlt = (x: number, y: number, f: (v: number) => string) => (i === 0 ? "" : ` (${x - y >= 0 ? "+" : "−"}${f(Math.abs(x - y))})`);
+                const dlt = (x: number | null, y: number | null, f: (v: number) => string) => (i === 0 || x === null || y === null ? "" : ` (${x - y >= 0 ? "+" : "−"}${f(Math.abs(x - y))})`);
                 return (
                   <tr key={id}><td><b>{String.fromCharCode(65 + i)}</b></td>
                     <td className="r num">{glyph(s.totalPnl)} {fmtMoney(s.totalPnl)}<span className="muted">{dlt(s.totalPnl, b.totalPnl, (v) => fmtNum(v))}</span></td>

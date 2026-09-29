@@ -54,8 +54,9 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 - **First run needs nothing.** An empty `/workspace` is seeded with a full `qkt.config.yaml`, an `instruments.yaml` with an entry for every symbol in your data source, a `.env`, and sample strategies on a symbol that exists. An *empty* `/data` gets a small **synthetic** dataset (`DEMOUSD`, a seeded random walk, clearly not market data) built by qkt itself. A data store that already has files is never touched.
 - **Your data:** mount your qkt data store at `/data` (default `~/.qkt/data`). It is read for candles and ticks; "Build bars" writes into it, so mount it read-only only if it is already complete.
 - **Files stay yours.** The container drops to the owner of the mounted `/workspace`. If Docker created the folder as root you'll get a note; create it yourself first (`mkdir workspace`).
-- **Exposing it beyond localhost:** set `STUDIO_TOKEN=<secret>`. That requires a token for the API and enables the full-shell terminal. Without a token on a non-loopback bind the terminal is restricted to `qkt` commands plus a few file helpers (`ls`, `cd`, `cat`, `tree`, …). There are no user accounts; this is a single-user or small-team tool, one container per workspace.
-- **Pin the engine:** `--build-arg QKT_IMAGE=ghcr.io/elitekaycy/qkt@sha256:<digest>` (default `ghcr.io/elitekaycy/qkt:latest`).
+- **Exposing it beyond localhost:** set `STUDIO_TOKEN=<secret>`. That requires a token for the API and enables the full-shell terminal (add `STUDIO_TERMINAL=restricted` to keep it to `qkt` commands). Without a token on a non-loopback bind the terminal is restricted to `qkt` commands plus a few file helpers (`ls`, `cd`, `cat`, `tree`, …). There are no user accounts; this is a single-user or small-team tool, one container per workspace.
+- **Engine version:** the qkt engine is pinned by digest in `docker/Dockerfile`; build another with `--build-arg QKT_IMAGE=ghcr.io/elitekaycy/qkt:<tag>`.
+- **Released images and servers:** tagged versions are published as `ghcr.io/elitekaycy/qkt-backtester:vX.Y.Z`. [docs/production.md](docs/production.md) covers releasing, running on a server (read-only data, token, private access), settings and upgrades.
 
 ## Using it
 

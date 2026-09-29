@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { attentionOf } from "../util/dataStatus.js";
 import { useStore } from "../state/store.js";
 import { useUi, type Section } from "../state/ui.js";
 import { Popover } from "../ui/Popover.js";
@@ -18,20 +19,27 @@ export function Rail() {
   const cog = useRef<HTMLButtonElement>(null);
   const nav = useRef<HTMLElement>(null);
   const jobRunning = jobs.some((j) => j.status === "running");
-  const dataProblem = scan ? scan.totals.incomplete + scan.totals.ticksOnly > 0 : false;
+  const dataProblem = scan ? scan.symbols.some((x) => attentionOf(x) !== null) : false;
 
-  // roving focus: up/down move between rail buttons (all remain tabbable, this is only a shortcut)
+  // one Tab stop for the whole rail (the current section, else the last one focused); arrows and Home/End move inside it
+  const buttons = () => [...(nav.current?.querySelectorAll<HTMLButtonElement>("button.rail-btn") ?? [])];
+  const rove = (to: HTMLButtonElement) => { for (const b of buttons()) b.tabIndex = b === to ? 0 : -1; };
+  useEffect(() => {
+    const els = buttons();
+    if (!els.some((b) => b.tabIndex === 0)) rove(els.find((b) => b.getAttribute("aria-current") === "true") ?? els[0]!);
+  });
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    const els = [...(nav.current?.querySelectorAll<HTMLButtonElement>("button.rail-btn") ?? [])];
+    const els = buttons();
     const i = els.indexOf(document.activeElement as HTMLButtonElement);
     if (i < 0) return;
+    const to = e.key === "ArrowDown" ? (i + 1) % els.length : e.key === "ArrowUp" ? (i - 1 + els.length) % els.length : e.key === "Home" ? 0 : e.key === "End" ? els.length - 1 : -1;
+    if (to < 0) return;
     e.preventDefault();
-    els[(i + (e.key === "ArrowDown" ? 1 : -1) + els.length) % els.length]?.focus();
+    rove(els[to]!); els[to]!.focus();
   };
 
   return (
-    <nav ref={nav} className="rail" aria-label="Sections" onKeyDown={onKey}>
+    <nav ref={nav} className="rail" aria-label="Sections" onKeyDown={onKey} onFocus={(e) => { if ((e.target as HTMLElement).matches("button.rail-btn")) rove(e.target as HTMLButtonElement); }}>
       <div className="logo" aria-hidden="true"><Activity size={18} strokeWidth={2.2} /></div>
       {SECTIONS.map((s) => {
         const Icon = s.icon;

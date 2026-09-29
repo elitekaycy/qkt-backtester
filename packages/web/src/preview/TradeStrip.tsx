@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { strategyAlias } from "@qkt-studio/core/strategy";
 import type { RoundTrip } from "../api/types.js";
-import { fmtDur, fmtMoney, fmtNum, fmtPct, fmtPrice, fmtTs } from "../util/format.js";
+import { fmtDur, fmtR, fmtMoney, fmtNum, fmtPct, fmtPrice, fmtTs } from "../util/format.js";
 import { strategyColor } from "../util/strategyColor.js";
 
 const EXIT_LABEL: Record<string, string> = { target: "◆ Target hit", stop: "✕ Stop hit", signal: "● Rule exit", open: "Still open" };
@@ -46,7 +46,7 @@ export function TradeStrip({ trip: t, index, count, startBalance, multi, onPrev,
         <Field l="Size" v={<><span className="num">{fmtNum(t.qty, 2)}</span> <span className="muted">lots</span></>} title="Largest position size held during the trade" />
         <Field l="Risk" v={t.risk !== undefined ? <><span className="num">{fmtMoney(t.risk).replace("+", "")}</span>{startBalance > 0 && <span className="muted"> · {fmtPct(t.risk / startBalance)} of start</span>}{rr !== null && <span className="muted"> · R:R {rr.toFixed(1)}</span>}</> : <span className="muted">no stop</span>} title={t.risk !== undefined ? "Money at stake at entry: distance to the stop × size" : "No stop was set on this entry, so risk and R are not measured. Add a BRACKET with STOP_LOSS to see them."} wide />
         <Field l="P&L" tone={tone} v={<span className="num">{fmtMoney(t.pnl)}</span>} />
-        <Field l="R" tone={tone} v={t.r !== undefined ? <span className="num">{`${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}R`}</span> : "—"} title="P&L divided by the risk at entry" />
+        <Field l="R" tone={tone} v={t.r !== undefined ? <span className="num">{fmtR(t.r)}</span> : "—"} title="P&L divided by the risk at entry" />
         <Field l="% of start" tone={tone} v={startBalance > 0 ? <span className="num">{fmtPct(t.pnl / startBalance)}</span> : "—"} title="P&L as a share of the starting balance" />
       </div>
       {t.entries && (

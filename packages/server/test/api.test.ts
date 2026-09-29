@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync, copyFileSync, readdirSync } from "node:fs";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -297,6 +297,32 @@ d("bars and coverage", () => {
     expect(Number(lod.headers["x-bars-count"])).toBeLessThanOrEqual(300);
     expect(lod.headers["x-bars-source-count"]).toBe("2021");
   });
+  it("reads a timeframe from a finer base folder, aggregated the way qkt does, and refuses a base that does not divide it", async () => {
+    const from = Date.UTC(2024, 9, 1), to = Date.UTC(2024, 9, 31);
+    const unpack = (r: { rawPayload: Buffer }) => {
+      const b = r.rawPayload, dv = new DataView(b.buffer, b.byteOffset, b.byteLength), n = dv.getUint32(0, true);
+      const col = (c: number) => Array.from({ length: n }, (_, i) => dv.getFloat64(16 + (c * n + i) * 8, true));
+      return { n, step: dv.getFloat64(8, true), ts: col(0), open: col(1), high: col(2), low: col(3), close: col(4) };
+    };
+    const m15 = unpack(await get(`/api/bars?broker=BACKTEST&symbol=XAUUSD&tf=15m&from=${from}&to=${to}&max=20000`));
+    const h1 = unpack(await get(`/api/bars?broker=BACKTEST&symbol=XAUUSD&tf=1h&base=15m&from=${from}&to=${to}&max=20000`));
+    expect(h1.step).toBe(3_600_000);
+    expect(h1.ts.every((t) => t % 3_600_000 === 0)).toBe(true);
+    // every hour is the open of its first quarter, the close of its last, the extremes of all of them
+    for (let i = 0; i < h1.n; i++) {
+      const q = m15.ts.flatMap((t, j) => (t >= h1.ts[i]! && t < h1.ts[i]! + 3_600_000 ? [j] : []));
+      expect(q.length).toBeGreaterThan(0);
+      expect(h1.open[i]).toBe(m15.open[q[0]!]);
+      expect(h1.close[i]).toBe(m15.close[q[q.length - 1]!]);
+      expect(h1.high[i]).toBe(Math.max(...q.map((j) => m15.high[j]!)));
+      expect(h1.low[i]).toBe(Math.min(...q.map((j) => m15.low[j]!)));
+    }
+    const cov = (await get("/api/bars/coverage?broker=BACKTEST&symbol=XAUUSD&tf=1h&base=15m&from=2024-10-01&to=2024-10-08")).json();
+    expect(cov.base).toBe("15m");
+    for (const q of ["tf=15m&base=1h", "tf=1h&base=7m", "tf=1h&base=zz"]) {
+      expect((await get(`/api/bars?broker=BACKTEST&symbol=XAUUSD&${q}&from=${from}&to=${to}`)).statusCode, q).toBe(400);
+    }
+  });
   it("rejects bad parameters and never lets identifiers become paths", async () => {
     for (const q of ["broker=..&symbol=X&tf=15m&from=2024-10-01&to=2024-10-02", "broker=B&symbol=..&tf=15m&from=2024-10-01&to=2024-10-02", "broker=.&symbol=X&tf=15m&from=2024-10-01&to=2024-10-02", "broker=B&symbol=../x&tf=15m&from=2024-10-01&to=2024-10-02",
       "broker=B&symbol=X&tf=zz&from=2024-10-01&to=2024-10-02", "broker=B&symbol=X&tf=15m&from=2024-10-02&to=2024-10-01", "broker=B&symbol=X&tf=15m&from=2000-01-01&to=2024-10-01", "symbol=X"]) {
@@ -495,5 +521,18 @@ describe("run housekeeping", () => {
     const after = (await studio.app.inject({ url: "/api/runs-usage" })).json() as { total: number };
     expect(after.total).toBeLessThan(before.total);
     expect((await studio.app.inject({ method: "POST", url: "/api/runs/prune", payload: {} })).statusCode).toBe(400);
+  });
+});
+
+describe.skipIf(!haveQkt)("live check of a portfolio resolves its imports from the file's own folder", () => {
+  it("a valid portfolio buffer has no diagnostics; a missing import names the workspace path", async () => {
+    const dir = path.join(ws, "strategies");
+    writeFileSync(path.join(dir, "child_a.qkt"), "STRATEGY child_a VERSION 1\n\nSYMBOLS\n    g = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN g.close > 0\n     AND POSITION.g = 0\n    THEN BUY g SIZING 0.1\n");
+    const book = "PORTFOLIO pb VERSION 1\n\nIMPORT 'child_a.qkt' AS a\n\nRULES\n    RUN a\n";
+    const ok = (await studio.app.inject({ method: "POST", url: "/api/check", payload: { kind: "qkt", content: book, path: "strategies/pb.qkt" } })).json();
+    expect(ok.diagnostics).toEqual([]);
+    const bad = (await studio.app.inject({ method: "POST", url: "/api/check", payload: { kind: "qkt", content: book.replace("child_a.qkt", "nope.qkt"), path: "strategies/pb.qkt" } })).json();
+    expect(bad.diagnostics[0].message).toMatch(/nope\.qkt/);
+    expect(readdirSync(dir).some((n) => n.startsWith(".qkt-check-"))).toBe(false); // the check copy is always removed
   });
 });

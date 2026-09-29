@@ -1,17 +1,33 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import {
-  bookInfo, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBars, strategyBreakdown, summarize, verifyManifest,
+  availableTimeframes, barBases, barBaseTf, bookInfo, canonicalTf, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBarsVia, strategyBreakdown, summarize, summarizeRejections, tfToMs, verifyManifest,
   type BarCols, type IntegrityReport, type RunJson, type Summary,
 } from "@qkt-studio/core";
 
-export const STUDIO_VERSION = "0.1.0";
+/** The studio's version: packages/server/package.json (one source; the release workflow checks the tag against it). */
+export const STUDIO_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
+/**
+ * Version of everything under derived/. Derived files are a pure function of qkt's own output (kept in engine/), so a finished
+ * run derived by an older version is re-derived on first access instead of serving numbers computed by old rules.
+ * Bump when a derived value changes meaning (2: exit reasons read from the closing order's class; trip-based loss streak;
+ * 3: each stream's bar base, so charts and checks read the bars qkt read; 4: the account currency money is reported in;
+ * 5: the orders qkt rejected, summarised by reason; 6: no Sharpe/Sortino/Calmar for a blown account;
+ * 7: a tick run's charts read the dividing bar folder that covers the window best; 8: an aggregated chart drops the
+ * final candle qkt never closed).
+ */
+export const DERIVED_VERSION = 8;
 /** Above this many fills the round-trip file is too large to page from memory. */
 export const MAX_FILLS = 2_000_000;
 
 export class PostprocessError extends Error {}
 
-export interface StreamRef { key: string; broker: string; symbol: string; tf: string }
+export interface StreamRef {
+  key: string; broker: string; symbol: string; tf: string;
+  /** The bar folder the chart reads for this stream: in a bars run, the one qkt itself read (it aggregates coarser streams from it). */
+  base?: string | null;
+}
 
 /** `BACKTEST:XAUUSD:15m` -> parts. The symbol may itself contain dots or dashes but never a colon. */
 export function parseStreamKey(key: string): StreamRef | null {
@@ -58,6 +74,12 @@ const median = (a: number[]) => { const s = [...a].sort((x, y) => x - y); return
 
 export interface PostprocessResult { summary: Summary; integrity: IntegrityReport; fills: number; trips: number; warnings: string[] }
 
+/** Day files of a bar folder inside [from, to). */
+async function daysWithFiles(dataRoot: string, broker: string, symbol: string, tf: string, from: string, to: string): Promise<number> {
+  const names = await fs.readdir(path.join(dataRoot, "bars", broker, symbol, tf)).catch(() => [] as string[]);
+  return names.filter((n) => n.endsWith(".bin") && n.slice(0, 10) >= from && n.slice(0, 10) < to).length;
+}
+
 export async function postprocess(args: { runDir: string; run: RunJson; dataRoot: string }): Promise<PostprocessResult> {
   const { runDir, run, dataRoot } = args;
   const engineDir = path.join(runDir, "engine"), derivedDir = path.join(runDir, "derived");
@@ -71,16 +93,43 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   const fills = await parseTradesFile(path.join(engineDir, "trades.csv"));
   if (fills.length > MAX_FILLS) throw new PostprocessError(`${fills.length.toLocaleString()} fills exceeds the studio limit of ${MAX_FILLS.toLocaleString()}`);
   const trips = pairRoundTrips(fills);
-  if (fills.length === 0) warnings.push("The strategy produced no trades in this window. Check the rule conditions and the data range.");
+  // orders qkt refused (risk caps, halts): without these a run that rejected every order reads as "no trades"
+  const rejections = summarizeRejections(await fs.readFile(path.join(engineDir, "rejections.csv"), "utf8").catch(() => ""));
+  if (rejections.count) {
+    const top = rejections.reasons[0]!;
+    warnings.push(`qkt rejected ${rejections.count.toLocaleString()} order${rejections.count === 1 ? "" : "s"}${fills.length === 0 ? ", every order this run placed, so it made no trades" : ""}: `
+      + rejections.reasons.slice(0, 3).map((x) => `${x.count.toLocaleString()} × ${x.label}`).join("; ") + (top.hint ? `. ${top.hint}` : "."));
+  } else if (fills.length === 0) warnings.push("The strategy produced no trades in this window: its conditions never held (qkt rejected no orders). Check the rule conditions and the data range.");
 
   // Chart-side evidence: bars for every stream the engine evaluated.
   const fromMs = Date.parse(run.from + "T00:00:00Z"), toMs = Date.parse(run.to + "T00:00:00Z");
   const streams = Object.keys(result.inputSummary.streamCandles ?? {}).map(parseStreamKey).filter((s): s is StreamRef => s !== null);
+  // which bar folder each stream's candles come from: in a bars run exactly qkt's choice; in a tick run the stream's own folder
+  // when it is built, else the coarsest built one that divides it (for display: qkt built those candles from ticks)
+  const built = new Map<string, string[]>();
+  for (const s of streams) if (!built.has(`${s.broker}:${s.symbol}`)) built.set(`${s.broker}:${s.symbol}`, await availableTimeframes(dataRoot, s.broker, s.symbol));
+  const builtOf = (b: string, sy: string) => built.get(`${b}:${sy}`) ?? [];
+  const draftBases = run.tier === "draft" ? barBases(streams, builtOf) : null;
+  // a bars run reads exactly qkt's folder; a tick run builds its candles from ticks, so the chart shows the built folder that
+  // covers the most of the window among those that divide the stream (the coarsest on a tie): a coarse folder with a hole
+  // in the window would draw an empty chart where a finer one has every day
+  for (const s of streams) {
+    if (draftBases) { s.base = draftBases.get(`${s.broker}:${s.symbol}`) ?? null; continue; }
+    const want = tfToMs(s.tf);
+    const cands = builtOf(s.broker, s.symbol).filter((tf) => canonicalTf(tf) === tf && want % tfToMs(tf) === 0).sort((a, b) => tfToMs(b) - tfToMs(a));
+    let best: string | null = null, bestDays = -1;
+    for (const tf of cands) {
+      const days = await daysWithFiles(dataRoot, s.broker, s.symbol, tf, run.from, run.to);
+      if (days > bestDays) { best = tf; bestDays = days; }
+    }
+    s.base = best ?? barBaseTf(builtOf(s.broker, s.symbol), s.tf);
+  }
   const barCounts: Record<string, number> = {};
   const bars: Record<string, BarCols> = {};
   const streamNotes: string[] = [];
   for (const s of streams) {
-    const r = await readBars(dataRoot, s.broker, s.symbol, s.tf, fromMs, toMs);
+    if (!s.base) { streamNotes.push(`${s.key}: no bar folder qkt can read for it, chart checks skipped`); continue; }
+    const r = await readBarsVia(dataRoot, s.broker, s.symbol, s.tf, s.base, fromMs, toMs);
     if (r.days.length === 0) { streamNotes.push(`${s.key}: no bar files in the store, chart checks skipped`); continue; }
     bars[s.key] = r.cols;
     if (r.missingDays.length === 0) barCounts[s.key] = r.cols.ts.length;
@@ -129,7 +178,9 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
     write("meta.json", {
       runId: run.id, tier: run.tier, from: run.from, to: run.to, streams, strategies: Object.keys(result.perStrategy),
       fills: fills.length, trips: trips.length, qktVersion: result.evidence.qktVersion, studioVersion: STUDIO_VERSION,
-      monteCarloEngine: result.global.monteCarlo ?? null,
+      currency: result.accounting?.accountCurrency ?? null,
+      rejections,
+      monteCarloEngine: result.global.monteCarlo ?? null, derivedVersion: DERIVED_VERSION,
     }),
   ]);
   return { summary, integrity: rep, fills: fills.length, trips: trips.length, warnings };

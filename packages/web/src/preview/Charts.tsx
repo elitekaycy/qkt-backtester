@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CandlestickSeries, ColorType, CrosshairMode, createChart, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
-import { EyeOff } from "lucide-react";
+import { X } from "lucide-react";
 import { api, type Coverage, type RunMeta } from "../api/client.js";
 import type { RoundTrip } from "../api/types.js";
 import { TradesPrimitive } from "../charts/TradesPrimitive.js";
@@ -8,8 +8,8 @@ import { ordered, useChartPrefs } from "../state/chartPrefs.js";
 import { useStore } from "../state/store.js";
 import { Maximize2, Minimize2 } from "../ui/icons.js";
 import { Tip } from "../ui/Tip.js";
-import { fmtDur, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
-import { strategyAlias } from "@qkt-studio/core/strategy";
+import { fmtDur, fmtR, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
+import { strategyAlias, tfMs } from "@qkt-studio/core/strategy";
 import { strategyColor } from "../util/strategyColor.js";
 import { ChartToolbar } from "./ChartToolbar.js";
 import { StrategyLegend } from "./StrategyLegend.js";
@@ -36,7 +36,7 @@ function CoverageStrip({ stream, from, to, registry, id }: { stream: Stream; fro
     let live = true;
     api.coverage({ ...stream, from: new Date(from).toISOString().slice(0, 10), to: new Date(to).toISOString().slice(0, 10) }).then((c) => live && setCov(c)).catch(() => live && setCov(null));
     return () => { live = false; };
-  }, [stream.broker, stream.symbol, stream.tf, from, to]);
+  }, [stream.broker, stream.symbol, stream.tf, stream.base, from, to]);
   useEffect(() => {
     const chart = registry.charts.get(id);
     if (!chart) return;
@@ -195,8 +195,10 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
         <span className="badge" title="Trades shown on this chart (after the filters)">{mine.length.toLocaleString()} trade{mine.length === 1 ? "" : "s"}</span>
         <span className="mono muted ohlc">{hover}</span>
         <span style={{ flex: 1 }} />
-        <Tip label={maximized ? "Restore this chart" : "Expand this chart to the whole pane"} side="bottom"><button className="btn ghost icon sm" aria-label={maximized ? `Restore ${stream.symbol} ${stream.tf}` : `Expand ${stream.symbol} ${stream.tf}`} onClick={onMax}>{maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></Tip>
-        <Tip label="Hide this chart (bring it back from Charts)" side="bottom"><button className="btn ghost icon sm" aria-label={`Hide ${stream.symbol} ${stream.tf}`} onClick={onHide}><EyeOff size={14} /></button></Tip>
+        <span className="cap-actions">
+          <Tip label={maximized ? "Restore this chart" : "Expand this chart to the whole pane"} side="bottom"><button className="btn ghost icon sm" aria-label={maximized ? `Restore ${stream.symbol} ${stream.tf}` : `Expand ${stream.symbol} ${stream.tf}`} onClick={onMax}>{maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button></Tip>
+          <Tip label="Close this chart (reopen it from Charts)" side="bottom"><button className="btn ghost icon sm" aria-label={`Close ${stream.symbol} ${stream.tf} chart`} onClick={onHide}><X size={14} /></button></Tip>
+        </span>
       </div>
       <div ref={plot} className="plot" />
       {t && tip && (
@@ -204,7 +206,7 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
           <b>{t.side === "long" ? "▲ Long" : "▼ Short"} {t.symbol.split(":").pop()} · {t.qty} lots{stratColor && <span style={{ color: strategyColor(t.strategy) }}> · {strategyAlias(t.strategy)}</span>}</b>
           <span>{fmtTs(t.entryTs)} → {t.open ? "open" : fmtTs(t.exitTs)}</span>
           <span>{fmtPrice(t.entryPx)} → {t.exitPx === null ? "—" : fmtPrice(t.exitPx)} · {t.open ? "open" : t.exit}</span>
-          <span className={t.pnl >= 0 ? "gain" : "loss"}>{fmtMoney(t.pnl)}{t.r !== undefined ? ` · ${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}R` : ""} · held {fmtDur(t.holdMs)}</span>
+          <span className={t.pnl >= 0 ? "gain" : "loss"}>{fmtMoney(t.pnl)}{t.r !== undefined ? ` · ${fmtR(t.r)}` : ""} · held {fmtDur(t.holdMs)}</span>
           <span className="muted">{t.risk !== undefined ? `risk ${fmtMoney(t.risk).replace("+", "")}` : "no stop set"}{t.sl !== undefined ? ` · SL ${fmtPrice(t.sl)}` : ""}{t.tp !== undefined ? ` · TP ${fmtPrice(t.tp)}` : ""}</span>
           <em>click to inspect</em>
         </div>
@@ -228,7 +230,13 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
 
   const all = useMemo(() => {
     const seen = new Set<string>();
-    return [...(meta?.streams ?? []), ...extra].filter((s) => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true; });
+    // an added chart of a run's symbol reads the run's bar base when that divides it, as qkt would aggregate it
+    const baseOf = (s: Stream) => {
+      const b = meta?.streams.find((m) => m.broker === s.broker && m.symbol === s.symbol)?.base;
+      const t = tfMs(s.tf), bt = b ? tfMs(b) : null;
+      return b && t && bt && t % bt === 0 ? b : undefined;
+    };
+    return [...(meta?.streams ?? []), ...extra.map((s) => ({ ...s, base: baseOf(s) }))].filter((s) => { const k = keyOf(s); if (seen.has(k)) return false; seen.add(k); return true; });
   }, [meta, extra]);
   const sorted = useMemo(() => ordered(all, keyOf, prefs.order), [all, prefs.order]);
   const shown = useMemo(() => sorted.filter((s) => !prefs.hidden.includes(keyOf(s))), [sorted, prefs.hidden]);
@@ -245,6 +253,9 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
   }, [meta?.runId]);
 
   const rows = trips.rows;
+  // the charts show every symbol's trades on its own chart; the list honours the symbol filter too
+  const symFilter = useStore((s) => s.filters.symbol);
+  const listRows = useMemo(() => (symFilter ? rows.filter((t) => t.symbol === symFilter) : rows), [rows, symFilter]);
   const idx = selected ? rows.findIndex((t) => t.id === selected.id) : -1;
   const step = (d: 1 | -1) => {
     if (!rows.length) return;
@@ -303,7 +314,8 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
             onHide={() => { if (maxed === keyOf(s)) setMaxed(null); prefs.toggle(keyOf(s)); }} onSelect={(t) => pick(t, true)} />
         ))}
       </div>
-      {!inChartTab && <TradesTab rows={rows} selectedId={selected?.id ?? null} onSelect={(t) => pick(t, false)} truncated={trips.truncated} total={trips.total} />}
+      {!inChartTab && <TradesTab rows={listRows} selectedId={selected?.id ?? null} onSelect={(t) => pick(t, false)}
+        all={results.summary.trades + results.summary.openTrades} matched={trips.truncated && !symFilter ? trips.total : null} />}
       <TradeStrip trip={selected} index={idx} count={rows.length} startBalance={results.equity.equity[0] ?? 0} multi={meta.strategies.length > 1} onPrev={() => step(-1)} onNext={() => step(1)} onClose={() => selectTrip(null)} />
       <span hidden>{String(!!onOpenJournal)}</span>
     </div>

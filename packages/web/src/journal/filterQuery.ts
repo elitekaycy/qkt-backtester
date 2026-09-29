@@ -65,6 +65,25 @@ function parseRange(v: string, num: (s: string) => number | null): { min?: numbe
     default: return { min: n, max: n };
   }
 }
+/**
+ * Hold times filter on [min, max), exactly like the hold buckets (1-4h holds 1h but not 4h). Durations are whole milliseconds,
+ * so "<=" and ">" shift the bound by one ms: `<1h` [0,1h), `<=1h` [0,1h], `>1h` (1h,..), `>=1h` [1h,..), `1h..4h` [1h,4h), `90m` exactly.
+ */
+function heldRange(v: string): { min?: number; max?: number } | null {
+  const rr = /^(.+)\.\.(.+)$/.exec(v);
+  if (rr) { const a = parseDuration(rr[1]!), b = parseDuration(rr[2]!); return a === null || b === null || a === b ? null : { min: Math.min(a, b), max: Math.max(a, b) }; }
+  const m = /^(>=|<=|>|<|=)?(.+)$/.exec(v);
+  const n = m ? parseDuration(m[2]!) : null;
+  if (!m || n === null) return null;
+  switch (m[1]) {
+    case "<": return { max: n };
+    case "<=": return { max: n + 1 };
+    case ">": return { min: n + 1 };
+    case ">=": return { min: n };
+    default: return { min: n, max: n + 1 };
+  }
+}
+
 const parseR = (s: string) => { const m = /^([+-]?\d+(?:\.\d+)?)r?$/i.exec(s.trim()); return m ? Number(m[1]) : null; };
 const parseMoney = (s: string) => { const m = /^([+-]?)\$?(\d+(?:\.\d+)?)(k)?$/i.exec(s.trim()); return m ? Number(m[1] + m[2]) * (m[3] ? 1000 : 1) : null; };
 
@@ -127,8 +146,8 @@ export function parseToken(raw: string, symbols: string[] = []): ParsedToken {
       return { raw, key, patch: { minR: r.min, maxR: r.max === undefined ? undefined : r.strictLt ? r.max - EPS : r.max } };
     }
     case "held": {
-      const r = parseRange(lv, parseDuration);
-      if (!r) return { raw, key, error: "held: like <1h, >4h, 1h..4h, 30m, 2d" };
+      const r = heldRange(lv);
+      if (!r) return { raw, key, error: "held: like <1h, >=4h, 1h..4h (from 1h up to 4h), 30m, 2d" };
       return { raw, key, patch: { minHoldMs: r.min, maxHoldMs: r.max } };
     }
     case "pnl": {
@@ -197,10 +216,12 @@ const rText = (lo?: number, hi?: number): string | null => {
   if (hi !== undefined) return hi < 0 && hi > -0.001 ? "r:<0" : `r:<=${f(hi)}`;
   return null;
 };
+// the inverse of heldRange: a bound one ms off a round duration came from ">"/"<=" (or an exact match)
 const heldText = (lo?: number, hi?: number): string | null => {
-  if (lo !== undefined && hi !== undefined) return `held:${formatDuration(lo)}..${formatDuration(hi)}`;
-  if (lo !== undefined) return `held:>${formatDuration(lo)}`;
-  if (hi !== undefined) return `held:<${formatDuration(hi)}`;
+  const f = formatDuration;
+  if (lo !== undefined && hi !== undefined) return hi === lo + 1 ? `held:${f(lo)}` : `held:${f(lo)}..${f(hi)}`;
+  if (lo !== undefined) return lo % 1000 === 1 ? `held:>${f(lo - 1)}` : `held:>=${f(lo)}`;
+  if (hi !== undefined) return hi % 1000 === 1 ? `held:<=${f(hi - 1)}` : `held:<${f(hi)}`;
   return null;
 };
 const pnlText = (lo?: number, hi?: number): string | null => {

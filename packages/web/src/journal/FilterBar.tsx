@@ -7,7 +7,7 @@ import { parseFilters, suggest, toChips } from "./filterQuery.js";
 import { useAnalytics } from "./useAnalytics.js";
 
 const H = 3_600_000;
-const HOLDS: Array<[string, number | undefined, number | undefined]> = [["Any", undefined, undefined], ["< 1h", undefined, H], ["1–4h", H, 4 * H], ["4–24h", 4 * H, 24 * H], ["> 1d", 24 * H, undefined]];
+const HOLDS: Array<[string, number | undefined, number | undefined]> = [["Any", undefined, undefined], ["< 1h", undefined, H], ["1–4h", H, 4 * H], ["4–24h", 4 * H, 24 * H], ["≥ 1d", 24 * H, undefined]];
 const RS: Array<[string, number | undefined, number | undefined]> = [["Any", undefined, undefined], ["< 0R", undefined, -0.0001], ["≥ 1R", 1, undefined], ["≥ 2R", 2, undefined]];
 const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WD_IDX = [1, 2, 3, 4, 5, 6, 0];
@@ -44,7 +44,7 @@ function FilterPanel() {
  * `held:<1h`, a day...), every active filter as a removable chip, and a Filters panel with the same options as buttons.
  * Changing a filter changes every chart and table at once.
  */
-export function FilterBar({ compact = false, count }: { compact?: boolean; count?: { shown: number; total: number } } = {}) {
+export function FilterBar({ compact = false, count }: { compact?: boolean; count?: { shown: number; total: number; capped?: number | null } } = {}) {
   const filters = useStore((s) => s.filters), setFilters = useStore((s) => s.setFilters), clear = useStore((s) => s.clearFilters);
   const meta = useStore((s) => s.results?.meta);
   const { a, base, loading, total } = useAnalytics();
@@ -129,7 +129,7 @@ export function FilterBar({ compact = false, count }: { compact?: boolean; count
       <button ref={panelBtn} className={`btn sm${compact ? " icon-only" : ""}`} aria-label="Filters" title="Filters" aria-haspopup="dialog" aria-expanded={panel} onClick={() => setPanel(!panel)}><Filter size={14} />{!compact && "Filters"}{active && <span className="badge accent" style={{ height: 16 }}>{chips.length}</span>}</button>
       <Popover open={panel} onClose={() => setPanel(false)} anchor={panelBtn} label="Filters" width={440}><FilterPanel /></Popover>
       {active && <button className="btn ghost sm" onClick={() => { clear(); setText(""); setErrors([]); }}>Clear all</button>}
-      <span className="stat" aria-live="polite">{count ? <>Showing <b className="num" style={{ color: "var(--ink)" }}>{count.shown.toLocaleString()}</b> of {count.total.toLocaleString()} trades</> : loading ? "Updating…" : a ? <>Showing <b className="num" style={{ color: "var(--ink)" }}>{a.count}</b> of {total} trades</> : ""}</span>
+      <span className="stat" aria-live="polite">{count ? <>Showing <b className="num" style={{ color: "var(--ink)" }}>{count.shown.toLocaleString()}</b> of {count.total.toLocaleString()} trades{count.capped ? <> · the first {count.shown.toLocaleString()} of {count.capped.toLocaleString()} matches: narrow the filters to see the rest</> : null}</> : loading ? "Updating…" : a ? <>Showing <b className="num" style={{ color: "var(--ink)" }}>{a.count}</b> of {total} trades</> : ""}</span>
       {errors.length > 0 && <div className="ferr" role="alert">{errors[0]}</div>}
     </div>
   );

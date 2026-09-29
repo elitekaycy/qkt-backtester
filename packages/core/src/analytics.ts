@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "./stats.js";
 import type { ExitReason, RoundTrip } from "./roundtrips.js";
 
 export interface Bucket { pnl: number; trades: number; wins: number }
@@ -46,14 +47,41 @@ const HOLD: Array<{ label: string; minMs: number; maxMs: number }> = [
   { label: "1-3d", minMs: 24 * H, maxMs: 72 * H }, { label: "> 3d", minMs: 72 * H, maxMs: Infinity },
 ];
 
+/** The largest double below x: turns an inclusive bound into "strictly less than x" for a filter that only has <= . */
+export function nextDown(x: number): number {
+  if (!Number.isFinite(x)) return x;
+  if (x === 0) return -Number.MIN_VALUE;
+  const v = new DataView(new ArrayBuffer(8));
+  v.setFloat64(0, x);
+  v.setBigUint64(0, x > 0 ? v.getBigUint64(0) - 1n : v.getBigUint64(0) + 1n);
+  return v.getFloat64(0);
+}
+
+/** Bin i of a histogram with these edges: the last i with edges[i] <= v, bins being [e_i, e_i+1) and the last one closed. */
+export function binOf(edges: readonly number[], v: number): number {
+  let a = 0, b = edges.length - 2;
+  while (a < b) { const m = (a + b + 1) >> 1; if (edges[m]! <= v) a = m; else b = m - 1; }
+  return a;
+}
+
+/**
+ * The value range to filter on for bar i, matching binOf exactly: [e_i, e_i+1) or, for the last bar, [e_i, max]. Clicking a bar
+ * therefore lists the same trades the bar counts, even when many trades sit exactly on an edge (every stop of a fixed bracket
+ * loses the same amount).
+ */
+export function binRange(h: Histogram, i: number): { min: number; max: number } {
+  return { min: h.edges[i]!, max: i === h.counts.length - 1 ? h.edges[i + 1]! : nextDown(h.edges[i + 1]!) };
+}
+
 function histogram(values: number[], bins: number): Histogram {
   if (!values.length) return { edges: [], counts: [] };
-  let lo = Math.min(...values), hi = Math.max(...values);
+  let lo = minOf(values), hi = maxOf(values);
   if (lo === hi) { lo -= 0.5; hi += 0.5; }
   const w = (hi - lo) / bins;
-  const edges = Array.from({ length: bins + 1 }, (_, i) => lo + i * w);
+  // the top edge is the maximum itself: lo + bins * w can land a hair below it and orphan the largest values
+  const edges = Array.from({ length: bins + 1 }, (_, i) => (i === bins ? hi : lo + i * w));
   const counts = new Array<number>(bins).fill(0);
-  for (const v of values) counts[Math.min(bins - 1, Math.floor((v - lo) / w))]!++;
+  for (const v of values) counts[binOf(edges, v)]!++;
   return { edges, counts };
 }
 
@@ -122,7 +150,7 @@ export function analyze(trips: RoundTrip[]): Analytics {
     winRate: closed.length ? wins.length / closed.length : 0,
     profitFactor: grossLoss < 0 ? grossWin / -grossLoss : null, avgWin, avgLoss, payoff: avgLoss < 0 ? avgWin / -avgLoss : null,
     expectancy: closed.length ? pnl / closed.length : 0,
-    largestWin: closed.length ? Math.max(0, ...closed.map((t) => t.pnl)) : 0, largestLoss: closed.length ? Math.min(0, ...closed.map((t) => t.pnl)) : 0,
+    largestWin: maxOf(closed.map((t) => t.pnl), 0), largestLoss: minOf(closed.map((t) => t.pnl), 0),
     avgHoldMs: holds.length ? holds.reduce((a, b) => a + b, 0) / holds.length : null,
     maxWinStreak: maxWin, maxLossStreak: maxLoss,
     rTrades: withR.length, avgR: withR.length ? withR.reduce((a, t) => a + t.r!, 0) / withR.length : null, totalR: withR.length ? withR.reduce((a, t) => a + t.r!, 0) : null,

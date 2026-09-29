@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client.js";
 import type { SymbolReport, TfReport, TickReport } from "../api/types.js";
 import { rangeDays } from "@qkt-studio/core/ranges";
@@ -6,8 +6,9 @@ import { useStore } from "../state/store.js";
 import { Modal } from "../ui/Modal.js";
 import { Tip } from "../ui/Tip.js";
 import { addDays } from "../util/format.js";
-import { gapDaysIn, monthGrids, yearChip } from "../util/datawindow.js";
-import { CircleAlert, CircleCheck, CircleX, Database, Folder, Info, Plus, RotateCcw, TriangleAlert, Zap } from "../ui/icons.js";
+import { fillableDays, gapDaysIn, monthGrids, yearChip } from "../util/datawindow.js";
+import { CircleAlert, CircleCheck, CircleX, Database, Folder, Hammer, Info, Plus, RotateCcw, TriangleAlert, Zap } from "../ui/icons.js";
+import { BuildForm } from "./dataParts.js";
 import { DataExplainer } from "./DataExplainer.js";
 import { DataSourceDialog } from "./DataSourceDialog.js";
 
@@ -19,7 +20,7 @@ const DAY_TEXT: Record<string, string> = { o: "ok", c: "closed", t: "thin", m: "
 interface Series { key: string; label: string; kind: string; r: TfReport | TickReport; isTicks: boolean }
 const seriesOf = (rep: SymbolReport | null): Series[] => !rep ? [] : [
   ...(rep.ticks ? [{ key: "ticks", label: "Ticks", kind: "ticks", r: rep.ticks, isTicks: true }] : []),
-  ...rep.bars.filter((b) => b.files > 0).map((b) => ({ key: `${b.broker}:${b.tf}`, label: `${b.tf} bars`, kind: `${b.broker}:${b.tf}`, r: b as TfReport | TickReport, isTicks: false })),
+  ...rep.bars.filter((b) => b.files > 0).map((b) => ({ key: `${b.broker}:${b.tf}`, label: b.qktReads ? `${b.tf} bars (not read by qkt: expects ${b.qktReads})` : `${b.tf} bars`, kind: `${b.broker}:${b.tf}`, r: b as TfReport | TickReport, isTicks: false })),
 ];
 
 /** Calendar heat-map of one series: a small month grid per year, missing days in red, click a day to start a range there. */
@@ -72,6 +73,8 @@ export function SymbolDialog() {
   const [explain, setExplain] = useState(false);
   const [pickSource, setPickSource] = useState(false);
   const [anchorDay, setAnchorDay] = useState<string | null>(null);
+  const [build, setBuild] = useState(false);
+  const buildBtn = useRef<HTMLButtonElement>(null);
 
   const load = async (sym: string) => {
     try {
@@ -93,6 +96,7 @@ export function SymbolDialog() {
   const lastExcl = last ? addDays(last, 1) : null;
   const eff = { from: from || first || "", to: to || lastExcl || "" };
   const gaps = cur?.r.gaps ?? [];
+  const fill = cur && !cur.isTicks && rep?.ticks ? fillableDays(gaps, rep.ticks) : 0;
   const missingInWindow = gapDaysIn(gaps, eff.from, eff.to);
   const users = readiness.filter((r) => r.streams.some((s) => s.symbol === symbol));
   const custom = detail && (detail.pref.source || detail.pref.from || detail.pref.to);
@@ -181,6 +185,19 @@ export function SymbolDialog() {
                     })}
                   </tbody>
                 </table></div>
+                {/* fixes that need ticks: bars are built into the default source, so they are offered there only */}
+                {rep.ticks && !source && (
+                  <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                    {cur && !cur.isTicks && fill > 0 && (
+                      <button className="btn sm" onClick={async () => {
+                        try { const { jobId } = await api.buildBars({ symbol: symbol!, tf: (cur.r as TfReport).tf, from: rep.ticks!.first!, to: addDays(rep.ticks!.last!, 1) }); useStore.getState().trackJob(jobId, `Fill ${symbol} ${(cur.r as TfReport).tf} bars`); }
+                        catch (e) { useStore.getState().toast("error", (e as Error).message); }
+                      }} title={`Rebuild the missing ${(cur.r as TfReport).tf} days that tick files cover (days already built are skipped)${cur.r.missing > fill ? `; the other ${cur.r.missing - fill} have no ticks either` : ""}`}><Hammer size={13} />Fill {fill.toLocaleString()} missing {(cur.r as TfReport).tf} day{fill === 1 ? "" : "s"} from ticks</button>
+                    )}
+                    <button ref={buildBtn} className="btn sm" onClick={() => setBuild(true)}><Plus size={13} />Build another timeframe…</button>
+                    <BuildForm open={build} onClose={() => setBuild(false)} anchor={buildBtn} symbol={symbol ?? undefined} />
+                  </div>
+                )}
                 {cur && (
                   <div className="years" role="list" aria-label={`Completeness by year, ${cur.label}`}>
                     {cur.r.years.map((y) => { const c = yearChip(y, cur.r.first, cur.r.last); return (

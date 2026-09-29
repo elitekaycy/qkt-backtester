@@ -47,7 +47,7 @@ export function registerFsRoutes(app: FastifyInstance, cfg: ServerConfig): void 
     catch (e) { return (e as NodeJS.ErrnoException).code === "ENOENT" ? fail(reply, 404, "not found") : fail(reply, 400, "not a directory"); }
     const entries: TreeEntry[] = [];
     for (const d of names) {
-      if (HIDDEN.has(d.name)) continue;
+      if (HIDDEN.has(d.name) || d.name.startsWith(".qkt-check-")) continue;
       const abs = path.join(g.abs, d.name);
       let st;
       try { st = await fs.stat(abs); } catch { continue; } // dangling symlink: skip

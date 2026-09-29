@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtNum, fmtMoney, fmtPct, fmtDur, fmtTs, fmtPrice, polarity, glyph, addDays, daysBetween, fmtBytes, DASH } from "./format.js";
+import { fmtNum, fmtMoney, fmtPct, fmtR, fmtRatio, fmtDur, fmtTs, fmtPrice, polarity, glyph, addDays, daysBetween, fmtBytes, DASH } from "./format.js";
 
 describe("format", () => {
   it("fmtNum groups thousands and shows a dash for missing values", () => {
@@ -15,7 +15,7 @@ describe("format", () => {
   });
   it("fmtPct converts fractions", () => {
     expect(fmtPct(0.06220635)).toBe("6.22%");
-    expect(fmtPct(-0.5, 0)).toBe("-50%");
+    expect(fmtPct(-0.5, 0)).toBe("−50%");
     expect(fmtPct(undefined)).toBe(DASH);
   });
   it("fmtDur picks the two most useful units", () => {
@@ -45,4 +45,21 @@ describe("format", () => {
     expect(daysBetween("2024-10-01", "2024-10-31")).toBe(30);
   });
   it("fmtBytes", () => { expect(fmtBytes(512)).toBe("512 B"); expect(fmtBytes(1536)).toBe("1.5 kB"); expect(fmtBytes(5 * 1024 ** 2)).toBe("5.0 MB"); });
+  it("every signed number uses a true minus, and nothing that rounds to zero keeps a sign", () => {
+    expect(fmtNum(-1234.5)).toBe("−1,234.50");
+    expect(fmtPct(-0.0525)).toBe("−5.25%");
+    expect(fmtRatio(-0.5)).toBe("−0.50");
+    expect(fmtMoney(-0.001)).toBe("0.00");
+    expect(fmtMoney(0.004)).toBe("0.00");
+    expect(fmtNum(-0.001)).toBe("0.00");
+    expect(fmtPct(-0.00001)).toBe("0.00%");
+    expect(fmtRatio(-0.001)).toBe("0.00");
+  });
+  it("fmtR signs multiples of risk", () => {
+    expect(fmtR(1.254)).toBe("+1.25R");
+    expect(fmtR(-0.5, 1)).toBe("−0.5R");
+    expect(fmtR(-0.001)).toBe("0.00R");
+    expect(fmtR(2, 2, false)).toBe("+2.00");
+    expect(fmtR(undefined)).toBe(DASH);
+  });
 });

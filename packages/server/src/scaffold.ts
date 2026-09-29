@@ -65,51 +65,132 @@ risk:
   # daily_dd_basis: balance         # balance | equity
   # max_round_trips_10m: 10         # 0 disables the runaway-loop breaker
   # max_broker_rejections_1m: 5
-  # (live) max_order_qty, max_order_notional, price_collar_pct, margin_floor_pct, measured_usage_hours, measured_usage_max_qty
+  # max_order_notional: "250000"   # per-order value cap (size x price x contract size); applies to backtests too
+  # max_order_qty: "100"            # per-order size cap; applies to backtests too
+  # (live) price_collar_pct: "5"   # refuse orders priced this far (percent) from the market
+  # (live) margin_floor_pct: "200"  # refuse orders that would take margin level below this percent
+  # (live) measured_usage_hours: "24"      # window, and cap on quantity, while a new strategy is being measured
+  # (live) measured_usage_max_qty: "0.01"
+  # (live) live_equity_basis: venue       # venue = broker equity | modeled = starting_balance + qkt P&L (matches backtests)
   # per_strategy:
   #   my_strategy:                  # the STRATEGY name in the .qkt file
   #     max_daily_loss: "300"
   #     max_position_size: "1.0"
   #     max_open_positions: "2"
+  #     max_drawdown_pct: "5"
+  #     max_daily_drawdown_pct: "3"
   #     max_trades_per_day: 20
   #     cooldown_after_loss: 30m
   #     loss_streak_halt: 5
 
 # ---------------------------------------------------------------------------------------------------------------------
-# (live) Brokers, market-data gate, notifications, telemetry, portfolio limits, promotion gates
+# Portfolio book risk: applies to PORTFOLIO runs (backtests too) as one book across its strategies
 # ---------------------------------------------------------------------------------------------------------------------
+# book_risk:
+#   capital: "100000"                     # required for drawdown-based de-risking to have a basis
+#   limits:
+#     max_gross_exposure: "300000"        # account currency
+#     max_net_exposure: "150000"
+#     max_symbol_concentration: "0.35"    # fraction of the book in one symbol
+#   de_risk:
+#     ladder:                             # scale exposure down as the book draws down
+#       - { drawdown: "0.04", factor: "0.50", cooldown_bars: 24 }
+#       - { drawdown: "0.08", factor: "0.00", cooldown_bars: 72 }
+#   allocation:
+#     method: FIXED                       # FIXED (default) | INVERSE_VOL | ERC (a REGIMES portfolio uses REGIME_WEIGHTED)
+#     target_vol: "0.10"
+#     rebalance_every_bars: 0             # 0 = never
+#     max_leverage: "4"
+
+# =====================================================================================================================
+# (live) Everything below is read by the live daemon and deploy checks only; backtests ignore it.
+# =====================================================================================================================
+
+# runtime:
+#   waivers:
+#     alerts: { reason: "supervised launch without an alert channel" }   # lets production preflight pass without notify
+
+# state:                                  # restart recovery and the audit journal (state folder: --state-dir / QKT_STATE_DIR)
+#   enabled: true                         # false disables restart recovery (and fails production preflight)
+#   async: false                          # true writes state on a background thread
+#   journal_retention_days: 14            # delete journal day-files older than this; 0 keeps all
+#   journal_compress_after_days: 1        # gzip closed journal files older than this; 0 never
+#   disk_free_alert_gb: 10                # alert (and fail production preflight) below this free space; 0 off
+
 # brokers:
 #   mt5:
 #     type: mt5
+#     # extends: exness                   # inherit from a built-in or earlier profile
 #     gateway_url: \${QKT_BROKER_GATEWAY_URL:-http://localhost:5001}
 #     api_key: \${QKT_BROKER_API_KEY}            # put the value in .env, not here
-#     server_time_zone: \${QKT_BROKER_SERVER_TIME_ZONE:-new_york_close}
+#     server_time_zone: \${QKT_BROKER_SERVER_TIME_ZONE:-new_york_close}   # or an IANA zone, e.g. Europe/Helsinki
+#     # server_tz_offset_hours: 2         # legacy fixed offset; no DST; not with server_time_zone
 #     symbol_suffix: \${QKT_BROKER_SYMBOL_SUFFIX:-}
-#     magic: \${QKT_BROKER_MAGIC:-10001}
-#     calendars:
+#     magic: \${QKT_BROKER_MAGIC:-10001}        # unique per MT5 profile
+#     # poll_interval_ms: 1000            # positions and pending orders
+#     # tick_poll_interval_ms: 250        # live quotes (inherits poll_interval_ms when that is set)
+#     # http_timeout_ms: 10000            # per gateway request
+#     # retry_attempts: 3
+#     # deviation_points: 20              # market-order price deviation tolerance
+#     # expected_account_login: "123456"  # startup refuses a different account...
+#     # expected_account_server: "Broker-Real"
+#     # expected_trade_mode: real         # ...demo/real inversion
+#     # expected_account_currency: USD
+#     # expected_leverage: 100
+#     # expected_margin_mode: hedging     # must match execution.position_mode
+#     calendars:                          # first matching pattern wins; "pause" adds a daily break
 #       "BTC*": crypto
+#       "XAU*": fx pause 17:00-18:00 America/New_York
 #       "*": fx
 #     aliases:
 #       NAS100: USTEC
+#     # capability_restrictions: []       # venue capabilities to disable, by name
 #     instrument_overrides:
 #       XAUUSD: { min_volume: "0.01", max_volume: "50", volume_step: "0.01", point_size: "0.001", digits: "3", trade_stops_level_points: "50" }
-#
-# market_data: { stale_age_multiple: 5.0, min_stale_age_ms: 10000, outlier_sigma: 6.0, max_clock_skew_ms: 60000 }
-#
+
+# market_data:                            # live quote health gate
+#   stale_age_multiple: 5.0               # stale after this many typical inter-tick gaps
+#   min_stale_age_ms: 10000
+#   outlier_sigma: 6.0                    # reject ticks this many standard deviations from the recent mean
+#   max_clock_skew_ms: 60000              # broker vs local clock tolerance before new orders pause
+
 # notify:
 #   telegram:
 #     enabled: false
 #     bot_token: \${TELEGRAM_BOT_TOKEN}
 #     chat_id: \${TELEGRAM_CHAT_ID}
-#     events: [order_rejected, halted, resumed, strategy_error]
-#
-# insights: { enabled: false, url: \${INSIGHTS_URL:-}, token: \${INSIGHTS_TOKEN:-} }
-#
-# book_risk:                                     # portfolio deployments only
-#   capital: "100000"
-#   limits: { max_gross_exposure: "300000", max_net_exposure: "150000", max_symbol_concentration: "0.35" }
-#
-# promotion: { enforce: false }
+#     events: [order_rejected, halted, resumed, strategy_error, daemon_started]
+#     daily_summary_utc: "21:00"
+#     commands: false                     # accept commands from the chat
+#     queue_capacity: 100
+
+# insights:                               # telemetry to a qkt-insights collector
+#   enabled: false
+#   url: \${INSIGHTS_URL:-}
+#   token: \${INSIGHTS_TOKEN:-}
+#   instance_id: qkt
+#   events: [trade, order, signal, risk, position, snapshot, log, state, deal, lifecycle]
+#   flush_interval_ms: 250
+#   batch_size: 200
+#   queue_capacity: 10000
+#   journal_enabled: false                # spool events locally and replay after collector downtime
+#   journal_dir: ""                       # blank = the daemon state folder
+#   state_poll_ms: 10000
+#   deal_backfill_days: 30
+
+# promotion:                              # gates a strategy must pass before deploy (enforced in production mode)
+#   enforce: false
+#   required_state: production            # draft | research | candidate | paper | shadow-live | small-capital | production
+#   dataset_snapshot: false
+#   realistic_execution: false
+#   walk_forward: false
+#   approval: true
+#   paper_days: 0
+#   paper_min_trades: 0
+#   max_paper_slippage_bps: 3.0
+#   registry_dir: ""                      # blank = the state folder's promotion registry
+
+# Reserved by qkt, not used yet: tv, fetchers.
 `;
 
 export const ENV_EXAMPLE = `# Copy to .env (the studio and every qkt command it runs read .env from the workspace folder).
@@ -276,4 +357,43 @@ export async function missingFiles(workspace: string): Promise<ScaffoldFile[]> {
   const out: ScaffoldFile[] = [];
   for (const f of ["qkt.config.yaml", "instruments.yaml", ".env"] as const) if (!(await fs.stat(path.join(workspace, f)).then(() => true, () => false))) out.push(f);
   return out;
+}
+
+/**
+ * The user's qkt.config.yaml merged into the full reference: every qkt option appears (commented unless it is a qkt
+ * default), and every top-level section the user wrote replaces the reference's version of it, so no value of theirs
+ * changes. e.g. a file holding only `starting_balance: 25000` becomes the whole reference with that line in place of
+ * `starting_balance: ${STARTING_BALANCE:-10000}`. Sections the reference does not know are kept at the end.
+ */
+export function completeConfig(user: string): string {
+  const top = /^([a-z_]+):/;                                  // an active top-level key
+  const topAny = /^(?:#\s?)?([a-z_]+):/;                      // active or commented top-level key (reference blocks)
+  const blocksOf = (text: string, re: RegExp) => {
+    const lines = text.split("\n"), out: Array<{ key: string | null; lines: string[] }> = [{ key: null, lines: [] }];
+    for (const l of lines) {
+      const m = re.exec(l);
+      if (m && !/^# (-|=){3,}/.test(l)) out.push({ key: m[1]!, lines: [l] });
+      else if (/^# (-|=){3,}/.test(l)) out.push({ key: null, lines: [l] });  // a section banner starts a new chunk
+      else out[out.length - 1]!.lines.push(l);
+    }
+    return out;
+  };
+  // split the user's file exactly like the reference; only sections whose key line is active are the user's own values
+  const mine = blocksOf(user.replace(/\s+$/, ""), topAny);
+  const byKey = new Map(mine.filter((b) => b.key && top.test(b.lines[0]!)).map((b) => [b.key!, b.lines.join("\n").replace(/\s+$/, "")]));
+  const used = new Set<string>();
+  const refBlocks = blocksOf(CONFIG_TEMPLATE, topAny);
+  const refHead = refBlocks[0]!.lines.join("\n").trim();
+  const ref = refBlocks.map((b) => {
+    if (!b.key || !byKey.has(b.key) || used.has(b.key)) return b.lines.join("\n");
+    used.add(b.key);
+    // keep the reference's trailing blank/comment lines that introduce the next section
+    const tail: string[] = [];
+    for (let i = b.lines.length - 1; i > 0 && (b.lines[i]!.trim() === "" ); i--) tail.unshift(b.lines[i]!);
+    return [byKey.get(b.key)!, ...tail].join("\n");
+  });
+  // the user's own leading comments are kept, unless they are the reference's header (a file completed before)
+  const head = mine[0]!.lines.join("\n").trim() === refHead ? "" : mine[0]!.lines.join("\n").trim();
+  const extra = [...byKey].filter(([k]) => !used.has(k)).map(([, t]) => t);
+  return [head ? `${head}\n` : "", ref.join("\n").replace(/\s+$/, ""), extra.length ? `\n\n# Your other settings\n${extra.join("\n\n")}` : ""].join("") + "\n";
 }

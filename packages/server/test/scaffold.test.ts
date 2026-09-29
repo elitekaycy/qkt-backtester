@@ -70,3 +70,32 @@ describe("scaffold endpoint defaults", () => {
     await studio.app.close(); rmSync(ws, { recursive: true, force: true });
   });
 });
+
+import { checkConfig } from "@qkt-studio/core";
+import { CONFIG_TEMPLATE } from "../src/scaffold.js";
+describe("the starter config is clean", () => {
+  it("the studio's own qkt.config.yaml template raises no findings", () => {
+    expect(checkConfig(CONFIG_TEMPLATE, true, {}).filter((f) => f.severity !== "info")).toEqual([]);
+  });
+});
+
+import { completeConfig, CONFIG_TEMPLATE } from "../src/scaffold.js";
+describe("completeConfig: the full reference around the user's own values", () => {
+  it("keeps every value the user set and adds every other option", () => {
+    const out = completeConfig("starting_balance: 25000\n");
+    expect(out).toContain("starting_balance: 25000");
+    expect(out).not.toContain("starting_balance: ${STARTING_BALANCE");
+    for (const k of ["execution:", "risk:", "book_risk:", "brokers:", "insights:", "promotion:", "live_equity_basis"]) expect(out).toContain(k);
+  });
+  it("replaces a whole section the user wrote, and keeps sections the reference does not know", () => {
+    const out = completeConfig("risk:\n  max_daily_loss: \"0\"\n\ncustom_thing:\n  a: 1\n");
+    expect(out).toContain('risk:\n  max_daily_loss: "0"');
+    expect(out).not.toContain('max_daily_loss: "1000"            # "0" disables');
+    expect(out).toMatch(/# Your other settings\ncustom_thing:\n {2}a: 1/);
+  });
+  it("is stable: completing a complete file changes nothing", () => {
+    expect(completeConfig(CONFIG_TEMPLATE)).toBe(CONFIG_TEMPLATE.replace(/\s+$/, "") + "\n");
+    const once = completeConfig("starting_balance: 25000\n");
+    expect(completeConfig(once)).toBe(once);
+  });
+});

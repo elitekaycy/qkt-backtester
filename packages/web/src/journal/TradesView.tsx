@@ -4,7 +4,7 @@ import { api } from "../api/client.js";
 import type { RoundTrip, TripQuery } from "../api/types.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
-import { DASH, fmtDur, fmtMoney, fmtNum, fmtPrice, fmtTs, glyph } from "../util/format.js";
+import { DASH, fmtDur, fmtR, fmtMoney, fmtNum, fmtPrice, fmtTs, glyph } from "../util/format.js";
 import { ArrowUpRight } from "../ui/icons.js";
 import { strategyColor } from "../util/strategyColor.js";
 import { useAnalytics } from "./useAnalytics.js";
@@ -35,7 +35,7 @@ function TradeCells({ t, strat }: { t: RoundTrip; strat: boolean }) {
       {c(fmtTs(t.entryTs), false, "mono")}{c(fmtPrice(t.entryPx), true)}{c(t.open ? <span className="badge">open</span> : fmtTs(t.exitTs), false, "mono")}{c(t.open ? DASH : fmtPrice(t.exitPx), true)}
       {c(fmtNum(t.qty, 2), true)}{c(t.risk === undefined ? <span title="No stop was set on this entry, so its risk is not measured">no stop</span> : fmtMoney(t.risk).replace("+", ""), true, t.risk === undefined ? "muted" : "")}
       {c(<span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{t.exit === "signal" ? "signal" : t.exit}</span>)}
-      {c(t.r === undefined ? DASH : `${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}`, true, t.r === undefined ? "muted" : t.r >= 0 ? "gain" : "loss")}
+      {c(fmtR(t.r, 2, false), true, t.r === undefined ? "muted" : t.r >= 0 ? "gain" : "loss")}
       {c(<>{t.open ? "" : glyph(t.pnl) + " "}{fmtMoney(t.pnl)}</>, true, t.pnl >= 0 ? "gain" : "loss")}{c(t.open ? DASH : fmtDur(t.holdMs), true)}
     </>
   );

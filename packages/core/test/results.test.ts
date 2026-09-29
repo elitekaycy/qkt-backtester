@@ -127,3 +127,42 @@ describe("verifyManifest", () => {
     expect((await verifyManifest(mkdtempSync(path.join(os.tmpdir(), "man-")))).ok).toBe(false);
   });
 });
+
+describe("summarize on very large runs", () => {
+  it("does not overflow the stack and counts the losing streak per round trip", () => {
+    const res = loadResult(JSON.parse(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "result-both.json"), "utf8")));
+    const N = 300_000;
+    const trips = Array.from({ length: N }, (_, i) => ({
+      id: i + 1, strategy: "s", symbol: "BACKTEST:X", side: "long" as const, entryTs: i * 1000, entryPx: 1, exitTs: i * 1000 + 500, exitPx: 1,
+      qty: 1, pnl: i >= 1000 && i < 1005 ? -1 : 1, fills: 2, holdMs: 500, open: false, exit: "signal" as const,
+    }));
+    const s = summarize(res, trips);
+    expect(s.trades).toBe(N);
+    expect(s.largestWin).toBe(1);
+    expect(s.largestLoss).toBe(-1);
+    expect(s.maxConsecutiveLosses).toBe(5);
+    expect(s.engineMaxConsecutiveLosses).toBe(res.global.maxConsecutiveLosses);
+  });
+});
+
+import { summarizeRejections } from "../src/rejections.js";
+describe("summarizeRejections", () => {
+  it("groups qkt's rejections by reason, with the fix for known ones", () => {
+    const csv = [
+      "timestamp,reason,strategy,symbol",
+      "1672701300000,order notional 365423.20000000 exceeds cap 250000 (qty=2 ref=1827.116 contractSize=100 currency=USD),m_short,BACKTEST:XAUUSD",
+      "1672702200000,order notional 365640.20000000 exceeds cap 250000 (qty=2 ref=1828.201 contractSize=100 currency=USD),m_short,BACKTEST:XAUUSD",
+      '1672703100000,"halted: daily loss 1012.5 exceeds max 1000",m_short,BACKTEST:XAUUSD',
+      "1672704000000,venue said no,m_short,BACKTEST:XAUUSD",
+    ].join("\n");
+    const r = summarizeRejections(csv);
+    expect(r.count).toBe(4);
+    expect(r.reasons.map((x) => [x.kind, x.count])).toEqual([["notional-cap", 2], ["daily-loss-halt", 1], ["other", 1]]);
+    expect(r.reasons[0]!.label).toBe("order notional exceeds cap");
+    expect(r.reasons[0]!.hint).toContain("risk.max_order_notional");
+    expect(r.reasons[1]!.example).toBe("halted: daily loss 1012.5 exceeds max 1000");
+    expect(r.reasons[2]!.hint).toBeUndefined();
+    expect(summarizeRejections("timestamp,reason,strategy,symbol\n")).toEqual({ count: 0, reasons: [] });
+    expect(summarizeRejections("")).toEqual({ count: 0, reasons: [] });
+  });
+});

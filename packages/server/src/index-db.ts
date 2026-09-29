@@ -12,6 +12,9 @@ export interface IndexRow {
  * Derived run index. Files under runs/ are the truth; this only makes listing, cache lookup, sequence numbers
  * and ETA estimation instant. It can be deleted at any time and rebuilt with reindex().
  */
+/** The fixed part of a run (engine start-up), left out of the per-day rate and added back by the estimate. */
+export const STARTUP_MS = 2000;
+
 export class RunIndex {
   private db: DatabaseSync;
   constructor(file: string) {
@@ -64,12 +67,15 @@ export class RunIndex {
   }
 
   /** Average wall-clock ms per calendar day for finished runs of this tier (ETA for the next one). */
+  /** Estimated run time: STARTUP_MS + msPerDay × days. */
   msPerDay(tier: string, strategy?: string): number | null {
     const rows = (strategy
-      ? this.db.prepare("SELECT from_d, to_d, duration_ms FROM runs WHERE status='done' AND tier=? AND strategy=? AND duration_ms > 0 ORDER BY created_at DESC LIMIT 5").all(tier, strategy)
-      : this.db.prepare("SELECT from_d, to_d, duration_ms FROM runs WHERE status='done' AND tier=? AND duration_ms > 0 ORDER BY created_at DESC LIMIT 5").all(tier)) as Array<{ from_d: string; to_d: string; duration_ms: number }>;
-    const per = rows.map((r) => r.duration_ms / Math.max(1, (Date.parse(r.to_d) - Date.parse(r.from_d)) / 86_400_000)).filter((x) => Number.isFinite(x));
-    return per.length ? per.reduce((a, b) => a + b, 0) / per.length : null;
+      ? this.db.prepare("SELECT from_d, to_d, duration_ms FROM runs WHERE status='done' AND tier=? AND strategy=? AND duration_ms > 0 ORDER BY created_at DESC LIMIT 9").all(tier, strategy)
+      : this.db.prepare("SELECT from_d, to_d, duration_ms FROM runs WHERE status='done' AND tier=? AND duration_ms > 0 ORDER BY created_at DESC LIMIT 9").all(tier)) as Array<{ from_d: string; to_d: string; duration_ms: number }>;
+    // a run costs a fixed start-up (~2 s of JVM) plus time per day; the median ignores the odd slow run (a grid's runs
+    // compete for the CPU), which a mean let turn a 5 s run's estimate into minutes
+    const per = rows.map((r) => Math.max(0, r.duration_ms - STARTUP_MS) / Math.max(1, (Date.parse(r.to_d) - Date.parse(r.from_d)) / 86_400_000)).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+    return per.length ? per[Math.floor(per.length / 2)]! : null;
   }
 
   /** Rebuild every row from runs/<id>/run.json (+ derived/summary.json). */

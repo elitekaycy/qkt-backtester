@@ -21,6 +21,7 @@ export interface TripQuery {
   maxQty?: number;
   /** One trade by its number in the run (the # column). */
   id?: number;
+  /** Hold time window, [minHoldMs, maxHoldMs): half-open like the journal's hold buckets, so "< 1h" never includes an exactly-1h trade. */
   minHoldMs?: number;
   maxHoldMs?: number;
   minPnl?: number;
@@ -62,7 +63,7 @@ export function matches(t: RoundTrip, q: TripQuery): boolean {
     case "closed": if (t.open) return false; break;
   }
   if (q.minHoldMs !== undefined && (t.holdMs === null || t.holdMs < q.minHoldMs)) return false;
-  if (q.maxHoldMs !== undefined && (t.holdMs === null || t.holdMs > q.maxHoldMs)) return false;
+  if (q.maxHoldMs !== undefined && (t.holdMs === null || t.holdMs >= q.maxHoldMs)) return false;
   if (q.exit && t.exit !== q.exit) return false;
   if (q.minR !== undefined && (t.r === undefined || t.r < q.minR)) return false;
   if (q.maxR !== undefined && (t.r === undefined || t.r > q.maxR)) return false;

@@ -94,3 +94,28 @@ table.tbl.heat th { font-size: 10px; letter-spacing: 0.02em; text-align: center;
 /* days outside the shown month are inactive: quieter, not faded to nothing */
 .cal-cell.out { opacity: 1; }
 .cal-cell.out .d { color: var(--ink-4); }
+
+/* portfolio: the table of strategies that compose the book */
+table.strat-table tbody tr { cursor: pointer; }
+table.strat-table tbody tr:hover { background: var(--card-2); }
+table.strat-table tbody tr.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-hi); }
+table.strat-table td:first-child, table.strat-table th:first-child { width: 22px; padding-right: 0; }
+.swatch.sm { width: 10px; height: 10px; border-radius: 3px; }
+@media (forced-colors: active) { table.strat-table tbody tr.on { outline: 2px solid Highlight; outline-offset: -2px; } .swatch { forced-color-adjust: none; } }
+
+/* parameter grid heatmap */
+.gridheat-wrap { overflow-x: auto; margin: var(--s2) 0 var(--s3); }
+.gridheat { border-collapse: separate; border-spacing: 3px; font-size: var(--fs-sm); }
+.gridheat th { font-weight: 500; color: var(--ink-3); padding: 2px 8px; font-size: var(--fs-xs); white-space: nowrap; }
+.gridheat th.corner { text-align: left; }
+.gh-cell { min-width: 72px; height: 32px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card-2); color: var(--ink); font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+.gh-cell:hover { outline: 2px solid var(--accent-hi); outline-offset: -1px; }
+.gh-cell:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 1px; }
+.gh-cell.sel { box-shadow: inset 0 0 0 2px var(--ink); }
+.gh-cell.blown { background: repeating-linear-gradient(45deg, var(--card-2) 0 5px, var(--card-3) 5px 10px); color: var(--ink-3); }
+.gh-cell:disabled { cursor: default; opacity: 0.5; }
+@media (forced-colors: active) { .gh-cell { forced-color-adjust: none; border-color: CanvasText; } }
+.gh-legend { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-xs); margin-top: 4px; }
+.gh-scale { display: inline-flex; gap: 2px; }
+.gh-scale i, .gh-sw { display: inline-block; width: 16px; height: 10px; border-radius: 2px; border: 1px solid var(--line); }
+.gh-sw.blown { background: repeating-linear-gradient(45deg, var(--card-2) 0 3px, var(--card-3) 3px 6px); }

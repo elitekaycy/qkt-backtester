@@ -3,17 +3,19 @@ import { prepareDataView, allowedWindow } from "./data-view.js";
 import { configStartingBalance } from "@qkt-studio/core";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
+import { scanCached, seriesDays } from "./data-scan.js";
+import { knownParsed, rememberParsed } from "./parse-cache.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
-  usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
-  parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, transition, uniqueStreams,
+  availableTimeframes, barBases, usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
+  parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, tfMs, transition, uniqueStreams, warmupBarsEstimate,
   type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
 } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
-import { RunIndex, type IndexRow } from "./index-db.js";
+import { RunIndex, STARTUP_MS, type IndexRow } from "./index-db.js";
 import { JailError, resolveInJail, toRel } from "./jail.js";
-import { postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
+import { DERIVED_VERSION, postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
 import { execQkt, spawnGroup, type ProcHandle } from "./proc.js";
 import { optionArgs, OptionsError, validateOptions, type RunOptions } from "./run-options.js";
 
@@ -52,6 +54,9 @@ class Cancelled extends Error {}
 
 interface Active {
   run: RunJson;
+  /** Rejects with Cancelled the moment the run is cancelled: raced against the steps that wait without a child process. */
+  cancelWait: Promise<never>;
+  rejectCancel(): void;
   /** Data folder qkt reads for this run: the source itself, or a folder of symlinks when symbols come from different sources. */
   dataRoot: string;
   wsEnv: WorkspaceEnv;
@@ -78,6 +83,46 @@ interface Active {
 const RUN_ID = /^[0-9A-Za-z][0-9A-Za-z_.-]{0,120}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
+
+/**
+ * Kill engine processes whose `--report-dir` is inside `runsDir`: left behind when the studio itself was killed. Linux only
+ * (reads /proc); elsewhere it does nothing. Returns how many were stopped.
+ */
+async function stopOrphanEngines(runsDir: string): Promise<number> {
+  const prefix = path.resolve(runsDir) + path.sep;
+  let n = 0;
+  for (const pid of await fs.readdir("/proc").catch(() => [] as string[])) {
+    if (!/^\d+$/.test(pid) || Number(pid) === process.pid) continue;
+    const args = (await fs.readFile(`/proc/${pid}/cmdline`, "utf8").catch(() => "")).split("\0");
+    const i = args.indexOf("--report-dir");
+    if (i < 0 || !(args[i + 1] ?? "").startsWith(prefix)) continue;
+    try { process.kill(Number(pid), "SIGKILL"); n++; } catch { /* gone, or not ours to kill */ }
+  }
+  return n;
+}
+
+/**
+ * STUDIO_CDS_DIR set (the Docker image does): backtest JVMs share a class-data archive that the JVM creates on first use,
+ * about 10% off every run's start-up with identical results. Backtests only, in their own file, so the archive holds what a
+ * backtest loads rather than whatever JVM happened to start first.
+ */
+function withCds(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const dir = process.env.STUDIO_CDS_DIR;
+  if (!dir) return env;
+  try { mkdirSync(dir, { recursive: true }); } catch { return env; }
+  const opt = `-XX:+AutoCreateSharedArchive -XX:SharedArchiveFile=${path.join(dir, "backtest.jsa")}`;
+  return { ...env, QKT_OPTS: [env.QKT_OPTS, opt].filter(Boolean).join(" ") };
+}
+
+/** A promise that rejects with Cancelled when the run is cancelled (handled, so an unraced one never counts as unhandled). */
+function cancelHandle(): { cancelWait: Promise<never>; rejectCancel(): void } {
+  let reject!: (e: unknown) => void;
+  const cancelWait = new Promise<never>((_, rej) => { reject = rej; });
+  cancelWait.catch(() => undefined);
+  return { cancelWait, rejectCancel: () => reject(new Cancelled()) };
+}
+/** Wait for `p`, or stop waiting as soon as the run is cancelled. */
+const orCancel = <T>(a: { cancelWait: Promise<never> }, p: Promise<T>): Promise<T> => Promise.race([p, a.cancelWait]);
 const MAX_RANGE_DAYS = 3660;
 const MAX_LOG_EVENTS = 300;
 
@@ -87,6 +132,8 @@ const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 export class Runner {
   readonly index: RunIndex;
   private active = new Map<string, Active>();
+  /** Final states of runs whose run.json could not be written (disk full): served instead of the stale file. */
+  private readonly unsaved = new Map<string, RunJson>();
   private queue: Active[] = [];
   private running = 0;
   private engine: { version: string; gitSha?: string } | null = null;
@@ -108,6 +155,10 @@ export class Runner {
   async init(): Promise<void> {
     await fs.mkdir(this.runsDir, { recursive: true });
     await fs.mkdir(path.join(this.cfg.workspace, ".qkt-studio"), { recursive: true });
+    // a studio killed outright (SIGKILL, OOM) cannot stop its engines: any still writing into this workspace's runs is ours
+    // and its run is about to be marked interrupted, so stop it first
+    const orphans = await stopOrphanEngines(this.runsDir);
+    if (orphans) console.error(`stopped ${orphans} engine process${orphans === 1 ? "" : "es"} left running by a previous studio`);
     for (const d of await fs.readdir(this.runsDir).catch(() => [] as string[])) {
       const file = path.join(this.runsDir, d, "run.json");
       try {
@@ -181,16 +232,31 @@ export class Runner {
     return { sources, streams: uniqueStreams(streams) };
   }
 
-  private async dataFiles(streams: StreamDecl[], tier: Tier, from: string, to: string): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
-    const start = Date.parse(from) - 14 * DAY_MS, end = Date.parse(to);
-    const days: string[] = [];
-    for (let d = start; d < end; d += DAY_MS) days.push(isoDay(d));
-    const paths: string[] = [];
-    if (tier === "draft") for (const s of streams) for (const d of days) paths.push(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, s.tf, `${d}.bin`));
-    else for (const sym of new Set(streams.map((s) => s.symbol))) for (const d of days) paths.push(path.join(rootFor(this.cfg, sym), "symbols", sym, `${d}.csv.gz`));
+  /**
+   * The data files a run reads, for its fingerprint: the window plus the warmup qkt reads before `from`. The warmup span is the
+   * bar count converted to calendar days with room for weekends and holidays (x1.5 + a week), never less than 14 days.
+   */
+  private async dataFiles(streams: StreamDecl[], tier: Tier, from: string, to: string, warmBars: number): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
+    const end = Date.parse(to);
+    const daysFor = (s: StreamDecl) => {
+      const back = Math.min(1100, Math.max(14, Math.ceil((Math.max(warmBars, s.warmupBars ?? 0) * (tfMs(s.tf) ?? DAY_MS) * 1.5) / DAY_MS) + 7));
+      const out: string[] = [];
+      for (let d = Date.parse(from) - back * DAY_MS; d < end; d += DAY_MS) out.push(isoDay(d));
+      return out;
+    };
+    const paths = new Set<string>();
+    if (tier === "draft") {
+      // the folder qkt reads for each symbol (a 1h stream runs on 15m bars when only those are built), not the stream's own name
+      const built = new Map<string, string[]>();
+      for (const s of streams) { const k = `${s.broker}:${s.symbol}`; if (!built.has(k)) built.set(k, await availableTimeframes(rootFor(this.cfg, s.symbol), s.broker, s.symbol)); }
+      const bases = barBases(streams, (b, sy) => built.get(`${b}:${sy}`) ?? []);
+      for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, bases.get(`${s.broker}:${s.symbol}`) ?? s.tf, `${d}.bin`));
+    }
+    else for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "symbols", s.symbol, `${d}.csv.gz`));
+    const list = [...paths];
     const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
-    for (let i = 0; i < paths.length; i += 256) {
-      const stats = await Promise.all(paths.slice(i, i + 256).map((p) => fs.stat(p).then((s) => ({ path: p, size: s.size, mtimeMs: s.mtimeMs }), () => null)));
+    for (let i = 0; i < list.length; i += 256) {
+      const stats = await Promise.all(list.slice(i, i + 256).map((p) => fs.stat(p).then((s) => ({ path: p, size: s.size, mtimeMs: s.mtimeMs }), () => null)));
       for (const s of stats) if (s) out.push(s);
     }
     return out;
@@ -217,7 +283,7 @@ export class Runner {
 
     const cfgAbs = path.join(ws, "qkt.config.yaml");
     const configText = await fs.readFile(cfgAbs, "utf8").catch(() => "");
-    const files = await this.dataFiles(streams, req.tier, req.from, req.to);
+    const files = await this.dataFiles(streams, req.tier, req.from, req.to, warmupBarsEstimate(Object.values(sources), req.params ?? {}));
     const wsEnv = await loadWorkspaceEnv(ws);
     // per-symbol data windows (Data -> symbol): a run may not reach outside them
     const win = allowedWindow(this.cfg, streams.map((s) => s.symbol));
@@ -228,13 +294,15 @@ export class Runner {
     if (options.startingBalance === undefined) { const sb = configStartingBalance(configText, childEnv(this.cfg, wsEnv)); if (sb !== undefined) options.startingBalance = sb; }
     const hashInput: RunHashInput = {
       strategySources: sources, config: configText, params, from: req.from, to: req.to, tier: req.tier, engine,
-      flags: [...(req.allowIncomplete ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
+      // "window-check:1": runs made before the studio refused windows with missing days are not reused (see checkWindowData)
+      flags: ["window-check:1", ...(req.allowIncomplete ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
     };
     const hash = runHash(hashInput);
 
     if (!req.force) {
       const done = this.index.findDone(hash);
       if (done && (await fs.stat(path.join(this.runDir(done.id), "derived", "summary.json")).then(() => true, () => false))) {
+        await this.ensureDerived(done.id).catch(() => undefined);
         return { runId: done.id, cached: true, joined: false };
       }
       const live = this.index.findActive(hash);
@@ -265,7 +333,7 @@ export class Runner {
     let resolve!: (r: RunJson) => void;
     const finished = new Promise<RunJson>((r) => { resolve = r; });
     const a: Active = {
-      run, dir, dataRoot: this.cfg.dataRoot, wsEnv, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
+      ...cancelHandle(), run, dir, dataRoot: this.cfg.dataRoot, wsEnv, cancelled: false, events: [], nextId: 1, listeners: new Set(), startedMs: Date.now(), phase: "queued", logCount: 0,
       finished, resolve, request: req, stratAbs, stratSource: sources[stratRel] ?? "", cfgAbs, info: { streams },
     };
     this.active.set(id, a);
@@ -318,11 +386,52 @@ export class Runner {
   async getRun(id: string): Promise<RunJson | null> {
     const a = this.active.get(id);
     if (a) return a.run;
+    const unsaved = this.unsaved.get(id);
+    if (unsaved) return unsaved;
     try { return JSON.parse(await fs.readFile(path.join(this.runDir(id), "run.json"), "utf8")) as RunJson; }
     catch { return null; }
   }
 
   list(strategy?: string, limit?: number): IndexRow[] { return this.index.list({ strategy, limit }); }
+
+  private rederiving = new Map<string, Promise<void>>();
+  /**
+   * Make sure a finished run's derived/ files come from the current derivation rules, re-deriving them from engine/ if they are
+   * older. Concurrent callers share one re-derivation. A run without engine output (failed, cancelled) is left as it is.
+   */
+  async ensureDerived(id: string): Promise<void> {
+    if (this.active.has(id)) return;
+    const pending = this.rederiving.get(id);
+    if (pending) return pending;
+    // registered before the first await, so concurrent callers (the UI loads several derived files at once) share one
+    // re-derivation instead of each parsing the run again
+    const dir = this.runDir(id);
+    const job = (async () => {
+      const meta = JSON.parse(await fs.readFile(path.join(dir, "derived", "meta.json"), "utf8").catch(() => "null")) as { derivedVersion?: number } | null;
+      if (!meta || meta.derivedVersion === DERIVED_VERSION) return;
+      if (!(await fs.stat(path.join(dir, "engine", "result.json")).then(() => true, () => false))) return;
+      const run = await this.getRun(id);
+      if (!run || run.status !== "done") return;
+      const { root } = await prepareDataView(this.cfg, uniqueStreams(Object.values(await this.sourcesOf(dir, run.strategy)).flatMap((t) => parseStrategyInfo(t).streams)).map((s) => s.symbol));
+      await postprocess({ runDir: dir, run, dataRoot: root });
+    })().finally(() => this.rederiving.delete(id));
+    this.rederiving.set(id, job);
+    return job;
+  }
+
+  /** The strategy sources a run was made from (its source/ snapshot), keyed by relative path. */
+  private async sourcesOf(dir: string, strategy: string): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    const walk = async (d: string) => {
+      for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) await walk(p); else if (e.name.endsWith(".qkt")) out[path.relative(path.join(dir, "source"), p)] = await fs.readFile(p, "utf8");
+      }
+    };
+    await walk(path.join(dir, "source"));
+    if (!Object.keys(out).length) out[strategy] = "";
+    return out;
+  }
 
   /** Resolves when the run reaches a terminal state (tests and job chaining). */
   async waitFor(id: string): Promise<RunJson> {
@@ -340,6 +449,7 @@ export class Runner {
     if (!a) return false;
     a.cancelled = true;
     if (opts.purge) a.purge = true;
+    a.rejectCancel();
     const qi = this.queue.indexOf(a);
     if (qi >= 0) { this.queue.splice(qi, 1); await this.finishCancelled(a); return true; }
     await a.proc?.kill();
@@ -350,7 +460,9 @@ export class Runner {
     while (this.running < this.cfg.maxParallel && this.queue.length) {
       const a = this.queue.shift()!;
       this.running++;
-      void this.execute(a).finally(() => { this.running--; void this.pump(); });
+      void this.execute(a)
+        .catch((e) => console.error(`run ${a.run.id}: ${(e as Error).stack ?? e}`))
+        .finally(() => { this.running--; void this.pump(); });
     }
   }
 
@@ -363,6 +475,19 @@ export class Runner {
     await fs.rename(tmp, file);
     // Snapshot, not a reference: history and slow SSE writers must see the state as of this event.
     this.emit(a, { t: "run", run: structuredClone(a.run) });
+  }
+
+  /**
+   * For the terminal paths (failed, cancelled): a write that fails (disk full, a read-only folder) must not throw out of the
+   * error handler, or the whole server exits and takes every other run with it. The run's final state stays in memory, in
+   * the index and in the event stream; only its run.json is stale, and startup marks such a run interrupted.
+   */
+  private async persistFinal(a: Active): Promise<void> {
+    try { await this.persist(a); this.unsaved.delete(a.run.id); } catch (e) {
+      console.error(`run ${a.run.id}: could not write run.json (${(e as Error).message}); its state is kept in memory`);
+      this.unsaved.set(a.run.id, structuredClone(a.run));
+      this.emit(a, { t: "run", run: structuredClone(a.run) });
+    }
   }
 
   private step(a: Active, id: StepId): StepRecord { return a.run.steps.find((s) => s.id === id)!; }
@@ -401,8 +526,9 @@ export class Runner {
       await this.setStatus(a, "checking");
       await this.stepProject(a); this.guardCancel(a);
       await this.stepConfig(a); this.guardCancel(a);
-      a.dataRoot = (await prepareDataView(this.cfg, a.info.streams.map((s) => s.symbol))).root;
+      a.dataRoot = (await orCancel(a, prepareDataView(this.cfg, a.info.streams.map((s) => s.symbol)))).root;
       await this.stepParse(a); this.guardCancel(a);
+      await orCancel(a, this.checkWindowData(a)); this.guardCancel(a);
       await this.stepEngine(a); this.guardCancel(a);
       await this.stepPostprocess(a);
       r.status = transition(r.status, "done");
@@ -417,14 +543,17 @@ export class Runner {
         ? new StepFailure("postprocess", { kind: "internal", message: e.message })
         : new StepFailure(this.currentStep(a), this.unexpected(e));
       const st = this.step(a, failure.step);
-      if (st.status !== "failed") await this.endStep(a, failure.step, "failed", failure.error.message);
+      if (st.status !== "failed") {
+        st.status = "failed"; st.message = failure.error.message;
+        if (st.startedAt) st.ms = Date.now() - Date.parse(st.startedAt);
+      }
       for (const s of r.steps) if (s.status === "pending") s.status = "skipped";
       r.error = failure.error;
       try { r.status = transition(r.status, "failed"); } catch { r.status = "failed"; }
       r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
-      await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true });
-      await this.persist(a);
-      this.index.upsert(r);
+      await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true }).catch(() => undefined);
+      await this.persistFinal(a);
+      try { this.index.upsert(r); } catch (ie) { console.error(`run ${r.id}: index update failed: ${(ie as Error).message}`); }
     } finally {
       this.active.delete(r.id);
       a.resolve(r);
@@ -445,11 +574,11 @@ export class Runner {
     r.error = { kind: "cancelled", message: "Cancelled" };
     try { r.status = transition(r.status, "cancelled"); } catch { r.status = "cancelled"; }
     r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
-    await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true });
-    await this.persist(a);
-    this.index.upsert(r);
+    await fs.rm(path.join(a.dir, "engine"), { recursive: true, force: true }).catch(() => undefined);
+    await this.persistFinal(a);
+    try { this.index.upsert(r); } catch (ie) { console.error(`run ${r.id}: index update failed: ${(ie as Error).message}`); }
     this.active.delete(r.id);
-    if (a.purge) { await fs.rm(a.dir, { recursive: true, force: true }); this.index.remove(r.id); }
+    if (a.purge) { await fs.rm(a.dir, { recursive: true, force: true }).catch(() => undefined); this.index.remove(r.id); }
     a.resolve(r);
   }
 
@@ -487,7 +616,9 @@ export class Runner {
   private async stepParse(a: Active): Promise<void> {
     const cmd = `${this.cfg.qktBin} parse ${quote(a.run.strategy)}`;
     await this.startStep(a, "parse", cmd);
-    const r = await execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 });
+    // the live check already ran qkt parse on exactly this text: skip the second JVM (a fast save-and-run loop)
+    const already = knownParsed(a.stratSource);
+    const r = already ? { code: 0, stdout: "", stderr: "" } : await orCancel(a, execQkt(this.cfg.qktBin, ["parse", a.stratAbs], { cwd: this.cfg.workspace, env: this.env(a), timeoutMs: 30_000 }));
     this.guardCancel(a);
     if (r.code !== 0) {
       const err = normalizeError(r.stderr || r.stdout, r.code);
@@ -495,9 +626,10 @@ export class Runner {
       err.file = a.run.strategy;
       throw new StepFailure("parse", err);
     }
+    if (!already) rememberParsed(a.stratSource);
     const lint = lintAliases(a.stratSource).filter((d) => d.severity === "error");
     if (lint.length) { const d = lint[0]!; throw new StepFailure("parse", { kind: "unknown_alias", message: d.message, file: a.run.strategy, line: d.line, col: d.col }); }
-    await this.endStep(a, "parse", "ok", "syntax OK");
+    await this.endStep(a, "parse", "ok", already ? "syntax OK (checked while editing)" : "syntax OK");
   }
 
   private async stepEngine(a: Active): Promise<void> {
@@ -535,11 +667,11 @@ export class Runner {
     const days = Math.max(1, (Date.parse(r.to) - Date.parse(r.from)) / DAY_MS);
     const tick = setInterval(() => {
       const elapsed = Date.now() - a.startedMs;
-      this.emit(a, { t: "progress", phase: a.phase, fills: r.counts!.fills, orders: r.counts!.orders, elapsedMs: elapsed, etaMs: perDay ? Math.max(0, Math.round(perDay * days - elapsed)) : null });
+      this.emit(a, { t: "progress", phase: a.phase, fills: r.counts!.fills, orders: r.counts!.orders, elapsedMs: elapsed, etaMs: perDay !== null ? Math.max(0, Math.round(STARTUP_MS + perDay * days - elapsed)) : null });
     }, 250);
 
     const proc = spawnGroup(this.cfg.qktBin, args, {
-      cwd: this.cfg.workspace, env: this.env(a), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
+      cwd: this.cfg.workspace, env: withCds(this.env(a)), timeoutMs: Number(process.env.MAX_RUN_MS ?? 30 * 60_000),
       logFiles: { out: path.join(a.dir, "logs", "stdout.log"), err: path.join(a.dir, "logs", "stderr.log") }, onLine,
     });
     a.proc = proc;
@@ -554,6 +686,7 @@ export class Runner {
     if (holes.length) r.holes = holes;
     const hint = parseBuildBarsHint(exit.stderr);
     if (hint) r.buildBarsHint = hint;
+    if (req.allowIncomplete && holes.length) r.waivedDays = [...new Set([...r.waivedDays, ...holes.map((h) => h.day)])].sort();
     if (req.allowIncomplete && holes.length) r.warnings.push(`Ran with ${holes.length} incomplete/missing day(s) waived: ${holes.slice(0, 5).map((h) => h.day).join(", ")}${holes.length > 5 ? "…" : ""}`);
 
     if (exit.timedOut) throw new StepFailure(covDone ? "backtest" : "coverage", { kind: "engine_crash", message: "The run exceeded its time limit and was stopped." });
@@ -568,6 +701,52 @@ export class Runner {
     }
     if (!covDone) { await this.endStep(a, "coverage", "ok", "no coverage report from qkt"); await this.startStep(a, "backtest"); }
     await this.endStep(a, "backtest", "ok", `${r.counts!.fills} fills`);
+  }
+
+  /**
+   * The same day-by-day rule the Data section shows, applied before the engine starts. qkt's own coverage check accepts any
+   * day that has a file, so an empty file on a 24/7 market (a Saturday with no bars) would pass and the run would silently
+   * trade through a day with no data, while the Data section calls that window incomplete. Such days refuse the run like
+   * qkt's own holes do; with "run anyway" they are recorded as waived. Reads what the run reads: in a bars run the folder qkt
+   * aggregates from, in a tick run the tick files. Days before `from` are warm-up and are not checked.
+   */
+  private async checkWindowData(a: Active): Promise<void> {
+    const r = a.run, req = a.request;
+    const report = await scanCached(a.dataRoot).catch(() => null);
+    if (!report) return;
+    const bySym = new Map(report.symbols.map((s) => [s.symbol, s]));
+    const bases = barBases(a.info.streams, (broker, symbol) => bySym.get(symbol)?.bars.filter((b) => b.broker === broker && b.files > 0 && !b.qktReads).map((b) => b.tf) ?? []);
+    const found: Array<{ what: string; days: string[] }> = [];
+    const seen = new Set<string>();
+    for (const s of a.info.streams) {
+      const key = r.tier === "draft" ? `${s.broker}:${s.symbol}` : s.symbol;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const base = r.tier === "draft" ? bases.get(key) : null;
+      if (r.tier === "draft" && !base) continue; // nothing qkt can read: its own coverage step names the missing folder
+      const series = await seriesDays(a.dataRoot, s.symbol, r.tier === "draft" ? { broker: s.broker, tf: base! } : "ticks").catch(() => null);
+      if (!series) continue; // no files at all: qkt reports it with the exact fix
+      const days: string[] = [];
+      const t0 = Date.parse(`${series.first}T00:00:00Z`);
+      for (let i = 0; i < series.days.length; i++) {
+        if (series.days[i] !== "m") continue;
+        const day = new Date(t0 + i * DAY_MS).toISOString().slice(0, 10);
+        if (day >= r.from && day < r.to) days.push(day);
+      }
+      if (days.length) found.push({ what: r.tier === "draft" ? `${s.symbol} ${base} bars` : `${s.symbol} ticks`, days });
+    }
+    if (!found.length) return;
+    const all = [...new Set(found.flatMap((f) => f.days))].sort();
+    const list = found.map((f) => `${f.what}: ${f.days.slice(0, 6).join(", ")}${f.days.length > 6 ? ` and ${f.days.length - 6} more` : ""}`).join("; ");
+    if (req.allowIncomplete) {
+      r.waivedDays = [...new Set([...r.waivedDays, ...all])].sort();
+      r.warnings.push(`Ran with ${all.length} day${all.length === 1 ? "" : "s"} of missing data waived (${list}): the engine sees no ${r.tier === "draft" ? "bars" : "ticks"} on them.`);
+      return;
+    }
+    throw new StepFailure("coverage", {
+      kind: "incomplete_data",
+      message: `The window has days with no data: ${list}. qkt would run through them as if the market were closed. Pick a window without them (Data shows the complete stretches), fill them, or turn on "run anyway" to waive them.`,
+    });
   }
 
   private async stepPostprocess(a: Active): Promise<void> {

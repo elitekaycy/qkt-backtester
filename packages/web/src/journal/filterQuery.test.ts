@@ -31,8 +31,10 @@ describe("parseToken", () => {
   it("hold durations", () => {
     expect(parseToken("held:<1h").patch).toEqual({ minHoldMs: undefined, maxHoldMs: H });
     expect(parseToken("held:1h..4h").patch).toEqual({ minHoldMs: H, maxHoldMs: 4 * H });
-    expect(parseToken("held:>1d").patch).toEqual({ minHoldMs: 24 * H, maxHoldMs: undefined });
-    expect(parseToken("held:90m").patch).toEqual({ minHoldMs: 90 * 60_000, maxHoldMs: 90 * 60_000 });
+    expect(parseToken("held:>1d").patch).toEqual({ minHoldMs: 24 * H + 1, maxHoldMs: undefined });
+    expect(parseToken("held:>=1d").patch).toEqual({ minHoldMs: 24 * H, maxHoldMs: undefined });
+    expect(parseToken("held:<=1h").patch).toEqual({ minHoldMs: undefined, maxHoldMs: H + 1 });
+    expect(parseToken("held:90m").patch).toEqual({ minHoldMs: 90 * 60_000, maxHoldMs: 90 * 60_000 + 1 });
     expect(parseDuration("1.5h")).toBe(5_400_000);
   });
   it("pnl, day, weekday, hour", () => {
@@ -150,5 +152,17 @@ describe("entry and exit time, size and trade number", () => {
     const s = suggest("entry:2024-1", { days: ["2024-10-01", "2024-10-02", "2024-11-03"] }).map((x) => x.text);
     expect(s).toContain("entry:2024-10");
     expect(s).toContain("entry:2024-11");
+  });
+});
+
+describe("hold filters agree with the hold buckets (half-open)", () => {
+  it("every hold form survives a round trip through its chip", () => {
+    for (const t of ["held:<1h", "held:<=1h", "held:>4h", "held:>=4h", "held:1h..4h", "held:90m"]) {
+      const f = parseFilters(t).patch;
+      const chip = toChips(f).find((c) => c.id === "held")!.text;
+      expect(parseFilters(chip).patch, `${t} -> ${chip}`).toEqual(f);
+    }
+    expect(toChips({ maxHoldMs: H }).find((c) => c.id === "held")!.text).toBe("held:<1h");
+    expect(toChips({ minHoldMs: H, maxHoldMs: 4 * H }).find((c) => c.id === "held")!.text).toBe("held:1h..4h");
   });
 });

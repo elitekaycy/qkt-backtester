@@ -93,3 +93,15 @@
 /* the suggestions must sit clearly above the trade list: solid, own surface, contained width */
 .trades-tab .fsug { left: 0; right: 0; max-height: 260px; }
 .trades-tab .fsug li[role="option"] { grid-template-columns: minmax(84px, 130px) 1fr auto; padding: 5px var(--s2); }
+
+/* portfolio run: one chip per strategy, toggling the app-wide strategy filter */
+.strategy-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px var(--s3); border-bottom: 1px solid var(--line); }
+.strategy-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 10px 2px 3px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-3); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.strategy-chip:hover { background: var(--card-2); color: var(--ink-2); }
+.strategy-chip.on { background: var(--card-2); color: var(--ink); border-color: var(--line-2, var(--line)); }
+.strategy-chip:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: 1px; }
+/* every palette colour keeps >= 4.5:1 against this dark ink, in both themes */
+.strategy-chip .swatch { width: 20px; height: 18px; border-radius: 999px; display: inline-grid; place-items: center; color: #0e0f11; font-size: 9px; font-weight: 700; letter-spacing: 0.02em; }
+.strategy-chip:not(.on) .swatch { opacity: 0.35; }
+.strategy-chip:not(.on) { text-decoration: line-through; text-decoration-color: var(--ink-3); }
+@media (forced-colors: active) { .strategy-chip.on { border: 2px solid Highlight; } .strategy-chip .swatch { forced-color-adjust: none; } }

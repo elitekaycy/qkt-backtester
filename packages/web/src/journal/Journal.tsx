@@ -22,7 +22,7 @@ const NAV: Array<{ id: JournalSection; label: string; icon: typeof ChartColumn; 
   { id: "monthly", label: "Monthly", icon: ChartColumn, filters: true, hint: "P&L, trades and win rate per month" },
   { id: "trades", label: "Trades", icon: ListChecks, filters: true, hint: "Every round trip, filtered and analysed" },
   { id: "time", label: "Time & risk", icon: Clock, filters: true, hint: "When you win, and how much you risk" },
-  { id: "lab", label: "Robustness", icon: Dices, filters: false, hint: "Monte Carlo, parameter grids, walk-forward" },
+  { id: "lab", label: "Optimize", icon: Dices, filters: false, hint: "Parameter grid, walk-forward and Monte Carlo: which settings work, and whether it holds up" },
   { id: "compare", label: "Compare", icon: GitCompare, filters: false, hint: "Runs side by side" },
 ];
 

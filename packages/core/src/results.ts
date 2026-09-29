@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "./stats.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -26,6 +27,8 @@ export interface QktResult {
   };
   bookRisk?: { bookVol?: string; maxGrossExposure?: string; maxNetExposure?: string; samples?: number; events?: number };
   artifacts?: Record<string, unknown>;
+  /** The currency every money figure is in (config `account.currency`, default USD). */
+  accounting?: { accountCurrency?: string };
 }
 
 export interface PerfReport {
@@ -61,9 +64,20 @@ export interface Summary {
   trades: number; openTrades: number;
   wins: number; losses: number; winRate: number;
   profitFactor: number | null; expectancy: number; avgWin: number; avgLoss: number;
-  largestWin: number; largestLoss: number; avgHoldMs: number | null; maxConsecutiveLosses: number;
+  largestWin: number; largestLoss: number; avgHoldMs: number | null;
+  /** Longest run of losing round trips, by exit time (the journal's streak). */
+  maxConsecutiveLosses: number;
+  /** qkt's own count, per closing fill: differs from the trip count when legs scale in or out. */
+  engineMaxConsecutiveLosses: number;
   long: { trades: number; pnl: number; winRate: number }; short: { trades: number; pnl: number; winRate: number };
-  sharpe: number; sortino: number; calmar: number; maxDrawdown: number; maxDailyDrawdown: number;
+  /**
+   * Null when the account was blown (equity reached zero or below, a drawdown of 100% or more): returns on a negative
+   * balance flip sign, so qkt's ratios can read positive for the worst runs. `engineRatios` keeps qkt's values.
+   */
+  sharpe: number | null; sortino: number | null; calmar: number | null; maxDrawdown: number; maxDailyDrawdown: number;
+  /** Equity reached zero or below at some point in the run. */
+  blown: boolean;
+  engineRatios: { sharpe: number; sortino: number; calmar: number };
   engineWinRate: number; engineProfitFactor: number;
 }
 
@@ -84,15 +98,23 @@ export function summarize(result: QktResult, trips: RoundTrip[]): Summary {
     profitFactor: gl < 0 ? gw / -gl : null,
     expectancy: closed.length ? closed.reduce((a, t) => a + t.pnl, 0) / closed.length : 0,
     avgWin: wins.length ? gw / wins.length : 0, avgLoss: losses.length ? gl / losses.length : 0,
-    largestWin: closed.length ? Math.max(0, ...closed.map((t) => t.pnl)) : 0,
-    largestLoss: closed.length ? Math.min(0, ...closed.map((t) => t.pnl)) : 0,
+    largestWin: maxOf(closed.map((t) => t.pnl), 0),
+    largestLoss: minOf(closed.map((t) => t.pnl), 0),
     avgHoldMs: holds.length ? holds.reduce((a, b) => a + b, 0) / holds.length : null,
-    maxConsecutiveLosses: g.maxConsecutiveLosses,
+    maxConsecutiveLosses: lossStreak(closed), engineMaxConsecutiveLosses: g.maxConsecutiveLosses,
     long: side("long"), short: side("short"),
-    sharpe: n(g.sharpeRatio), sortino: n(g.sortinoRatio), calmar: n(g.calmarRatio),
+    sharpe: n(g.maxDrawdown) >= 1 ? null : n(g.sharpeRatio), sortino: n(g.maxDrawdown) >= 1 ? null : n(g.sortinoRatio), calmar: n(g.maxDrawdown) >= 1 ? null : n(g.calmarRatio),
+    blown: n(g.maxDrawdown) >= 1, engineRatios: { sharpe: n(g.sharpeRatio), sortino: n(g.sortinoRatio), calmar: n(g.calmarRatio) },
     maxDrawdown: n(g.maxDrawdown), maxDailyDrawdown: n(g.maxDailyDrawdown),
     engineWinRate: n(g.winRate), engineProfitFactor: n(g.profitFactor),
   };
+}
+
+/** Longest run of consecutive losing trips in exit order (a breakeven trip ends a run, as in the journal). */
+function lossStreak(closed: RoundTrip[]): number {
+  let run = 0, max = 0;
+  for (const t of [...closed].sort((a, b) => (a.exitTs ?? 0) - (b.exitTs ?? 0))) { run = t.pnl < 0 ? run + 1 : 0; if (run > max) max = run; }
+  return max;
 }
 
 export interface MonthRow { month: string; pnl: number; trades: number }

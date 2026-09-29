@@ -1,16 +1,16 @@
-import { anchorParseError } from "@qkt-studio/core/lint";
+import { anchorParseError, relocate } from "@qkt-studio/core/lint";
 import { create } from "zustand";
 import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import { api, ApiError, openRunEvents, type Equity, type Info, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
 import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJson, RunOptions, ScanReport, Summary, Tier, TripQuery } from "../api/types.js";
-import { addDays } from "../util/format.js";
+import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
 import type { SymbolReport } from "../api/types.js";
 
 export interface OpenFile { path: string; content: string; saved: string; etag: string; conflict?: boolean }
 export interface Progress { phase: string; fills: number; orders: number; elapsedMs: number; etaMs: number | null }
-export interface Results { runId: string; summary: Summary; integrity: IntegrityReport; monthly: MonthRow[]; equity: Equity; meta: RunMeta }
+export interface Results { runId: string; summary: Summary; integrity: IntegrityReport; monthly: MonthRow[]; equity: Equity; meta: RunMeta; strategy: string }
 export interface Toast { id: number; kind: "info" | "error" | "ok"; text: string }
 export type DiagSource = "lsp" | "check" | "run" | "config";
 
@@ -53,6 +53,8 @@ interface State {
   openSymbol(symbol: string | null): void;
   /** The server's last message when a run was refused (e.g. window outside a symbol's range); shown in Run settings. */
   submitError: string | null;
+  /** One sentence for screen readers when a run starts, finishes or fails (read by a polite live region). */
+  announce: string;
   setSymbolPref(symbol: string, pref: { source?: string | null; from?: string | null; to?: string | null }): Promise<void>;
   resetSymbolPrefs(): Promise<void>;
   autoFindSources(): Promise<Array<{ symbol: string; source: string; days: number }>>;
@@ -71,6 +73,10 @@ interface State {
   runs: RunRow[];
 
   results: Results | null;
+  /** The previous result of the same strategy, for "what did my change do" deltas; null after switching strategy. */
+  previous: Results | null;
+  /** Why the last save did not auto-run (a syntax error), or null. */
+  autoSkipped: string | null;
   resultsStale: boolean;
 
   filters: TripQuery;
@@ -116,6 +122,7 @@ interface State {
   setOption<K extends keyof RunOptions>(key: K, value: RunOptions[K] | undefined): void;
   selectRun(id: string): Promise<void>;
   loadResults(id: string): Promise<void>;
+  attachRun(runId: string): void;
   refreshRuns(): Promise<void>;
 
   setFilters(patch: Partial<TripQuery>): void;
@@ -133,10 +140,10 @@ export const useStore = create<State>((set, get) => ({
   theme: prefs.theme === "light" ? "light" : "dark",
   toasts: [],
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
-  cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun === true, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
-  settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, scanning: false, jobs: [], compare: [],
+  cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun !== false, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
+  settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
   runId: null, run: null, progress: null, logs: [], running: false, runs: [],
-  results: null, resultsStale: false,
+  results: null, previous: null, autoSkipped: null, resultsStale: false,
   filters: {}, selectedTrip: null, focus: null,
   problems: {},
 
@@ -152,6 +159,9 @@ export const useStore = create<State>((set, get) => ({
     if (root.some((e) => e.name === CONFIG)) await get().openFile(CONFIG);
     if (first) await get().openFile(first.path);
     await get().refreshRuns();
+    // a run still in progress on the server (the page was reloaded, or it was started in another tab): follow it again
+    const live = get().runs.find((r) => ["queued", "checking", "running", "postprocessing"].includes(r.status));
+    if (live && !get().running) get().attachRun(live.id);
     if (!get().cfg.from || !get().cfg.to) await get().applyDefaultRange();
     void get().refreshData();
   },
@@ -217,7 +227,13 @@ export const useStore = create<State>((set, get) => ({
       set((s) => ({ openFiles: s.openFiles.map((x) => (x.path === path ? { ...x, saved: f.content, etag: r.etag, conflict: false } : x)) }));
       if (get().cfg.autoRun && (isStrategy(path) || path === CONFIG)) {
         if (autoTimer) clearTimeout(autoTimer);
-        autoTimer = setTimeout(() => void get().startRun({ auto: true, tier: "draft" }), 300);
+        // a file with a syntax error would only produce a failed run: keep the last good result and say why instead
+        const target = isStrategy(path) ? path : get().strategyPath();
+        const errs = target ? Object.entries(get().problems[target] ?? {}).filter(([src]) => src !== "run").flatMap(([, l]) => l ?? []).filter((d) => d.severity === "error") : [];
+        if (errs.length) { const e0 = errs[0]!; set({ autoSkipped: `Not run: line ${e0.line}: ${e0.message}` }); return true; }
+        set({ autoSkipped: null });
+        // a short pause only to gather files saved together (Save all)
+        autoTimer = setTimeout(() => void get().startRun({ auto: true, tier: "draft" }), 150);
       }
       return true;
     } catch (e) {
@@ -319,37 +335,46 @@ export const useStore = create<State>((set, get) => ({
     const declared = new Map((f ? parseStrategyInfo(f.content).params : []).map((p) => [p.name, p.default]));
     const overrides = Object.fromEntries(Object.entries(cfg.paramsByStrategy[strategy] ?? {}).filter(([k, v]) => declared.has(k) && v !== "" && v !== declared.get(k)));
     closeEvents?.();
-    set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null }));
+    set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null, announce: `Running ${strategy.split("/").pop()}…` }));
     try {
       const tier = opts.tier ?? cfg.tier;
       const { broker, execution, slippage, ...common } = cfg.options;
       const options: RunOptions = tier === "full" ? { ...common, broker, execution, slippage } : common;
       const clean = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined && v !== "")) as RunOptions;
       const { runId } = await api.submit({ strategy, from: cfg.from, to: cfg.to, tier, params: overrides, allowIncomplete: opts.allowIncomplete ?? cfg.allowIncomplete, force: opts.force, auto: opts.auto, options: clean });
-      set({ runId });
-      closeEvents = openRunEvents(runId, (e) => {
-        if (get().runId !== runId) return;
-        if (e.t === "run") set({ run: e.run });
-        else if (e.t === "progress") set({ progress: e });
-        else set((s) => ({ logs: [...s.logs.slice(-299), `${e.level === "warn" ? "warning: " : ""}${e.message}`] }));
-      }, () => {
-        void (async () => {
-          if (get().runId !== runId) return;
-          const run = await api.run(runId).catch(() => null);
-          set({ running: false, run: run ?? get().run });
-          if (run?.status === "done") await get().loadResults(runId);
-          else set({ resultsStale: false });
-          if (run?.error && run.error.file && run.error.line) {
-            const path = run.error.file === CONFIG ? CONFIG : run.error.file;
-            get().setDiagnostics(path, "run", [{ severity: "error", code: run.error.kind, message: run.error.message, line: run.error.line, col: run.error.col ?? 1, endCol: (run.error.col ?? 1) + 1 }]);
-          } else for (const p of Object.keys(get().problems)) get().setDiagnostics(p, "run", []);
-          await get().refreshRuns();
-        })();
-      });
+      get().attachRun(runId);
     } catch (e) {
       set({ running: false, resultsStale: false, submitError: e instanceof ApiError && e.status === 400 ? e.message : null });
       get().toast("error", (e as Error).message);
     }
+  },
+  /** Follow a run to its end: its status, progress and log, then its results. Used for a new run and, after a page
+   *  load, for a run the server is still working on, so the Stop button is there whenever something runs. */
+  attachRun(runId) {
+    closeEvents?.();
+    set({ runId, running: true });
+    closeEvents = openRunEvents(runId, (e) => {
+      if (get().runId !== runId) return;
+      if (e.t === "run") set({ run: e.run });
+      else if (e.t === "progress") set({ progress: e });
+      else set((s) => ({ logs: [...s.logs.slice(-299), `${e.level === "warn" ? "warning: " : ""}${e.message}`] }));
+    }, () => {
+      void (async () => {
+        if (get().runId !== runId) return;
+        const run = await api.run(runId).catch(() => null);
+        set({ running: false, run: run ?? get().run });
+        if (run?.status === "done") {
+          await get().loadResults(runId);
+          const sm = get().results?.summary;
+          set({ announce: sm ? `Run finished: ${sm.trades} closed trade${sm.trades === 1 ? "" : "s"}, net P&L ${fmtMoney(sm.totalPnl)}.` : "Run finished." });
+        } else set({ resultsStale: false, announce: run?.status === "failed" ? `Run failed: ${run.error?.message ?? "see the pipeline"}` : "Run stopped." });
+        if (run?.error && run.error.file && run.error.line) {
+          const path = run.error.file === CONFIG ? CONFIG : run.error.file;
+          get().setDiagnostics(path, "run", [{ severity: "error", code: run.error.kind, message: run.error.message, line: run.error.line, col: run.error.col ?? 1, endCol: (run.error.col ?? 1) + 1 }]);
+        } else for (const p of Object.keys(get().problems)) get().setDiagnostics(p, "run", []);
+        await get().refreshRuns();
+      })();
+    });
   },
   async stopRun() {
     const id = get().runId;
@@ -455,9 +480,11 @@ export const useStore = create<State>((set, get) => ({
   },
   async loadResults(id) {
     try {
-      const [summary, integrity, monthly, equity, meta] = await Promise.all([api.summary(id), api.integrity(id), api.monthly(id), api.equity(id), api.meta(id)]);
+      const [summary, integrity, monthly, equity, meta, run] = await Promise.all([api.summary(id), api.integrity(id), api.monthly(id), api.equity(id), api.meta(id), api.run(id)]);
       if (get().runId !== id) return;
-      set({ results: { runId: id, summary, integrity, monthly, equity, meta }, resultsStale: false, selectedTrip: null });
+      const prev = get().results;
+      const previous = prev && prev.runId !== id && prev.strategy === run.strategy ? prev : prev?.runId === id ? get().previous : null;
+      set({ results: { runId: id, summary, integrity, monthly, equity, meta, strategy: run.strategy }, previous, resultsStale: false, selectedTrip: null });
     } catch (e) {
       set({ resultsStale: false });
       get().toast("error", `Cannot load results: ${(e as Error).message}`);
@@ -480,7 +507,15 @@ export const useStore = create<State>((set, get) => ({
   setDiagnostics(path, source, list) {
     if (path.endsWith(".qkt") && list.length) {
       const text = get().openFiles.find((f) => f.path === path)?.content;
-      if (text !== undefined) list = list.map((d) => (d.severity === "error" ? { ...d, ...anchorParseError(text, d) } : d));
+      const ws = get().info?.workspace;
+      if (text !== undefined) list = list.map((d) => {
+        let x = { ...d };
+        // qkt names a missing import by its absolute path alone
+        if (/^\/.*\.qkt$/.test(x.message)) x.message = `Imported file not found: ${ws && x.message.startsWith(ws + "/") ? x.message.slice(ws.length + 1) : x.message}`;
+        // reported without a position (line 1, col 1): point at the text the message is about
+        if (x.line <= 1 && x.col <= 1) { const at = relocate(text, x.message); if (at) x = { ...x, line: at.line, col: at.col, endCol: at.endCol }; }
+        return x.severity === "error" ? { ...x, ...anchorParseError(text, x) } : x;
+      });
     }
     set((s) => {
       const cur = { ...(s.problems[path] ?? {}) };
@@ -493,8 +528,25 @@ export const useStore = create<State>((set, get) => ({
 }));
 
 /** Flatten diagnostics for the Problems list. */
+/**
+ * The problems of one file as shown everywhere (the editor's squiggles and the Problems panel read this same list): the
+ * same message at the same place from qkt's language server and from the check after a pause is one problem, not two.
+ */
+export function fileProblems(bySource: Partial<Record<DiagSource, Diagnostic[]>>): Array<Diagnostic & { source: DiagSource }> {
+  const out: Array<Diagnostic & { source: DiagSource }> = [], seen = new Set<string>();
+  for (const source of ["lsp", "check", "config", "run"] as DiagSource[]) for (const d of bySource[source] ?? []) {
+    const k = `${d.line}:${d.message}`;
+    if (seen.has(k)) continue;
+    seen.add(k); out.push({ ...d, source });
+  }
+  return out;
+}
+
 export function flattenProblems(problems: State["problems"]): Array<Diagnostic & { path: string; source: DiagSource }> {
   const out: Array<Diagnostic & { path: string; source: DiagSource }> = [];
-  for (const [path, bySource] of Object.entries(problems)) for (const [source, list] of Object.entries(bySource)) for (const d of list ?? []) out.push({ ...d, path, source: source as DiagSource });
+  for (const [path, bySource] of Object.entries(problems)) for (const d of fileProblems(bySource)) out.push({ ...d, path });
   return out.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
 }
+
+// handle for automated tests (like __qktEditor): lets an end-to-end script set the window as the date picker does
+if (typeof window !== "undefined") (window as unknown as { __qktStore?: typeof useStore }).__qktStore = useStore;

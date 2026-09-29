@@ -28,9 +28,13 @@ export const ALLOWED_SUBCOMMANDS = new Set(["parse", "backtest", "sweep", "walkf
 export function checkRestricted(words: string[], workspace: string, dataRoot: string): string | null {
   if (words[0] !== "qkt") return `${words[0]}: command not found. This terminal runs qkt commands and a few file helpers; type 'help'.`;
   if (!words[1] || !ALLOWED_SUBCOMMANDS.has(words[1])) return `Not allowed: ${words[1] ?? "(none)"}. Allowed: ${[...ALLOWED_SUBCOMMANDS].join(", ")}`;
+  // every argument, and the value half of --flag=value, is a potential path
+  const within = (root: string, p: string) => { const r = path.relative(root, p); return r === "" || (!r.startsWith("..") && !path.isAbsolute(r)); };
   for (const a of words.slice(2)) {
-    if (a.split("/").includes("..")) return "Paths with '..' are not allowed.";
-    if (path.isAbsolute(a) && !a.startsWith(workspace + path.sep) && a !== workspace && !a.startsWith(dataRoot)) return `Absolute path outside the workspace: ${a}`;
+    for (const v of a.startsWith("-") && a.includes("=") ? [a, a.slice(a.indexOf("=") + 1)] : [a]) {
+      if (v.split(/[\/\\]/).includes("..")) return "Paths with '..' are not allowed.";
+      if (path.isAbsolute(v) && !within(workspace, path.resolve(v)) && !within(dataRoot, path.resolve(v))) return `Absolute path outside the workspace: ${v}`;
+    }
   }
   return null;
 }

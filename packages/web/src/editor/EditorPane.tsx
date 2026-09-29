@@ -4,10 +4,19 @@ import type { editor } from "monaco-editor/editor/editor.api.js";
 import { api } from "../api/client.js";
 import { LspClient, toMarkers } from "./lsp.js";
 import { enableVim, languageFor, setupMonaco, themeFor, type Monaco } from "./monaco.js";
-import { useStore } from "../state/store.js";
+import { fileProblems, useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
+import { cycleRegion } from "../util/regions.js";
+
+/** Top-level settings a config file lists, written or commented: a near-empty file gets the offer to show every option. */
+const configKeyCount = (text: string) => new Set([...text.matchAll(/^(?:#\s?)?([a-z_]+):/gm)].map((m) => m[1])).size;
+
+// A file shown before the user has pressed a key or clicked (the one restored on page load) does not take focus: a keyboard
+// user starts outside the editor, where Tab moves between controls. Any file they open themselves is focused as usual.
+let userActed = false;
+for (const ev of ["keydown", "pointerdown"] as const) window.addEventListener(ev, () => { userActed = true; }, { capture: true, once: true });
 import { newStrategy } from "../sections/FilesSection.js";
-import { FileCode2, FileCog, FileText, Plus, X } from "../ui/icons.js";
+import { FileCode2, FileCog, FileText, Info, Plus, X } from "../ui/icons.js";
 
 export const REVEAL_EVENT = "qkt:reveal";
 export const revealAt = (path: string, line: number, col: number) => window.dispatchEvent(new CustomEvent(REVEAL_EVENT, { detail: { path, line, col } }));
@@ -40,13 +49,12 @@ export function EditorPane() {
         scrollBeyondLastLine: false, renderWhitespace: "selection", fixedOverflowWidgets: true, padding: { top: 12, bottom: 12 }, lineHeight: 0,
         fontFamily: "'JetBrains Mono Variable', ui-monospace, Menlo, Consolas, monospace", fontLigatures: true, lineNumbersMinChars: 3, smoothScrolling: true,
         cursorSmoothCaretAnimation: "on", roundedSelection: true, guides: { indentation: true, bracketPairs: false }, overviewRulerBorder: false, renderLineHighlight: "line",
+        ariaLabel: "Strategy editor. Tab indents; press Ctrl+M to make Tab move focus out of the editor instead.",
       });
       const lsp = new LspClient(m, info.workspace, (uri, diags) => {
         const prefix = `file://${info.workspace}/`;
         const path = uri.startsWith(prefix) ? uri.slice(prefix.length) : null;
         if (!path) return;
-        const model = S.current?.models.get(path);
-        if (model) m.editor.setModelMarkers(model, "qkt-lsp", toMarkers(m, diags));
         store.getState().setDiagnostics(path, "lsp", diags);
       });
       lsp.onStatus = setLspStatus;
@@ -54,6 +62,7 @@ export function EditorPane() {
       lsp.connect();
       S.current = { m, ed, models: new Map(), views: new Map(), lsp, suppress: false };
       (window as unknown as { __qktEditor?: editor.IStandaloneCodeEditor }).__qktEditor = ed; // handle for automated tests
+      (window as unknown as { __qktMarkers?: () => unknown }).__qktMarkers = () => m.editor.getModelMarkers({}).map((x) => ({ owner: x.owner, sev: x.severity, line: x.startLineNumber, col: x.startColumn, msg: x.message, file: x.resource.path })); // for automated tests
       ed.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.KeyS, () => { const p = store.getState().activePath; if (p) void store.getState().saveFile(p); });
       ed.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.Enter, () => void store.getState().startRun());
       // Monaco owns these chords while the editor has focus; forward them to the app so shortcuts work everywhere.
@@ -64,6 +73,15 @@ export function EditorPane() {
       ed.addCommand(C | K.Comma, () => ui().set({ runSettings: !ui().runSettings }));
       ed.addCommand(C | K.Period, () => void store.getState().killAll());
       ed.addCommand(C | K.Backquote, () => ui().set({ dockOpen: !ui().dockOpen }));
+      // Tab indents, so a keyboard user needs a way out: Ctrl+M flips Tab to moving focus (Monaco's own chord, also in vim mode)
+      let tabMoves = false;
+      ed.addCommand(C | K.KeyM, () => {
+        ed.trigger("keyboard", "editor.action.toggleTabFocusMode", null);
+        const on = (tabMoves = !tabMoves);
+        store.setState({ announce: on ? "Tab now moves focus out of the editor. Ctrl+M to indent with Tab again." : "Tab indents again. Ctrl+M to move focus with Tab." });
+      });
+      ed.addCommand(K.F6, () => cycleRegion(1));
+      ed.addCommand(m.KeyMod.Shift | K.F6, () => cycleRegion(-1));
       ([K.Digit1, K.Digit2, K.Digit3] as const).forEach((k, i) => ed.addCommand(C | k, () => ui().set({ section: (["files", "data", "runs"] as const)[i]! })));
       // Esc with a completion popup open: in vim mode it closes the popup AND leaves insert mode in the same press (one Esc is all a
       // vim user should ever need); without vim it only closes the popup, as in any Monaco editor.
@@ -134,14 +152,23 @@ export function EditorPane() {
     for (const [p, model] of s.models) if (!want.has(p)) { if (p.endsWith(".qkt")) s.lsp.close(p); model.dispose(); s.models.delete(p); s.views.delete(p); store.getState().setDiagnostics(p, "check", []); store.getState().setDiagnostics(p, "lsp", []); }
   }, [openFiles, booted, info]);
 
+  // the squiggles are the Problems panel's list, per file: one normalised source, so both always agree
+  const problems = useStore((st) => st.problems);
+  useEffect(() => {
+    const s = S.current;
+    if (!s) return;
+    for (const [path, model] of s.models) s.m.editor.setModelMarkers(model, "qkt", toMarkers(s.m, fileProblems(problems[path] ?? {})));
+  }, [problems, booted, activePath]);
+
   const shown = useRef<string | null>(null);
+
   useEffect(() => {
     const s = S.current;
     if (!s || !booted) return;
     if (shown.current && shown.current !== activePath) s.views.set(shown.current, s.ed.saveViewState());
     const model = activePath ? s.models.get(activePath) : null;
     const swapped = !!model && s.ed.getModel() !== model;
-    if (model && swapped) { s.ed.setModel(model); const v = s.views.get(activePath!); if (v) s.ed.restoreViewState(v); s.ed.focus(); }
+    if (model && swapped) { s.ed.setModel(model); const v = s.views.get(activePath!); if (v) s.ed.restoreViewState(v); if (userActed) s.ed.focus(); }
     if (!model) s.ed.setModel(null);
     shown.current = activePath;
     if (swapped && useUi.getState().vim) syncVim();
@@ -163,10 +190,8 @@ export function EditorPane() {
     const seq = ++timers.current.seq;
     timers.current.check = setTimeout(async () => {
       try {
-        const { diagnostics } = await api.check(kind, text);
+        const { diagnostics } = await api.check(kind, text, path);
         if (seq !== timers.current.seq) return;
-        const s = S.current, model = s?.models.get(path);
-        if (s && model) s.m.editor.setModelMarkers(model, "qkt-check", toMarkers(s.m, diagnostics));
         store.getState().setDiagnostics(path, kind === "config" ? "config" : "check", diagnostics);
       } catch { /* checker busy or offline: keep the last markers */ }
     }, 600);
@@ -220,13 +245,27 @@ export function EditorPane() {
         <div className="empty" style={{ flex: 1, justifyContent: "center" }}><FileCode2 className="ico-big" /><b>No file open</b>Pick one from Files, or start a new strategy.
           <button className="btn primary" onClick={() => newStrategy()}><Plus size={15} />New strategy</button></div>
       )}
+      {active?.path === "qkt.config.yaml" && configKeyCount(active.content) < 8 && (
+        <div className="banner info editor-banner" role="status">
+          <Info size={14} aria-hidden="true" />
+          <span>This file shows {configKeyCount(active.content)} of qkt's settings. Show every option, commented, around your own values (nothing you set changes; undo with Ctrl+Z).</span>
+          <button className="btn sm" onClick={async () => {
+            const s = S.current; if (!s) return;
+            try {
+              const { content } = await api.completeConfig(s.ed.getValue());
+              const model = s.ed.getModel(); if (!model) return;
+              s.ed.pushUndoStop(); s.ed.executeEdits("complete-config", [{ range: model.getFullModelRange(), text: content }]); s.ed.pushUndoStop();
+            } catch (e) { store.getState().toast("error", (e as Error).message); }
+          }}>Show every option</button>
+        </div>
+      )}
       <div ref={host} id="editor" className="monaco-host" style={{ display: active ? "block" : "none" }} />
-      <div className="editor-status" role="status">
+      <div className="editor-status">
         <span className="vim-status" ref={vimStatus} aria-label="Vim mode" />
         <span>{active ? `Ln ${cursor.line}, Col ${cursor.col}` : ""}</span>
         <span>{active ? (active.path.endsWith(".qkt") ? "qkt" : "YAML") : ""}</span>
         <span className="row" style={{ gap: 6 }}><span className={`dot ${lspStatus === "ready" ? "ok" : "warn"}`} />LSP {lspStatus === "ready" ? "connected" : lspStatus === "connecting" ? "connecting…" : "reconnecting…"}</span>
-        <span style={{ marginLeft: "auto" }}><span className="kbd">Ctrl</span> <span className="kbd">S</span> save · <span className="kbd">Ctrl</span> <span className="kbd">Enter</span> run</span>
+        <span className="editor-hints" style={{ marginLeft: "auto" }}><span className="kbd">Ctrl</span> <span className="kbd">S</span> save · <span className="kbd">Ctrl</span> <span className="kbd">Enter</span> run</span>
       </div>
     </>
   );

@@ -3,7 +3,11 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import "monaco-editor/features/register.all.js";
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
-import { createHighlighter } from "shiki";
+import { createHighlighterCore } from "shiki/core";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import yamlLang from "shiki/langs/yaml.mjs";
+import githubDark from "shiki/themes/github-dark.mjs";
+import githubLight from "shiki/themes/github-light.mjs";
 import { shikiToMonaco } from "@shikijs/monaco";
 import qktGrammar from "./qkt.tmLanguage.json";
 
@@ -25,7 +29,7 @@ export function setupMonaco(): Promise<Monaco> {
       surroundingPairs: [{ open: "(", close: ")" }, { open: '"', close: '"' }],
       wordPattern: /[A-Za-z_][\w]*/,
     });
-    const hl = await createHighlighter({ themes: ["github-dark", "github-light"], langs: [{ ...(qktGrammar as object), name: "qkt" } as never, "yaml"] });
+    const hl = await createHighlighterCore({ engine: createJavaScriptRegexEngine(), themes: [githubDark, githubLight], langs: [{ ...(qktGrammar as object), name: "qkt" } as never, yamlLang] });
     shikiToMonaco(hl, monaco);
     return monaco;
   })();
@@ -34,27 +38,38 @@ export function setupMonaco(): Promise<Monaco> {
 
 export const languageFor = (path: string): string => (path.endsWith(".qkt") ? "qkt" : /\.ya?ml$/.test(path) ? "yaml" : "plaintext");
 
-export const QKT_TEMPLATE = (name: string) => `STRATEGY ${name} VERSION 1
+/**
+ * A new strategy's text, on a stream the data source really has: the first of XAUUSD, EURUSD, BTCUSD, DEMOUSD with bars qkt
+ * can read, else any such symbol; 15m when built, else its finest timeframe. A template on a symbol the user has no data
+ * for would fail its very first run.
+ */
+export const QKT_TEMPLATE = (name: string, scan?: import("../api/types.js").ScanReport | null) => {
+  const usable = (scan?.symbols ?? []).filter((x) => x.bars.some((b) => b.files > 0 && !b.qktReads));
+  const sym = ["XAUUSD", "EURUSD", "BTCUSD", "DEMOUSD"].map((n) => usable.find((x) => x.symbol === n)).find(Boolean) ?? usable[0];
+  const bars = sym?.bars.filter((b) => b.files > 0 && !b.qktReads) ?? [];
+  const ms = (tf: string) => { const m = /^(\d+)([smhd])$/.exec(tf); return m ? Number(m[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[m[2] as "s"] : Infinity; };
+  const tf = bars.some((b) => b.tf === "15m") ? "15m" : [...bars].sort((x, y) => ms(x.tf) - ms(y.tf))[0]?.tf ?? "15m";
+  const broker = bars.find((b) => b.tf === tf)?.broker ?? "BACKTEST";
+  const symbol = sym?.symbol ?? "XAUUSD";
+  const size = symbol === "DEMOUSD" ? "10" : "0.1";
+  return `STRATEGY ${name} VERSION 1
 
 SYMBOLS
-    gold = BACKTEST:XAUUSD EVERY 15m
+    px = ${broker}:${symbol} EVERY ${tf}
 
 PARAM fast = 9
 PARAM slow = 21
 
 RULES
-    WHEN ema(gold.close, fast) CROSSES ABOVE ema(gold.close, slow)
-     AND POSITION.gold = 0
-    THEN BUY gold SIZING 0.1 ; LOG "long entry"
+    WHEN ema(px.close, fast) CROSSES ABOVE ema(px.close, slow)
+     AND POSITION.px = 0
+    THEN BUY px SIZING ${size} ; LOG "long entry"
 
-    WHEN ema(gold.close, fast) CROSSES BELOW ema(gold.close, slow)
-     AND POSITION.gold > 0
-    THEN CLOSE gold ; LOG "exit"
+    WHEN ema(px.close, fast) CROSSES BELOW ema(px.close, slow)
+     AND POSITION.px > 0
+    THEN CLOSE px ; LOG "exit"
 `;
-
-export const CONFIG_TEMPLATE = `# qkt.config.yaml. qkt reads this file from the working directory of every run.
-starting_balance: 10000
-`;
+};
 
 export interface VimHandlers { save(): Promise<boolean> | boolean; saveAll(): Promise<unknown> | unknown; close(force: boolean): void; run(): void; say(msg: string): void }
 
@@ -79,5 +94,35 @@ export async function enableVim(editor: import("monaco-editor/editor/editor.api.
     Vim.defineEx("run", "ru", () => H().run());
   } else if (h) (window as unknown as { __vimHandlers: { h: VimHandlers } }).__vimHandlers.h = h;
   const vim = initVimMode(editor, statusEl);
-  return () => vim.dispose();
+  const stopGuard = guardAgainstEscBlur(editor, vim, VimMode as unknown as VimApi);
+  return () => { stopGuard(); vim.dispose(); };
+}
+
+type VimApi = { Vim: { exitInsertMode(cm: unknown): void; exitVisualMode(cm: unknown): void } };
+
+/**
+ * Browser extensions with their own vim keys (Vimium, Surfingkeys, Tridactyl) take Esc in any editable element: they swallow
+ * the key and blur it. In a vim editor that Esc was meant for vim, so without this the editor loses focus AND stays in insert
+ * mode. The key never reaches the page, so the blur is recognised by what it leaves behind: focus dropped to nothing (the
+ * page body) with no click, no Tab and the window still focused, which only a script's blur() does. The editor then takes
+ * focus back and leaves insert/visual mode, as the Esc intended. A click, Tab or Ctrl+M still moves focus out as usual.
+ */
+function guardAgainstEscBlur(editor: import("monaco-editor/editor/editor.api.js").editor.IStandaloneCodeEditor, vim: unknown, api: VimApi): () => void {
+  let userMovedAt = 0;
+  const moved = () => { userMovedAt = performance.now(); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Tab" || e.key === "F6") moved(); };
+  window.addEventListener("pointerdown", moved, true);
+  window.addEventListener("keydown", onKey, true);
+  const sub = editor.onDidBlurEditorText(() => {
+    if (performance.now() - userMovedAt < 400) return;
+    setTimeout(() => {
+      const a = document.activeElement;
+      if (!document.hasFocus() || (a && a !== document.body && a !== document.documentElement)) return;
+      editor.focus();
+      const st = (vim as { state?: { vim?: { insertMode?: boolean; visualMode?: boolean } } }).state?.vim;
+      if (st?.insertMode) api.Vim.exitInsertMode(vim);
+      else if (st?.visualMode) api.Vim.exitVisualMode(vim);
+    }, 0);
+  });
+  return () => { sub.dispose(); window.removeEventListener("pointerdown", moved, true); window.removeEventListener("keydown", onKey, true); };
 }

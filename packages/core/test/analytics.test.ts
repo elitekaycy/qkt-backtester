@@ -33,7 +33,29 @@ describe("exit classification on real bracket trades", () => {
     expect(oct.filter((t) => !t.open).every((t) => t.exit === "signal" && t.r === undefined)).toBe(true);
     expect(oct.find((t) => t.open)!.exit).toBe("open");
   });
-  it("classifyExit rules", () => {
+  it("classifyExit reads the closing order's class when the engine writes it", () => {
+    const base = { open: false, side: "long" as const, entryPx: 100, sl: 95, tp: 110 };
+    expect(classifyExit(base, 96, "Market")).toBe("signal");    // a rule closed it at a loss: NOT a stop
+    expect(classifyExit(base, 110, "Limit")).toBe("target");
+    expect(classifyExit(base, 95, "Stop")).toBe("stop");
+    expect(classifyExit(base, 104, "TrailingStop")).toBe("stop"); // a trailing stop that locked in profit is still a stop
+    for (const k of ["StopLimit", "ArmedTrailingStop", "SteppedStop", "TimeTighteningStop", "TrailingStopLimit"]) expect(classifyExit(base, 104, k)).toBe("stop");
+    expect(classifyExit(base, 104, "IfTouched")).toBe("target");
+    expect(classifyExit({ ...base, open: true }, null, "Stop")).toBe("open");
+  });
+  it("on real engine output, every trade's exit matches the order type of its closing fill (bracket + rule exit)", () => {
+    const text = fx("trades-bracket-rule-exit.csv");
+    const lines = text.trim().split("\n"), hdr = lines[0]!.split(",");
+    const ot = hdr.indexOf("orderType"), ts = hdr.indexOf("timestamp"), eff = hdr.indexOf("positionEffect");
+    const closeType = new Map(lines.slice(1).map((l) => l.split(",")).filter((r) => r[eff]!.startsWith("CLOSE")).map((r) => [Number(r[ts]), r[ot]!]));
+    const trips = pairRoundTrips(parseTradesCsv(text)).filter((t) => !t.open);
+    const want = (o: string) => (o === "Stop" ? "stop" : o === "Limit" ? "target" : "signal");
+    expect(trips.length).toBe(20);
+    for (const t of trips) expect(t.exit, `trade #${t.id}`).toBe(want(closeType.get(t.exitTs!)!));
+    const n = (r: string) => trips.filter((t) => t.exit === r).length;
+    expect([n("stop"), n("target"), n("signal")]).toEqual([3, 1, 16]); // measured: price inference used to call 11 of the rule exits "stop"
+  });
+  it("classifyExit rules (price fallback for engines without orderType)", () => {
     const base = { open: false, side: "long" as const, entryPx: 100 };
     expect(classifyExit({ ...base, sl: 95, tp: 110 }, 110)).toBe("target");
     expect(classifyExit({ ...base, sl: 95, tp: 110 }, 96)).toBe("stop");
@@ -122,5 +144,52 @@ describe("analyze: edges", () => {
     const a = analyze(many);
     expect(a.cumulative.ts.length).toBeLessThanOrEqual(602);
     expect(a.cumulative.pnl.at(-1)!).toBeCloseTo(a.pnl, 9);
+  });
+});
+
+describe("very large trade lists", () => {
+  // Math.max(...a) throws RangeError at ~150k elements; summarize/analyze must not spread.
+  const N = 400_000;
+  const trips: RoundTrip[] = Array.from({ length: N }, (_, i) => ({
+    id: i + 1, strategy: "s", symbol: "BACKTEST:X", side: i % 2 ? "long" : "short", entryTs: i * 60_000, entryPx: 100, exitTs: i * 60_000 + 30_000, exitPx: 101,
+    qty: 1, pnl: (i % 7) - 3, fills: 2, holdMs: 30_000, open: false, exit: "signal",
+  }));
+  it("analyze handles 400k trades and gets the extremes right", () => {
+    const a = analyze(trips);
+    expect(a.closed).toBe(N);
+    expect(a.largestWin).toBe(3);
+    expect(a.largestLoss).toBe(-3);
+    expect(a.pnlHistogram.counts.reduce((x, y) => x + y, 0)).toBe(N);
+  });
+});
+
+import { binRange, binOf, nextDown } from "../src/analytics.js";
+describe("histogram bars and their click filters agree", () => {
+  const mk = (pnls: number[], r?: number[]): RoundTrip[] => pnls.map((pnl, i) => ({
+    id: i + 1, strategy: "s", symbol: "BACKTEST:X", side: "long", entryTs: i * 1000, entryPx: 100, exitTs: i * 1000 + 500, exitPx: 101,
+    qty: 1, pnl, fills: 2, holdMs: 500, open: false, exit: "signal", ...(r ? { risk: 120, r: r[i] } : {}),
+  }));
+  it("every bar lists exactly the trades it counts, even with many trades exactly on the edges and at the maximum", () => {
+    // fixed-bracket shape: every stop loses exactly -120, every target wins exactly +240
+    const pnls = [...Array(30).fill(-120), ...Array(12).fill(240), -45.5, 13.2, 80, 199.99, 0];
+    const trips = mk(pnls, pnls.map((p) => p / 120));
+    const a = analyze(trips);
+    for (const [h, key] of [[a.pnlHistogram, "Pnl"], [a.rHistogram!, "R"]] as const) {
+      expect(h.edges[h.edges.length - 1]).toBe(key === "Pnl" ? 240 : 2);
+      h.counts.forEach((c, i) => {
+        const { min, max } = binRange(h, i);
+        const q = key === "Pnl" ? { minPnl: min, maxPnl: max } : { minR: min, maxR: max };
+        expect(filterTrips(trips, q).length, `${key} bar ${i}`).toBe(c);
+      });
+      expect(h.counts.reduce((x, y) => x + y, 0)).toBe(trips.length);
+    }
+  });
+  it("nextDown is the largest double below x; binOf puts an edge value in the upper bin", () => {
+    expect(nextDown(240)).toBeLessThan(240);
+    expect(nextDown(240)).toBeGreaterThan(239.99999999999);
+    expect(nextDown(-120)).toBeLessThan(-120);
+    expect(binOf([0, 1, 2, 3], 1)).toBe(1);
+    expect(binOf([0, 1, 2, 3], 3)).toBe(2);
+    expect(binOf([0, 1, 2, 3], 0.999)).toBe(0);
   });
 });

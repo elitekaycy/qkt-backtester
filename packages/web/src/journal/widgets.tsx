@@ -19,14 +19,14 @@ export function chartBase(over: echarts.EChartsCoreOption = {}): echarts.ECharts
     backgroundColor: "transparent", textStyle: { color: ink3, fontFamily: tok("--font") || "system-ui" },
     grid: { left: 44, right: 12, top: 14, bottom: 22 },
     tooltip: { trigger: "axis", backgroundColor: tok("--card-3"), borderColor: tok("--line-2"), borderWidth: 1, padding: [8, 10], textStyle: { color: tok("--ink"), fontSize: 12 }, axisPointer: { type: "line", lineStyle: { color: axis } }, confine: true, transitionDuration: 0.1, extraCssText: "border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-variant-numeric:tabular-nums" },
-    xAxis: { axisLine: { lineStyle: { color: axis } }, axisTick: { show: false }, axisLabel: { color: ink3, fontSize: 11 }, splitLine: { show: false } },
+    xAxis: { axisLine: { lineStyle: { color: axis } }, axisTick: { show: false }, axisLabel: { color: ink3, fontSize: 11, hideOverlap: true }, splitLine: { show: false } },
     yAxis: { axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: ink3, fontSize: 11, formatter: (v: number) => compactMoney(v) }, splitLine: { lineStyle: { color: grid } } },
     ...over,
   };
 }
 
 /** 1200 -> 1.2k, so axis labels stay short and the tooltip carries the exact figure. */
-export const compactMoney = (v: number): string => (Math.abs(v) >= 10_000 ? `${(v / 1000).toFixed(0)}k` : Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
+export const compactMoney = (v: number): string => (Math.abs(v) >= 10_000 ? `${(v / 1000).toFixed(0)}k` : Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v))).replace(/^-/, "−");
 
 const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 /** Tooltip body: a title, one headline figure (signed, coloured, with a glyph so colour is never the only signal) and aligned rows. */
@@ -146,7 +146,7 @@ export function Gauge({ value, max = 3, label }: { value: number | null; max?: n
 /** Tiny area sparkline drawn behind a KPI. Purely decorative (aria-hidden); the number beside it is the data. */
 export function Spark({ values, color }: { values: number[]; color: string }) {
   if (values.length < 2) return null;
-  const w = 160, h = 44, lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
+  const w = 160, h = 44, lo = values.reduce((a, v) => (v < a ? v : a), Infinity), hi = values.reduce((a, v) => (v > a ? v : a), -Infinity), span = hi - lo || 1;
   const pts = values.map((v, i) => [(i / (values.length - 1)) * w, h - 4 - ((v - lo) / span) * (h - 10)] as const);
   const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
   return (

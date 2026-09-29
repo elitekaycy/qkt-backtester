@@ -8,6 +8,13 @@ say() { echo "qkt-backtester: $*" >&2; }
 # Started as root (the default): run as the owner of the mounted /workspace, so files you edit on the host stay yours
 # without needing --user. If the folder is owned by root (docker created it), stay root and say so.
 if [ "$(id -u)" = 0 ] && [ -d /workspace ] && [ -z "${STUDIO_KEEP_ROOT:-}" ]; then
+  mkdir -p /workspace /data
+  # a folder Docker created for a missing bind mount is root-owned and empty: hand it to PUID:PGID (default 1000)
+  for d in /workspace /data; do
+    if [ "$(stat -c %u "$d")" = 0 ] && [ -z "$(ls -A "$d" 2>/dev/null)" ] && [ -w "$d" ]; then
+      chown "${PUID:-1000}:${PGID:-1000}" "$d" && say "note: $d was an empty root-owned folder; gave it to ${PUID:-1000}:${PGID:-1000} (set PUID/PGID to change)"
+    fi
+  done
   ws_uid=$(stat -c %u /workspace 2>/dev/null || echo 0)
   ws_gid=$(stat -c %g /workspace 2>/dev/null || echo 0)
   if [ "$ws_uid" != 0 ]; then
@@ -30,7 +37,7 @@ DATA_WRITABLE=1
 if [ "${QKT_DEMO:-1}" = 1 ] && [ "$DATA_WRITABLE" = 1 ] && [ -z "$(ls -A /data 2>/dev/null)" ]; then
   say "empty data store: creating SYNTHETIC demo data (DEMOUSD, a seeded random walk, not market data)"
   node /app/tools/demo-data.mjs /data 90 2024-01-01 >&2
-  for tf in 15m 1h; do "$QKT_BIN" data build-bars DEMOUSD --tf "$tf" --from 2024-01-01 --to 2024-03-30 --data-root /data >&2; done
+  for tf in 15m 1h; do "$QKT_BIN" data build-bars DEMOUSD --tf "$tf" --from 2024-01-01 --to 2024-03-31 --data-root /data >&2; done
 fi
 
 if [ -z "${STUDIO_TOKEN:-}" ] && [ "${HOST:-}" != "127.0.0.1" ] && [ "${HOST:-}" != "localhost" ]; then

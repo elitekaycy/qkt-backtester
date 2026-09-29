@@ -3,11 +3,10 @@ import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import { api, type Job } from "../api/client.js";
 import type { StepRecord } from "../api/types.js";
 import { revealAt } from "../editor/EditorPane.js";
-import { CONFIG_TEMPLATE } from "../editor/monaco.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
-import { addDays, fmtDur } from "../util/format.js";
-import { Circle, CircleCheck, CircleDashed, CircleX, Copy, Hammer, OctagonX, Play, TriangleAlert } from "../ui/icons.js";
+import { addDays, fmtDur, fmtWindow } from "../util/format.js";
+import { Square, Circle, CircleCheck, CircleDashed, CircleX, Copy, Hammer, OctagonX, Play, TriangleAlert } from "../ui/icons.js";
 
 const LABEL: Record<string, string> = { project: "Project", config: "Config", parse: "Parse", coverage: "Data check", backtest: "Backtest", postprocess: "Post-process", render: "Render" };
 const ORDER = ["project", "config", "parse", "coverage", "backtest", "postprocess", "render"] as const;
@@ -72,12 +71,12 @@ export function PipelineTab() {
       <div className="row" style={{ padding: "var(--s2) var(--s4)", borderBottom: "1px solid var(--line)", flex: "none" }}>
         {run ? <>
           <span className={`badge ${run.tier === "full" ? "accent" : ""}`}>{run.tier === "full" ? "Ran on ticks" : "Ran on bars"}</span>
-          <span className="muted mono" title={run.id} style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{run.id.slice(-24)}</span>
+          <span className="ink2 nowrap" title={`Run ${run.id}`} style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}><b>{run.strategy.split("/").pop()}</b> <span className="muted">· {fmtWindow(run.from, run.to)}</span></span>
           {run.options && Object.keys(run.options).length > 0 && <span className="badge" title={JSON.stringify(run.options)}>{Object.keys(run.options).length} option{Object.keys(run.options).length > 1 ? "s" : ""}</span>}
         </> : <span className="muted">Nothing has run yet</span>}
         <span className="grow" />
         {running && progress && <span className="ink2 num nowrap">{progress.fills} fills · {fmtDur(progress.elapsedMs)}</span>}
-        {running ? <button className="btn danger sm" onClick={() => void store().killAll()}><OctagonX size={14} />Stop</button>
+        {running ? <button className="btn danger sm" title="Stop this run and delete its files" aria-label="Stop this run and delete its files" onClick={() => void store().stopRun()}><Square size={12} fill="currentColor" />Stop</button>
           : <button className="btn sm" disabled={!strategy} onClick={() => void store().startRun()}><Play size={13} fill="currentColor" />Run</button>}
       </div>
       {running && <div className={`progress${phase === "coverage" || !progress ? " indet" : ""}`}><i style={{ width: phase === "backtest" && progress?.etaMs ? `${Math.min(97, (progress.elapsedMs / (progress.elapsedMs + progress.etaMs)) * 100)}%` : undefined }} /></div>}
@@ -90,7 +89,7 @@ export function PipelineTab() {
             <div><b>{err.kind.replace(/_/g, " ")}</b>: {err.message}</div>
             <div className="row" style={{ flexWrap: "wrap" }}>
               {err.file && err.line && <button className="btn sm" onClick={() => revealAt(err.file!, err.line!, err.col ?? 1)}>Show {err.file}:{err.line}</button>}
-              {err.kind === "missing_config" && <button className="btn sm primary" onClick={() => void store().createEntry("qkt.config.yaml", "file", CONFIG_TEMPLATE)}>Create qkt.config.yaml</button>}
+              {err.kind === "missing_config" && <button className="btn sm primary" onClick={async () => { await api.scaffold(["qkt.config.yaml"]).catch((e) => store().toast("error", (e as Error).message)); await store().refreshTree(""); void store().openFile("qkt.config.yaml"); }}>Create qkt.config.yaml</button>}
               {(err.kind === "missing_data" || err.kind === "incomplete_data") && (
                 <>
                   <button className="btn sm primary" onClick={() => void buildBars()}><Hammer size={14} />Build bars</button>

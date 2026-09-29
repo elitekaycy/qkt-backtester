@@ -21,6 +21,8 @@ export interface Fill {
   tp?: number;
   /** Dollar risk qkt recorded on the entry (stop distance x size), when the entry had a stop. */
   risk?: number;
+  /** Class of the order that filled (`Market`, `Limit`, `Stop`, `TrailingStop`, ...), as qkt writes it. Absent on older engines. */
+  orderType?: string;
 }
 
 export interface TripEntry { ts: number; px: number; qty: number; sl?: number; tp?: number; risk?: number }
@@ -53,13 +55,20 @@ export interface RoundTrip {
   r?: number;
 }
 
+/** Order classes qkt fills a protective stop with (every trailing / stepped / tightening variant is still a stop). */
+const STOP_ORDERS = new Set(["Stop", "StopLimit", "TrailingStop", "ArmedTrailingStop", "SteppedStop", "TimeTighteningStop", "TrailingStopLimit"]);
+/** Order classes that take profit at a price. */
+const TARGET_ORDERS = new Set(["Limit", "IfTouched"]);
+
 /**
- * Classify a finished trade. A bracketed entry that exits at its target is a `target`; a bracketed entry that exits on
- * the losing side is a `stop` (Draft fills stops at a bar-approximated price, so exact price equality is not usable);
- * everything else, including every exit of a strategy without brackets, is a rule-driven `signal`.
+ * How a finished trade ended. The engine writes the class of the order behind every fill, so the closing fill says it
+ * exactly: a stop-family order is a `stop` (a trailing stop that locked in profit included), a limit is a `target`, and a
+ * market order is a rule closing the position (`signal`). Only when an older engine leaves that column empty is the
+ * reason inferred from prices: exit at the target, or on the losing side of a bracketed entry.
  */
-export function classifyExit(t: Pick<RoundTrip, "open" | "sl" | "tp" | "side" | "entryPx">, exitPx: number | null): ExitReason {
+export function classifyExit(t: Pick<RoundTrip, "open" | "sl" | "tp" | "side" | "entryPx">, exitPx: number | null, closeOrderType?: string): ExitReason {
   if (t.open || exitPx === null) return "open";
+  if (closeOrderType) return STOP_ORDERS.has(closeOrderType) ? "stop" : TARGET_ORDERS.has(closeOrderType) ? "target" : "signal";
   if (t.sl === undefined && t.tp === undefined) return "signal";
   if (t.tp !== undefined && Math.abs(exitPx - t.tp) <= Math.abs(t.entryPx) * 0.0002) return "target";
   const lossSide = t.side === "long" ? exitPx < t.entryPx : exitPx > t.entryPx;
@@ -106,7 +115,7 @@ function makeParser(headerLine: string): (line: string) => Fill {
     ts: c.need("timestamp"), strategy: c.need("strategy"), symbol: c.need("symbol"), side: c.need("side"),
     effect: c.need("positionEffect"), qty: c.need("quantity"), price: c.need("price"), realized: c.need("realized"),
     before: c.need("strategyPositionQtyBefore"), after: c.need("strategyPositionQtyAfter"),
-    leg: c.need("legId"), order: c.need("brokerOrderId"), sl: c.need("stopLossPrice"), tp: c.need("takeProfitPrice"), risk: c.opt("riskUsd"),
+    leg: c.need("legId"), order: c.need("brokerOrderId"), sl: c.need("stopLossPrice"), tp: c.need("takeProfitPrice"), risk: c.opt("riskUsd"), orderType: c.opt("orderType"),
   };
   return (line) => {
     const f = splitCsvLine(line);
@@ -115,6 +124,7 @@ function makeParser(headerLine: string): (line: string) => Fill {
       effect: f[ix.effect]!, qty: num(f[ix.qty]), price: num(f[ix.price]), realized: num(f[ix.realized]),
       posBefore: num(f[ix.before]), posAfter: num(f[ix.after]), legId: f[ix.leg] ?? "", orderId: f[ix.order] ?? "",
       sl: optNum(f[ix.sl]), tp: optNum(f[ix.tp]), risk: ix.risk >= 0 ? optNum(f[ix.risk]) : undefined,
+      orderType: ix.orderType >= 0 && f[ix.orderType] ? f[ix.orderType] : undefined,
     };
   };
 }
@@ -170,7 +180,7 @@ export function pairRoundTrips(fills: Fill[]): RoundTrip[] {
     a.trip.holdMs = f.ts - a.trip.entryTs;
     a.trip.open = false;
     if (a.entries.length > 1) a.trip.entries = a.entries;
-    a.trip.exit = classifyExit(a.trip, a.trip.exitPx);
+    a.trip.exit = classifyExit(a.trip, a.trip.exitPx, f.orderType);
     if (a.trip.risk && a.trip.risk > 0) a.trip.r = a.trip.pnl / a.trip.risk;
   };
 

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ApiError, getToken, setToken } from "../api/client.js";
 import { DockBar, DockBody } from "../dock/Dock.js";
 import { EditorPane } from "../editor/EditorPane.js";
-import { Journal } from "../journal/Journal.js";
+const Journal = lazy(() => import("../journal/Journal.js").then((m) => ({ default: m.Journal })));
 import { PreviewPane } from "../preview/PreviewPane.js";
 import { DataSection } from "../sections/DataSection.js";
 import { FilesSection } from "../sections/FilesSection.js";
@@ -15,11 +15,18 @@ import { ChevronLeft } from "../ui/icons.js";
 import { CommandPalette, Shortcuts } from "./CommandPalette.js";
 import { Rail } from "./Rail.js";
 import { StatusBar } from "./StatusBar.js";
+import { cycleRegion } from "../util/regions.js";
 import { TopBar } from "./TopBar.js";
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
   return <div className="toasts" role="status" aria-live="polite">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`} onClick={() => useStore.getState().dismissToast(t.id)}>{t.text}</div>)}</div>;
+}
+
+/** Run started / finished / failed, for screen readers: the visual progress text updates too often to be a live region. */
+function RunAnnouncer() {
+  const text = useStore((s) => s.announce);
+  return <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{text}</div>;
 }
 
 function TokenGate({ children }: { children: React.ReactNode }) {
@@ -84,6 +91,7 @@ function Shell() {
         const ed = (window as unknown as { __qktEditor?: { focus(): void; trigger(s: string, id: string, a: unknown): void } }).__qktEditor;
         if (ed) { e.preventDefault(); ed.focus(); ed.trigger("keyboard", e.key === "z" && !e.shiftKey ? "undo" : "redo", null); return; }
       }
+      if (e.key === "F6" && !mod && !e.altKey) { e.preventDefault(); cycleRegion(e.shiftKey ? -1 : 1); return; }
       if (mod && e.key === "k") { e.preventDefault(); u.set({ palette: !u.palette }); }
       else if (mod && e.key === "j") { e.preventDefault(); u.set({ journalOpen: !u.journalOpen }); }
       else if (mod && e.key === "b") { e.preventDefault(); u.toggleCollapse("sidebar"); }
@@ -165,13 +173,14 @@ function Shell() {
               <ChartPane maxed={maxed === "chart"} onMax={() => ui.toggleMax("chart")} />
             </div>
           </div>
-          {ui.journalOpen && <Journal containerWidth={box.w} />}
+          {ui.journalOpen && <Suspense fallback={null}><Journal containerWidth={box.w} /></Suspense>}
         </main>
       </div>
       <StatusBar />
       <CommandPalette />
       <Shortcuts />
       <Toasts />
+      <RunAnnouncer />
     </div>
   );
 }

@@ -134,3 +134,19 @@ describe("anchorParseError", () => {
     expect(anchorParseError(src, b)).toEqual(b);
   });
 });
+
+import { relocate as relocate2 } from "../src/lint.js";
+describe("relocate: errors qkt reports without a position point at their text", () => {
+  const src = "STRATEGY e VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN gold.closee > ema(gold.close) \n    THEN BUY gold SIZING 0.5 PCT RISK\n        BRACKET { TAKE_PROFIT BY 5 }\n";
+  it("finds the field, the indicator call, the risk sizing and the bracket", () => {
+    expect(relocate2(src, "Unknown stream field for gold: closee")).toEqual({ line: 7, col: 10, endCol: 21 });
+    expect(relocate2(src, "Indicator ema expects 2 args, got 1")).toMatchObject({ line: 7, col: 24 });
+    expect(relocate2(src, "SIZING RISK <fraction> requires a resolvable stop distance via BRACKET STOP LOSS")).toMatchObject({ line: 8, col: 19 });
+    expect(relocate2(src, "BRACKET requires both STOP LOSS and TAKE PROFIT; missing STOP LOSS after DEFAULTS merge")).toMatchObject({ line: 9 });
+  });
+  it("finds the IMPORT of a missing file", () => {
+    const p = "PORTFOLIO p VERSION 1\n\nIMPORT 'a.qkt' AS a\nIMPORT 'sub/nope.qkt' AS b\n\nRULES\n    RUN a\n";
+    expect(relocate2(p, "/tmp/acc/strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
+    expect(relocate2(p, "Imported file not found: strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
+  });
+});

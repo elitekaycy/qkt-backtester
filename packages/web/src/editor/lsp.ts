@@ -140,7 +140,7 @@ export class LspClient {
         const kindOf = (k: string) => m.languages.CompletionItemKind[(k === "field" ? "Field" : k === "alias" ? "Variable" : k === "symbol" ? "Constant" : k === "timeframe" ? "Unit" : k === "snippet" ? "Snippet" : "Keyword") as keyof typeof m.languages.CompletionItemKind];
         const mine: languages.CompletionItem[] = loc.items.map((i) => ({
           label: { label: i.label, detail: i.detail ? `  ${i.detail}` : undefined }, kind: kindOf(i.kind), documentation: i.doc, insertText: i.insert,
-          insertTextRules: i.snippet ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined, filterText: i.label, sortText: `0${i.sort}`, range,
+          insertTextRules: i.snippet ? m.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined, filterText: i.filter ?? i.label, sortText: `0${i.sort}`, range,
         }));
         if (loc.exclusive) return { suggestions: mine };
         let lspItems: any[] = [];
@@ -156,7 +156,8 @@ export class LspClient {
         }
         const taken = new Set(loc.items.map((i) => i.label.toLowerCase()));
         return {
-          suggestions: [...mine, ...lspItems.filter((it) => !taken.has(String(it.label).toLowerCase())).map((it) => ({
+          // qkt's own snippets are offered everywhere and some do not parse (see snippets.ts): the studio offers its own instead
+          suggestions: [...mine, ...lspItems.filter((it) => it.insertTextFormat !== 2 && !taken.has(String(it.label).toLowerCase())).map((it) => ({
             label: it.label,
             kind: m.languages.CompletionItemKind[KIND[it.kind ?? 1] ?? "Text"],
             detail: it.detail,

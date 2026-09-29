@@ -8,7 +8,7 @@ import type { Runner } from "./runner.js";
 import { applySettings, dataRootAllowed, loadSettings, saveSettings, savePrefs } from "./settings.js";
 import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
-import { missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
+import { completeConfig, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
 import { rangeDays, longest } from "@qkt-studio/core";
 
 const looksLikeStore = async (dir: string) =>
@@ -77,6 +77,12 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
 
   // ---- project files: qkt.config.yaml, instruments.yaml, .env ---------------------------------------------------------
   app.get("/api/workspace/missing", async () => ({ missing: await missingFiles(cfg.workspace) }));
+  // the given qkt.config.yaml text merged into the full reference (read-only: the editor applies it as an undoable edit)
+  app.post<{ Body: { content?: string } }>("/api/workspace/config-complete", async (req, reply) => {
+    const content = req.body?.content;
+    if (typeof content !== "string" || content.length > 1_000_000) return reply.code(400).send({ error: "content must be the config text" });
+    return { content: completeConfig(content) };
+  });
   /** Create the standard project files that are missing (never overwrites). `files` limits which. */
   app.post<{ Body: { files?: ScaffoldFile[] } }>("/api/workspace/scaffold", async (req) => {
     const scan = await scanCached(cfg.dataRoot).catch(() => null);

@@ -1,25 +1,30 @@
+import { binRange } from "@qkt-studio/core/analytics";
 import { useStore } from "../state/store.js";
 import { useAnalytics } from "./useAnalytics.js";
 import { Chart, chartBase, Gauge, Ring, SignedBars, Spark, Stat, tipHtml, Widget, tok, zoomOptions } from "./widgets.js";
-import { DASH, fmtDay, fmtDur, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph } from "../util/format.js";
+import { DASH, fmtDay, fmtDur, fmtR, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph } from "../util/format.js";
 import { Activity, Gauge as GaugeIcon, Percent, Scale, Target, TrendingUp, Layers } from "../ui/icons.js";
 
 export function Overview() {
   const { a } = useAnalytics();
   const results = useStore((s) => s.results), setFilters = useStore((s) => s.setFilters), filters = useStore((s) => s.filters);
   if (!a || !results) return <div className="empty"><span className="spin" />Loading…</div>;
-  const s = results.summary, start = results.equity.equity[0] ?? 0;
+  const s = results.summary, start = results.equity.equity[0] ?? 0, cur = results.meta.currency ?? null;
   const gain = tok("--gain"), loss = tok("--loss");
   const up = a.pnl >= 0;
+  const filtered = Object.values(filters).some((v) => v !== undefined && !(Array.isArray(v) && v.length === 0));
   const H = a.pnlHistogram;
   const mid = (i: number) => (H.edges[i]! + H.edges[i + 1]!) / 2;
 
   return (
     <div className="grid" style={{ gap: "var(--s4)" }}>
       <div className="grid cols-5">
-        <Widget title="Net P&L" icon={<TrendingUp size={15} />} className="kcard">
+        {/* The journal works on round trips, so this is the P&L of the (filtered) closed trades. "Net P&L" is reserved for the
+            engine's realised + unrealised total, shown here too whenever an open position makes the two differ. */}
+        <Widget title="Realised P&L" icon={<TrendingUp size={15} />} className="kcard">
           <div className={`big ${up ? "gain" : "loss"}`}>{glyph(a.pnl)} {fmtMoney(a.pnl)}</div>
-          <div className="sub">{start ? `${fmtPct(a.pnl / start)} on ${fmtNum(start, 0)}` : `${a.closed} closed trades`}</div>
+          <div className="sub">{start ? `${fmtPct(a.pnl / start)} on ${fmtNum(start, 0)}${cur ? ` ${cur}` : ""}` : `${a.closed} closed trades`}</div>
+          {!filtered && s.unrealized !== 0 && <div className="sub">Net {glyph(s.totalPnl)} {fmtMoney(s.totalPnl)} incl. {fmtMoney(s.unrealized)} on {s.openTrades} open</div>}
           <Spark values={a.cumulative.pnl} color={up ? gain : loss} />
         </Widget>
         <Widget title="Win rate" icon={<Percent size={15} />}>
@@ -38,7 +43,7 @@ export function Overview() {
         </Widget>
         <Widget title="Expectancy" icon={<Target size={15} />}>
           <div className={`big ${a.expectancy >= 0 ? "gain" : "loss"}`}>{fmtMoney(a.expectancy)}</div>
-          <div className="sub">per trade{a.avgR !== null ? ` · avg ${a.avgR >= 0 ? "+" : "−"}${Math.abs(a.avgR).toFixed(2)}R over ${a.rTrades}` : " · no stop, so no R"}</div>
+          <div className="sub">per trade{a.avgR !== null ? ` · avg ${fmtR(a.avgR)} over ${a.rTrades}` : " · no stop, so no R"}</div>
         </Widget>
       </div>
 
@@ -55,7 +60,7 @@ export function Overview() {
         </Widget>
         <Widget title="P&L per trade" icon={<Layers size={15} />} right={<span className="muted" style={{ fontSize: "var(--fs-xs)" }}>click a bar to filter</span>}>
           <Chart height={262} label="Distribution of profit and loss per trade" deps={[H, filters.minPnl, filters.maxPnl]}
-            onClick={(p) => { if (H.edges.length) setFilters({ minPnl: H.edges[p.dataIndex], maxPnl: H.edges[p.dataIndex + 1] }); }}
+            onClick={(p) => { if (!H.edges.length) return; const r = binRange(H, p.dataIndex); setFilters(filters.minPnl === r.min && filters.maxPnl === r.max ? { minPnl: undefined, maxPnl: undefined } : { minPnl: r.min, maxPnl: r.max }); }}
             build={() => chartBase({
               xAxis: { ...(chartBase().xAxis as object), type: "category", data: H.counts.map((_, i) => fmtNum(mid(i), 0)), axisLabel: { color: tok("--ink-3"), fontSize: 10, interval: Math.max(0, Math.floor(H.counts.length / 5)) } },
               series: [{ type: "bar", barCategoryGap: "12%", data: H.counts.map((v, i) => ({ value: v, itemStyle: { color: mid(i) >= 0 ? gain : loss, borderRadius: [3, 3, 0, 0], opacity: filters.minPnl === undefined || filters.minPnl === H.edges[i] ? 1 : 0.35 } })) }],

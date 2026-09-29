@@ -85,10 +85,18 @@ describe("strategy readiness", () => {
     expect(r.bars.longest).toEqual({ from: "2024-01-18", to: "2024-01-29" });
     expect(r.bars.blocked).toEqual([]);
   });
-  it("blocked with the exact fix when the timeframe was never built, and when the symbol is unknown", async () => {
+  it("a timeframe that was never built runs on a finer built one that divides it, as qkt aggregates it", async () => {
     const scan = await scanStore(store);
-    const a = readinessFor(scan, "s.qkt", src("    a = BACKTEST:TST EVERY 1h"));
-    expect(a.bars).toMatchObject({ runnable: false, blocked: [{ stream: "BACKTEST:TST 1h", fix: "build-bars" }] });
+    const h = readinessFor(scan, "s.qkt", src("    a = BACKTEST:TST EVERY 1h"));
+    const m = readinessFor(scan, "s.qkt", src("    a = BACKTEST:TST EVERY 15m"));
+    expect(h.bars.runnable).toBe(true);
+    expect(h.bars.ranges).toEqual(m.bars.ranges);
+  });
+  it("blocked with the exact fix when nothing built divides the timeframe, and when the symbol is unknown", async () => {
+    const scan = await scanStore(store);
+    const a = readinessFor(scan, "s.qkt", src("    a = BACKTEST:TST EVERY 10m"));
+    expect(a.bars).toMatchObject({ runnable: false, blocked: [{ stream: "BACKTEST:TST 10m", fix: "build-bars" }] });
+    expect(a.bars.blocked[0]!.reason).toContain("no bars qkt can use for 10m");
     const b = readinessFor(scan, "s.qkt", src("    a = BACKTEST:NOPE EVERY 15m"));
     expect(b.bars.blocked[0]).toMatchObject({ fix: "fetch" });
     expect(b.ticks.runnable).toBe(false);

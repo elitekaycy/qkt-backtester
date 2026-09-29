@@ -102,3 +102,18 @@ describe("tfToMs / readBars on the real store", () => {
     expect(await availableTimeframes(root, "BACKTEST", "NOPE")).toEqual([]);
   });
 });
+
+import { dropUnclosedTail } from "../src/bars.js";
+describe("dropUnclosedTail: the chart shows the candles qkt closed", () => {
+  const H = 3_600_000, cols = (tfMs: number, ts: number[]) => ({ tfMs, ts: Float64Array.from(ts), open: Float64Array.from(ts.map(() => 1)), high: Float64Array.from(ts.map(() => 2)), low: Float64Array.from(ts.map(() => 0.5)), close: Float64Array.from(ts.map(() => 1.5)), volume: Float64Array.from(ts.map(() => 1)) });
+  it("drops a last 4h candle whose data stops before its end (the market closed)", () => {
+    const src = cols(H / 4, [16 * H, 16.25 * H, 20 * H, 20.75 * H]);   // data ends 21:00
+    const agg = cols(4 * H, [16 * H, 20 * H]);
+    expect(Array.from(dropUnclosedTail(agg, src).ts)).toEqual([16 * H]);
+  });
+  it("keeps a last candle whose data reaches its end", () => {
+    const src = cols(H / 4, [20 * H, 23.75 * H]);                        // last bar closes 24:00
+    const agg = cols(4 * H, [20 * H]);
+    expect(dropUnclosedTail(agg, src).ts.length).toBe(1);
+  });
+});

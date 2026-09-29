@@ -48,7 +48,7 @@ export function Strategies() {
       {/* Always the whole book's own numbers (never the active drill filter): this table is what composes the book, not a
           view of it, so a strategy's row does not change when you click it to filter the rest of the journal. */}
       <Widget title="Strategies" icon={<Layers size={15} />} right={<span className="muted" style={{ fontSize: "var(--fs-xs)" }}>click a row to filter the journal to it</span>} className="flush">
-        <table className="strat-table">
+        <table className="tbl strat-table" aria-label="Strategies in this book: select one to filter the journal">
           <thead><tr><th /><th>Strategy</th><th className="r">Trades</th><th className="r">Win rate</th><th className="r">Net P&amp;L</th><th className="r">Profit factor</th><th className="r">Contribution</th></tr></thead>
           <tbody>
             {ids.map((id) => {
@@ -60,8 +60,9 @@ export function Strategies() {
               const pf = src?.profitFactor ?? (bkt && bkt.grossLoss < 0 ? bkt.grossWin / -bkt.grossLoss : null);
               const on = active === id;
               return (
-                <tr key={id} className={on ? "on" : ""} onClick={() => setFilters({ strategies: on ? undefined : [id] })} style={{ cursor: "pointer" }}>
-                  <td><span className="swatch sm" style={{ background: strategyColor(id) }} /></td>
+                <tr key={id} className={on ? "on" : ""} tabIndex={0} aria-current={on ? "true" : undefined} onClick={() => setFilters({ strategies: on ? undefined : [id] })}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setFilters({ strategies: on ? undefined : [id] }); } }}>
+                  <td><span className="swatch sm" style={{ background: strategyColor(id) }} aria-hidden="true" /></td>
                   <td><b>{strategyAlias(id)}</b>{src && <span className="muted" style={{ marginLeft: 6, fontSize: "var(--fs-xs)" }}>{src.symbols.map((s) => s.split(":").pop()).join(", ")}</span>}</td>
                   <td className="r num">{trades}</td>
                   <td className="r num">{fmtPct(wr, 0)}</td>

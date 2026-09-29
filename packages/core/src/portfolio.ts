@@ -1,3 +1,4 @@
+import { maxOf, minOf } from "./stats.js";
 import type { PerfReport, QktResult } from "./results.js";
 import type { RoundTrip } from "./roundtrips.js";
 import { strategyAlias } from "./strategy.js";
@@ -50,11 +51,11 @@ export function strategyBreakdown(result: QktResult, trips: RoundTrip[]): Strate
       fills: p.tradeCount ?? 0, trades: closed.length, openTrades: mine.length - closed.length, wins: wins.length, losses: losses.length,
       winRate: closed.length ? wins.length / closed.length : 0,
       profitFactor: gl < 0 ? gw / -gl : null, avgWin: wins.length ? gw / wins.length : 0, avgLoss: losses.length ? gl / losses.length : 0,
-      largestWin: closed.length ? Math.max(0, ...closed.map((t) => t.pnl)) : 0, largestLoss: closed.length ? Math.min(0, ...closed.map((t) => t.pnl)) : 0,
+      largestWin: maxOf(closed.map((t) => t.pnl), 0), largestLoss: minOf(closed.map((t) => t.pnl), 0),
       maxDrawdown: n(p.maxDrawdown), maxDailyDrawdown: n(p.maxDailyDrawdown), sharpe: n(p.sharpeRatio), sortino: n(p.sortinoRatio), calmar: n(p.calmarRatio),
       maxConsecutiveLosses: p.maxConsecutiveLosses ?? 0, turnover: n(p.turnover),
-      firstTradeTs: mine.length ? Math.min(...mine.map((t) => t.entryTs)) : null,
-      lastTradeTs: mine.length ? Math.max(...mine.map((t) => t.exitTs ?? t.entryTs)) : null,
+      firstTradeTs: mine.length ? minOf(mine.map((t) => t.entryTs)) : null,
+      lastTradeTs: mine.length ? maxOf(mine.map((t) => t.exitTs ?? t.entryTs)) : null,
       symbols: [...new Set(mine.map((t) => t.symbol))],
       contribution: bookTotal !== 0 ? n(p.totalPnL) / bookTotal : null,
       returnContribution: opt(ba?.contributionToReturn), riskContribution: opt(ba?.riskContribution), drawdownContribution: opt(ba?.drawdownContribution),

@@ -50,7 +50,9 @@ export interface SettingsView { sources: string[]; symbolPrefs: Record<string, S
 export interface DirList { path: string; parent: string | null; store: boolean; dirs: Array<{ name: string; store: boolean }> }
 export interface Overlay { total: number; truncated: boolean; rows: RoundTrip[] }
 export interface Equity { ts: number[]; equity: number[]; drawdown: number[] }
-export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string }>; strategies: string[]; fills: number; trips: number; qktVersion: string }
+export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string; base?: string | null }>; strategies: string[]; fills: number; trips: number; qktVersion: string; /** Account currency every money figure is in; null on runs from before it was recorded. */ currency?: string | null;
+  /** Orders qkt refused (risk caps, halts), by reason; absent on runs from before it was recorded. */
+  rejections?: { count: number; reasons: Array<{ kind: string; label: string; count: number; example: string; hint?: string }> } }
 export interface DayCoverage { day: string; bars: number; status: "ok" | "thin" | "closed" | "missing" }
 export interface Coverage { broker: string; symbol: string; tf: string; days: DayCoverage[]; summary: Record<string, number> }
 export interface SymbolRow { broker: string; symbol: string; timeframes: string[] }
@@ -64,7 +66,7 @@ export const api = {
   createFile: (path: string, content = "", type: "file" | "dir" = "file") => req<{ path: string; etag?: string }>("/api/file", { method: "POST", body: JSON.stringify({ path, content, type }) }),
   remove: (path: string) => req<void>(`/api/file${qs({ path })}`, { method: "DELETE" }),
   rename: (from: string, to: string) => req<{ from: string; to: string }>("/api/rename", { method: "POST", body: JSON.stringify({ from, to }) }),
-  check: (kind: "qkt" | "config", content: string) => req<{ diagnostics: Diagnostic[] }>("/api/check", { method: "POST", body: JSON.stringify({ kind, content }) }),
+  check: (kind: "qkt" | "config", content: string, path?: string) => req<{ diagnostics: Diagnostic[] }>("/api/check", { method: "POST", body: JSON.stringify({ kind, content, path }) }),
 
   runs: (strategy?: string, limit = 200) => req<{ runs: RunRow[] }>(`/api/runs${qs({ strategy, limit })}`),
   portfolios: () => req<{ portfolios: PortfolioListing[]; usedIn: Record<string, string[]> }>("/api/portfolios"),
@@ -80,6 +82,7 @@ export const api = {
   scan: (refresh = false) => req<ScanReport>(`/api/data/scan${refresh ? "?refresh=1" : ""}`),
   readiness: (refresh = false) => req<{ scannedAt: string; strategies: Readiness[] }>(`/api/data/readiness${refresh ? "?refresh=1" : ""}`),
   scaffoldMissing: () => req<{ missing: string[] }>("/api/workspace/missing"),
+  completeConfig: (content: string) => req<{ content: string }>("/api/workspace/config-complete", { method: "POST", body: JSON.stringify({ content }) }),
   scaffold: (files?: string[]) => req<{ created: string[]; skipped: string[]; missing: string[] }>("/api/workspace/scaffold", { method: "POST", body: JSON.stringify({ files }) }),
   addSource: (path: string) => req<SettingsView & { warnings: string[] }>("/api/settings/sources", { method: "POST", body: JSON.stringify({ path }) }),
   removeSource: (path: string) => req<SettingsView>("/api/settings/sources", { method: "DELETE", body: JSON.stringify({ path }) }),
@@ -114,8 +117,8 @@ export const api = {
 
   barsSymbols: () => req<{ symbols: SymbolRow[] }>("/api/bars/symbols"),
   barsRange: (p: { broker: string; symbol: string; tf: string }) => req<{ first: string | null; last: string | null; files: number }>(`/api/bars/range${qs(p)}`),
-  coverage: (p: { broker: string; symbol: string; tf: string; from: string; to: string }) => req<Coverage>(`/api/bars/coverage${qs(p)}`),
-  bars: async (p: { broker: string; symbol: string; tf: string; from: number; to: number; max?: number }): Promise<{ cols: BarCols; sourceCount: number; missingDays: number; emptyDays: number }> => {
+  coverage: (p: { broker: string; symbol: string; tf: string; base?: string | null; from: string; to: string }) => req<Coverage>(`/api/bars/coverage${qs(p)}`),
+  bars: async (p: { broker: string; symbol: string; tf: string; base?: string | null; from: number; to: number; max?: number }): Promise<{ cols: BarCols; sourceCount: number; missingDays: number; emptyDays: number }> => {
     const t = getToken();
     const r = await fetch(`/api/bars${qs(p)}`, { headers: t ? { Authorization: `Bearer ${t}` } : {} });
     if (!r.ok) throw new ApiError(r.status, ((await r.json().catch(() => ({}))) as { error?: string }).error ?? "bars unavailable");

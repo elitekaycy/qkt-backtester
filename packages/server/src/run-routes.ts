@@ -7,7 +7,9 @@ import {
 import { resolveInJail } from "./jail.js";
 import { Runner, RunRequestError, type RunRequest } from "./runner.js";
 
-const TRIP_CACHE_MAX = 6;
+/** Round trips kept parsed in memory, summed over cached runs (~250 bytes each): a size cap, not a run count, since one run
+ *  can hold 800k trips. The run being read is always kept, however large. */
+const TRIP_CACHE_MAX_TRIPS = 1_500_000;
 const ARTIFACT_TOPS = new Set(["logs", "engine", "source", "robustness", "derived"]);
 const MIME: Record<string, string> = {
   ".json": "application/json", ".html": "text/html; charset=utf-8", ".csv": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
@@ -39,15 +41,26 @@ export function parseTripQuery(q: Record<string, string | undefined>): TripQuery
 
 export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
   const tripCache = new Map<string, RoundTrip[]>();
+  const loading = new Map<string, Promise<RoundTrip[] | null>>();
+  let cachedTrips = 0;
+  const evict = (id: string) => { const t = tripCache.get(id); if (t) { cachedTrips -= t.length; tripCache.delete(id); } };
   const loadTrips = async (id: string): Promise<RoundTrip[] | null> => {
+    await runner.ensureDerived(id).catch(() => undefined);
     const hit = tripCache.get(id);
     if (hit) { tripCache.delete(id); tripCache.set(id, hit); return hit; }
-    try {
-      const trips = JSON.parse(await fs.readFile(path.join(runner.runDir(id), "derived", "roundtrips.json"), "utf8")) as RoundTrip[];
-      tripCache.set(id, trips);
-      if (tripCache.size > TRIP_CACHE_MAX) tripCache.delete(tripCache.keys().next().value as string);
-      return trips;
-    } catch { return null; }
+    // one parse per run however many requests arrive together (the UI asks for trades, analytics and overlay at once)
+    const inflight = loading.get(id);
+    if (inflight) return inflight;
+    const job = (async () => {
+      try {
+        const trips = JSON.parse(await fs.readFile(path.join(runner.runDir(id), "derived", "roundtrips.json"), "utf8")) as RoundTrip[];
+        tripCache.set(id, trips); cachedTrips += trips.length;
+        for (const k of tripCache.keys()) { if (cachedTrips <= TRIP_CACHE_MAX_TRIPS || k === id) break; evict(k); }
+        return trips;
+      } catch { return null; }
+    })().finally(() => loading.delete(id));
+    loading.set(id, job);
+    return job;
   };
   const notFound = (reply: FastifyReply, what = "not found") => reply.code(404).send({ error: what });
 
@@ -91,7 +104,7 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
     if (!(await fs.stat(dir).then(() => true, () => false))) return notFound(reply, "run not found");
     await fs.rm(dir, { recursive: true, force: true });
     runner.index.remove(req.params.id);
-    tripCache.delete(req.params.id);
+    evict(req.params.id); kindCache.delete(req.params.id);
     return reply.code(204).send();
   });
 
@@ -131,7 +144,7 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
       const size = async (d: string): Promise<number> => { let n = 0; for (const e of await fs.readdir(d, { withFileTypes: true }).catch(() => [])) { const p = path.join(d, e.name); n += e.isDirectory() ? await size(p) : (await fs.stat(p).catch(() => null))?.size ?? 0; } return n; };
       freed += await size(dir);
       await fs.rm(dir, { recursive: true, force: true });
-      runner.index.remove(id); tripCache.delete(id); deleted.push(id);
+      runner.index.remove(id); evict(id); kindCache.delete(id); deleted.push(id);
     }
     return { deleted, freedBytes: freed };
   });
@@ -167,6 +180,7 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
 
   app.get<{ Params: { id: string; name: string } }>("/api/runs/:id/derived/:name", async (req, reply) => {
     if (!DERIVED.has(req.params.name)) return notFound(reply);
+    await runner.ensureDerived(req.params.id).catch(() => undefined);
     try {
       const text = await fs.readFile(path.join(runner.runDir(req.params.id), "derived", `${req.params.name}.json`), "utf8");
       return reply.type("application/json").send(text);
@@ -207,6 +221,7 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
     if (!st.isFile()) return reply.code(400).send({ error: "not a file" });
     const ext = path.extname(abs).toLowerCase();
     const tail = num(req.query.tail);
+    if (tail !== undefined && !(Number.isInteger(tail) && tail > 0)) return reply.code(400).send({ error: "tail is a number of bytes, above 0" });
     let body: Buffer;
     if (tail && st.size > tail) {
       const fh = await fs.open(abs, "r");
@@ -225,11 +240,18 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner): void {
       if (!trips) return notFound(reply, "trades not available");
       const b = req.body ?? {};
       const method = (["shuffle", "bootstrap", "block", "skip"] as const).find((m) => m === b.method) ?? "bootstrap";
-      const sims = Math.floor(b.sims ?? 1000), seed = Math.floor(b.seed ?? 42);
+      const sims = Number(b.sims ?? 1000), seed = Number(b.seed ?? 42);
+      if (!Number.isInteger(sims) || sims < 1 || sims > MC_MAX_SIMS) return reply.code(400).send({ error: `sims must be a whole number from 1 to ${MC_MAX_SIMS}` });
+      if (!Number.isInteger(seed)) return reply.code(400).send({ error: "seed must be a whole number" });
+      if (b.skipPct !== undefined && !(Number(b.skipPct) >= 0 && Number(b.skipPct) <= 1)) return reply.code(400).send({ error: "skipPct is a fraction from 0 to 1 (0.1 skips 10% of trades)" });
+      if (b.blockLen !== undefined && !(Number.isInteger(Number(b.blockLen)) && Number(b.blockLen) >= 1)) return reply.code(400).send({ error: "blockLen must be a whole number of trades, at least 1" });
+      if (b.ruinDrawdown !== undefined && !(Number(b.ruinDrawdown) > 0 && Number(b.ruinDrawdown) <= 1)) return reply.code(400).send({ error: "ruinDrawdown is a fraction above 0, up to 1 (0.5 = a 50% drawdown)" });
       const pnls = trips.filter((t) => !t.open).sort((a, c) => (a.exitTs ?? 0) - (c.exitTs ?? 0)).map((t) => t.pnl);
       if (sims * Math.max(pnls.length, 1) > 5e7) return reply.code(400).send({ error: `sims × trades exceeds the safety cap (max sims ${MC_MAX_SIMS}, ~5e7 steps)` });
       const equity = JSON.parse(await fs.readFile(path.join(runner.runDir(req.params.id), "derived", "equity.json"), "utf8").catch(() => "null")) as { equity: number[] } | null;
-      const startEquity = equity?.equity[0] ?? 10_000;
+      // the simulation starts from the run's real starting equity; never from a made-up balance
+      const startEquity = equity?.equity[0];
+      if (startEquity === undefined || !Number.isFinite(startEquity)) return reply.code(409).send({ error: "this run has no equity curve to start the simulation from; run it again" });
       const res = runMonteCarlo(pnls, { method, sims, seed, startEquity, blockLen: b.blockLen, skipPct: b.skipPct, ruinDrawdown: b.ruinDrawdown });
       const dir = path.join(runner.runDir(req.params.id), "robustness");
       await fs.mkdir(dir, { recursive: true });
