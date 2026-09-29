@@ -23,7 +23,12 @@ export function splitCut(split: Split, from: string, to: string): number | null 
   else if ("test_last" in split) {
     const [, n, unit] = LAST.exec(split.test_last)!;
     const d = new Date(z);
-    if (/month/i.test(unit!)) d.setUTCMonth(d.getUTCMonth() - Number(n)); else d.setUTCDate(d.getUTCDate() - Number(n) * (/week/i.test(unit!) ? 7 : 1));
+    if (/month/i.test(unit!)) {
+      // clamp the day: a month back from 03-31 is 02-28 (or 29), not 03-03 as a bare setUTCMonth would give
+      const day = d.getUTCDate();
+      d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - Number(n));
+      d.setUTCDate(Math.min(day, new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()));
+    } else d.setUTCDate(d.getUTCDate() - Number(n) * (/week/i.test(unit!) ? 7 : 1));
     cut = d.getTime();
   } else if ("test_from" in split) cut = Date.parse(`${split.test_from}T00:00:00Z`);
   return cut !== null && cut > a && cut < z ? cut : null;

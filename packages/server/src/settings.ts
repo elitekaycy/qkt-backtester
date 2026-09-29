@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Split } from "@qkt-studio/core";
 import type { ServerConfig, SymbolPref } from "./config.js";
+import { JsonFile } from "./agent/json-store.js";
 
 export interface StudioSettings { dataRoot?: string; sources?: string[]; symbols?: Record<string, SymbolPref>; split?: Split }
 
@@ -14,9 +15,17 @@ export async function loadSettings(cfg: ServerConfig): Promise<StudioSettings> {
   try { return JSON.parse(await fs.readFile(file(cfg), "utf8")) as StudioSettings; } catch { return {}; }
 }
 
-export async function saveSettings(cfg: ServerConfig, s: StudioSettings): Promise<void> {
-  await fs.mkdir(path.dirname(file(cfg)), { recursive: true });
-  await fs.writeFile(file(cfg), JSON.stringify(s, null, 2));
+const stores = new Map<string, JsonFile<StudioSettings>>();
+/**
+ * The ONLY way settings.json is written: read-modify-write as one serialized step per workspace, written atomically, so
+ * two writers (the split from a tool, a data-source change from the UI) never lose each other's keys. A file that does
+ * not parse is kept aside as settings.json.corrupt-<ms> rather than overwritten.
+ */
+export function updateSettings(cfg: ServerConfig, change: (s: StudioSettings) => StudioSettings): Promise<StudioSettings> {
+  const f = file(cfg);
+  let store = stores.get(f);
+  if (!store) stores.set(f, (store = new JsonFile<StudioSettings>(f, 2)));
+  return store.update({}, (cur) => change(cur && typeof cur === "object" && !Array.isArray(cur) ? { ...cur } : {}));
 }
 
 /** May the UI point the studio at `target`? Everything is allowed with a token or on loopback; otherwise only known mount roots. */
@@ -42,10 +51,7 @@ export async function applySettings(cfg: ServerConfig): Promise<void> {
 
 /** Persist the source list and per-symbol preferences that live on `cfg`. */
 export async function savePrefs(cfg: ServerConfig): Promise<void> {
-  const s = await loadSettings(cfg);
-  s.sources = cfg.sources ?? [];
-  s.symbols = Object.fromEntries(Object.entries(cfg.symbolPrefs ?? {}).filter(([, v]) => v.source || v.from || v.to));
-  await saveSettings(cfg, s);
+  await updateSettings(cfg, (s) => ({ ...s, sources: cfg.sources ?? [], symbols: Object.fromEntries(Object.entries(cfg.symbolPrefs ?? {}).filter(([, v]) => v.source || v.from || v.to)) }));
 }
 
 /** The data folder a symbol is read from: its own override or the default source. */

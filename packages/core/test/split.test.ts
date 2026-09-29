@@ -17,6 +17,10 @@ describe("split", () => {
     expect(new Date(splitCut({ test_pct: 25 }, "2026-01-01", "2026-05-01")!).toISOString().slice(0, 10)).toBe("2026-04-01");
     expect(new Date(splitCut({ test_last: "1 months" }, "2026-01-01", "2026-05-01")!).toISOString().slice(0, 10)).toBe("2026-04-01");
     expect(splitCut({ none: true }, "2026-01-01", "2026-05-01")).toBeNull();
+    // a month back from a month's last day lands on the shorter month's last day, never overflows into the next month
+    expect(new Date(splitCut({ test_last: "1 months" }, "2026-01-01", "2026-03-31")!).toISOString().slice(0, 10)).toBe("2026-02-28");
+    expect(new Date(splitCut({ test_last: "1 months" }, "2024-01-01", "2024-03-31")!).toISOString().slice(0, 10)).toBe("2024-02-29");
+    expect(new Date(splitCut({ test_last: "3 months" }, "2025-01-01", "2025-05-31")!).toISOString().slice(0, 10)).toBe("2025-02-28");
     expect(splitCut({ test_from: "2027-01-01" }, "2026-01-01", "2026-05-01")).toBeNull();
   });
   it("splits trades by exit time, and a part with no trades has zeros and nulls, never NaN", () => {

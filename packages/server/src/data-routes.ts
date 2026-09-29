@@ -5,7 +5,7 @@ import type { ServerConfig } from "./config.js";
 import { invalidateScan, listStrategies, readinessFor, scanCached, scanStore, scanSymbolIn, seriesDays } from "./data-scan.js";
 import type { Jobs } from "./jobs.js";
 import type { Runner } from "./runner.js";
-import { applySettings, dataRootAllowed, loadSettings, saveSettings, savePrefs } from "./settings.js";
+import { applySettings, dataRootAllowed, loadSettings, savePrefs, updateSettings } from "./settings.js";
 import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
 import { completeConfig, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
@@ -33,7 +33,7 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
   app.put<{ Body: { dataRoot?: string | null } }>("/api/settings/data-root", async (req, reply) => {
     const raw = req.body?.dataRoot;
     if (raw === null || raw === "") { // reset to the default
-      const s = await loadSettings(cfg); delete s.dataRoot; await saveSettings(cfg, s);
+      await updateSettings(cfg, ({ dataRoot: _d, ...s }) => s);
       cfg.dataRoot = cfg.defaultDataRoot ?? cfg.dataRoot; invalidateScan();
       return { ...(await settingsView()), warnings: [] as string[] };
     }
@@ -46,7 +46,7 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
     const warnings: string[] = [];
     if (!(await looksLikeStore(target))) warnings.push("This folder has no `symbols/` or `bars/` directory yet. It looks empty or is not a qkt data store.");
     cfg.dataRoot = target; invalidateScan();
-    const s = await loadSettings(cfg); s.dataRoot = target; await saveSettings(cfg, s);
+    await updateSettings(cfg, (s) => ({ ...s, dataRoot: target }));
     await applySettings(cfg);
     return { ...(await settingsView()), warnings };
   });

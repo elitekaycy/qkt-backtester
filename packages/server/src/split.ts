@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DEFAULT_SPLIT, describeSplit, parseSplit, partsOf, type Split } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
-import { loadSettings, saveSettings } from "./settings.js";
+import { loadSettings, updateSettings } from "./settings.js";
 import type { EventBus } from "./agent/events.js";
 import type { RunData } from "./run-data.js";
 import { ok, guard, type ToolCtx } from "./mcp/util.js";
@@ -11,8 +11,7 @@ import { ok, guard, type ToolCtx } from "./mcp/util.js";
 export async function getSplit(cfg: ServerConfig): Promise<Split> { return (await loadSettings(cfg)).split ?? DEFAULT_SPLIT; }
 export async function setSplit(cfg: ServerConfig, events: EventBus, x: unknown): Promise<Split> {
   const split = parseSplit(x);
-  const s = await loadSettings(cfg);
-  await saveSettings(cfg, { ...s, split });
+  await updateSettings(cfg, (s) => ({ ...s, split }));
   events.emit({ t: "split" });
   return split;
 }

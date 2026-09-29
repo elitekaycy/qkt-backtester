@@ -130,3 +130,8 @@ claude mcp add --transport http qkt-studio http://bot2:8080/api/mcp --header "Au
 Then ask, in plain English, with the studio open in the browser: "make the stop-loss 2 % and let's see". The change runs
 on a copy and appears on the chart with Adopt / Discard / Back; edits to your files appear under **Proposals** until you
 apply them. Nothing a tool does changes an existing file without your click.
+
+Each open studio tab keeps one event stream to the server (for what the tools do), plus one more while a run is
+going. Over plain HTTP (for example `http://bot2:8080`) browsers allow 6 connections per host, so with about five tabs
+of the studio open, requests in every tab start to wait. Close tabs you do not use, or serve the studio over HTTPS
+(HTTP/2) behind a proxy, where this limit does not apply.
