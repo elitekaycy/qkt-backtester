@@ -31,6 +31,15 @@ RUN pnpm --filter @qkt-studio/server deploy --prod --legacy /out/server \
  && rm -f /out/server/node_modules/.modules.yaml
 
 FROM ${QKT_IMAGE} AS runtime
+ARG QKT_IMAGE
+ARG STUDIO_VERSION=dev
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="qkt-backtester" \
+      org.opencontainers.image.description="Browser workspace for the qkt trading engine: editor, runs, charts, journal" \
+      org.opencontainers.image.source="https://github.com/elitekaycy/qkt-backtester" \
+      org.opencontainers.image.version="${STUDIO_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      io.qkt.engine-image="${QKT_IMAGE}"
 USER root
 COPY --from=nodebin /usr/local/bin/node /usr/local/bin/node
 COPY --from=nodebin /usr/bin/tini /usr/bin/tini

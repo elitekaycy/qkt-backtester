@@ -1,11 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import {
   availableTimeframes, barBases, barBaseTf, bookInfo, canonicalTf, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBarsVia, strategyBreakdown, summarize, summarizeRejections, tfToMs, verifyManifest,
   type BarCols, type IntegrityReport, type RunJson, type Summary,
 } from "@qkt-studio/core";
 
-export const STUDIO_VERSION = "0.1.0";
+/** The studio's version: packages/server/package.json (one source; the release workflow checks the tag against it). */
+export const STUDIO_VERSION: string = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 /**
  * Version of everything under derived/. Derived files are a pure function of qkt's own output (kept in engine/), so a finished
  * run derived by an older version is re-derived on first access instead of serving numbers computed by old rules.
