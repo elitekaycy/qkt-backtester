@@ -69,7 +69,8 @@ docker run -d --name qkt-backtester --restart unless-stopped \
   `ssh -N -L 8080:127.0.0.1:8080 user@server`, then open <http://localhost:8080>.
 - **Tailscale**: publish on the server's tailnet address instead (`-p 100.x.y.z:8080:8080`) and add
   `-e STUDIO_ALLOWED_HOSTS=server-name,server-name.tailnet-name.ts.net`. The token is then required; the browser asks for
-  it once.
+  it once and remembers it (a `?token=` link works too and is taken out of the address bar). On a shared computer,
+  *Forget the saved token* in the command palette removes it.
 
 ### Health, logs, upgrades
 

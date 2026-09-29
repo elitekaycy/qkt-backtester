@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../state/store.js";
+import { forgetToken, getToken } from "../api/client.js";
 import { useUi, type JournalSection } from "../state/ui.js";
 import { Modal } from "../ui/Modal.js";
 import { FileCode2, Play, Search } from "../ui/icons.js";
@@ -43,6 +44,7 @@ export function CommandPalette() {
       { id: "reset-layout", label: "Reset all pane sizes", group: "View", run: () => ui.reset() },
       { id: "dock", label: "Toggle output panel", hint: "Ctrl+`", group: "View", run: () => ui.set({ dockOpen: !ui.dockOpen }) },
       { id: "term", label: "Open terminal", group: "View", run: () => ui.showDock("terminal") },
+      ...(store().info?.tokenRequired && getToken() ? [{ id: "forget-token", label: "Forget the saved token (asks for it again)", group: "View", run: () => { forgetToken(); location.reload(); } }] : []),
       { id: "layout", label: `Put the chart ${ui.layout === "row" ? "below" : "beside"} the editor`, group: "View", run: () => ui.set({ layout: ui.layout === "row" ? "col" : "row" }) },
       { id: "theme", label: theme === "dark" ? "Switch to light theme" : "Switch to dark theme", group: "Preferences", run: () => store().setTheme(theme === "dark" ? "light" : "dark") },
       { id: "vim", label: ui.vim ? "Turn Vim keybindings off" : "Turn Vim keybindings on", group: "Preferences", run: () => ui.set({ vim: !ui.vim }) },
