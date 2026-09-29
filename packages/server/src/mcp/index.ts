@@ -6,6 +6,7 @@ import { registerContextTools } from "./tools-context.js";
 import { registerKnowledgeTools } from "./tools-knowledge.js";
 import { registerAnalysisTools } from "./tools-analysis.js";
 import { registerAuthoringTools } from "./tools-authoring.js";
+import { registerSplitTools } from "../split.js";
 import type { ToolCtx } from "./util.js";
 
 /** Every tool group registers here; later tasks add their `register...` calls to this list. */
@@ -15,6 +16,7 @@ export function buildMcp(ctx: ToolCtx): McpServer {
   registerKnowledgeTools(s, ctx);
   registerAnalysisTools(s, ctx);
   registerAuthoringTools(s, ctx);
+  registerSplitTools(s, ctx);
   return s;
 }
 

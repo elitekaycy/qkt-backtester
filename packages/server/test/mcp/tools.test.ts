@@ -151,3 +151,20 @@ describe("authoring tools", () => {
     await c.close();
   });
 });
+
+describe("the split", () => {
+  it("is readable and changeable from tools and the API, and announced to the UI", async () => {
+    const c = await mcpClient(base, "t0k");
+    expect((await call(c, "get_split")).json).toMatchObject({ split: { test_pct: 25 }, text: "test = last 25 %" });
+    const seen: string[] = [];
+    const off = studio.events.subscribe((e) => seen.push(e.t));
+    expect((await call(c, "set_split", { split: { test_last: "2 months" } })).json.text).toBe("test = last 2 months");
+    off();
+    expect(seen).toContain("split");
+    const r = await fetch(`${base}/api/split`, { headers: { Authorization: "Bearer t0k" } });
+    expect(await r.json()).toMatchObject({ split: { test_last: "2 months" } });
+    expect((await call(c, "set_split", { split: { test_pct: 1 } })).isError).toBe(true);
+    await call(c, "set_split", { split: { test_pct: 25 } });
+    await c.close();
+  });
+});

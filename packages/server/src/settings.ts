@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { Split } from "@qkt-studio/core";
 import type { ServerConfig, SymbolPref } from "./config.js";
 
-export interface StudioSettings { dataRoot?: string; sources?: string[]; symbols?: Record<string, SymbolPref> }
+export interface StudioSettings { dataRoot?: string; sources?: string[]; symbols?: Record<string, SymbolPref>; split?: Split }
 
 const file = (cfg: ServerConfig) => path.join(cfg.workspace, ".qkt-studio", "settings.json");
 const isLoopback = (h: string) => h === "127.0.0.1" || h === "::1" || h === "localhost";

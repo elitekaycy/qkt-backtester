@@ -14,6 +14,7 @@ import { RunData } from "./run-data.js";
 import { Runner } from "./runner.js";
 import { applySettings } from "./settings.js";
 import { registerTerminal } from "./terminal.js";
+import { registerSplitRoutes } from "./split.js";
 import { EventBus, registerEvents } from "./agent/events.js";
 import { ViewState, registerView } from "./agent/view-state.js";
 import { Proposals, registerProposalRoutes } from "./agent/proposals.js";
@@ -41,6 +42,7 @@ export async function createStudio(cfg: ServerConfig) {
     registerEvents(a, events);
     registerView(a, view);
     registerProposalRoutes(a, proposals);
+    registerSplitRoutes(a, cfg, events, data);
     registerMcp(a, { cfg, runner, jobs, data, events, view, proposals });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
