@@ -76,8 +76,9 @@ function Shell() {
   useEffect(() => { if (running) useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [running]);
   useEffect(() => { if (run?.status === "failed") useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [run?.status]);
 
-  // the agent slice (variants, proposals, split) and the SSE stream that keeps them live
-  useEffect(() => { useAgent.getState().start(); }, []);
+  // the agent slice (variants, proposals, split) and the SSE stream that keeps them live; start() closes any
+  // previous stream and returns a stop function, so a StrictMode remount never leaves a duplicate stream open
+  useEffect(() => { const stop = useAgent.getState().start(); return stop; }, []);
   // report what the user is looking at, debounced, whenever the store changes (file, run, window, selection)
   useEffect(() => {
     const unsub = useStore.subscribe(() => scheduleViewReport());

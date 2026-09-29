@@ -1,3 +1,4 @@
+import type { editor as MonacoEditorNS } from "monaco-editor/editor/editor.api.js";
 import { create } from "zustand";
 import { api, withToken } from "../api/client.js";
 import { useStore } from "./store.js";
@@ -15,26 +16,70 @@ export function viewReport(s: { activePath: string | null; cursorLine: number | 
   };
 }
 
+/** Pure: whether a run finished by an agent tool (the SSE `run` event) should take over the chart in this tab.
+ *  Only when it is the strategy currently open here and no variant is being reviewed — a run of some other
+ *  strategy, or one started while a variant is showing, must not yank the chart out from under the user. */
+export function shouldShowRun(a: { runStrategy: string | null; activePath: string | null; variantShowing: boolean }): boolean {
+  return !a.variantShowing && a.runStrategy !== null && a.runStrategy === a.activePath;
+}
+
+export type AdoptAction = "saveFailed" | "autoRun" | "startRun";
+/** Pure: what adopt() does after saveFile resolves. A failed save (e.g. a 412 conflict) must not be reported as
+ *  success or trigger a run. A successful save with autoRun on has already scheduled its own run (the store's
+ *  saveFile does this), so calling startRun() again would submit a duplicate. */
+export function decideAdoptAction(saved: boolean, autoRun: boolean): AdoptAction {
+  if (!saved) return "saveFailed";
+  return autoRun ? "autoRun" : "startRun";
+}
+
+/** Poll monaco's global model registry for the model at `workspace`/`path` (the same URI EditorPane uses), up to
+ *  `timeoutMs`. EditorPane creates a file's model asynchronously (its own effect, after `openFiles` changes), so a
+ *  freshly-opened file may not have a model yet the instant `openFile()` resolves. */
+async function waitForModel(workspace: string, path: string, timeoutMs = 2000): Promise<MonacoEditorNS.ITextModel | null> {
+  // dynamic: agent.ts is imported from plain unit tests (no DOM), and monaco.js touches `window` at import time
+  const { setupMonaco } = await import("../editor/monaco.js");
+  const m = await setupMonaco();
+  const uri = m.Uri.parse(`file://${workspace}/${path}`);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const model = m.editor.getModel(uri);
+    if (model) return model;
+    if (Date.now() >= deadline) return null;
+    await new Promise((r) => setTimeout(r, 30));
+  }
+}
+
+/** One EventSource for the whole tab, kept in module scope so StrictMode's mount/unmount/remount (or a second call
+ *  to start()) never leaves a duplicate stream running. */
+let es: EventSource | null = null;
+
 export const useAgent = create<{
   variants: VariantInfo[]; showing: VariantInfo | null; split: { split: Split; text: string } | null; proposals: ProposalInfo[];
-  start(): void; refresh(): Promise<void>; show(v: VariantInfo): Promise<void>; back(): Promise<void>; discard(id: string): Promise<void>; adopt(id: string): Promise<void>;
+  /** Opens the SSE stream (closing any previous one first) and returns a stop function for cleanup. */
+  start(): () => void;
+  refresh(): Promise<void>; show(v: VariantInfo): Promise<void>; back(): Promise<void>; discard(id: string): Promise<void>; adopt(id: string): Promise<void>;
 }>((set, get) => ({
   variants: [], showing: null, split: null, proposals: [],
   start() {
+    es?.close();
     void get().refresh();
-    const es = new EventSource(withToken("/api/events"));
-    es.addEventListener("variant", (m) => {
+    const src = (es = new EventSource(withToken("/api/events")));
+    src.addEventListener("variant", (m) => {
       const e = JSON.parse((m as MessageEvent).data) as { variantId: string };
       void get().refresh().then(() => { const v = get().variants.find((x) => x.id === e.variantId); if (v) void get().show(v); });
     });
-    es.addEventListener("proposal", () => void get().refresh());
-    es.addEventListener("split", () => void get().refresh());
-    es.addEventListener("open", (m) => void useStore.getState().openFile((JSON.parse((m as MessageEvent).data) as { path: string }).path));
-    es.addEventListener("run", (m) => {
+    src.addEventListener("proposal", () => void get().refresh());
+    src.addEventListener("split", () => void get().refresh());
+    src.addEventListener("open", (m) => void useStore.getState().openFile((JSON.parse((m as MessageEvent).data) as { path: string }).path));
+    src.addEventListener("run", (m) => {
       const e = JSON.parse((m as MessageEvent).data) as { runId: string };
       void useStore.getState().refreshRuns();
-      if (useStore.getState().running === false) void useStore.getState().selectRun(e.runId);
+      if (useStore.getState().running) return; // this tab is following a live run of its own: leave it alone
+      void api.run(e.runId).then((run) => {
+        if (shouldShowRun({ runStrategy: run.strategy, activePath: useStore.getState().activePath, variantShowing: !!get().showing })) void useStore.getState().selectRun(e.runId);
+      }).catch(() => undefined);
     });
+    return () => { if (es === src) { src.close(); es = null; } };
   },
   async refresh() {
     const [v, p, s] = await Promise.all([api.variants(), api.proposals(), api.split()]);
@@ -43,19 +88,36 @@ export const useAgent = create<{
   async show(v) { set({ showing: v }); if (v.runId) await useStore.getState().selectRun(v.runId); },
   async back() { const v = get().showing; set({ showing: null }); if (v?.baseRunId) await useStore.getState().selectRun(v.baseRunId); },
   async discard(id) { await api.discardVariant(id); if (get().showing?.id === id) await get().back(); await get().refresh(); },
-  /** Adopt = the variant's text becomes the base file, as ONE edit in the editor (so Ctrl+Z undoes it), then saved. */
+  /** Adopt = the variant's text becomes the base file, as ONE edit (undoable with Ctrl+Z), then saved and re-run
+   *  exactly once. The edit targets the base file's OWN monaco model by URI, never whatever model happens to be
+   *  attached to the editor right now (the attach can still be mid-flight after openFile()). */
   async adopt(id) {
     const v = await api.variant(id);
     if (!v.source) throw new Error("the variant file is gone");
-    const store = useStore.getState();
-    await store.openFile(v.base);
-    const ed = (window as unknown as { __qktEditor?: { getModel(): { getFullModelRange(): unknown; uri: { path: string } } | null; executeEdits(src: string, edits: Array<{ range: unknown; text: string }>): void; pushUndoStop(): void } }).__qktEditor;
-    const model = ed?.getModel();
-    if (ed && model) { ed.pushUndoStop(); ed.executeEdits("adopt", [{ range: model.getFullModelRange(), text: v.source }]); ed.pushUndoStop(); }
-    else store.setContent(v.base, v.source);
-    await store.saveFile(v.base);
+    await useStore.getState().openFile(v.base);
+
+    let editedInEditor = false;
+    const workspace = useStore.getState().info?.workspace;
+    if (workspace) {
+      const model = await waitForModel(workspace, v.base);
+      if (model) {
+        model.pushStackElement();
+        model.pushEditOperations([], [{ range: model.getFullModelRange(), text: v.source }], () => null);
+        model.pushStackElement();
+        editedInEditor = true;
+      }
+    }
+    if (!editedInEditor) {
+      useStore.getState().setContent(v.base, v.source);
+      useStore.getState().toast("info", `Adopted ${v.base.split("/").pop()}: undo (Ctrl+Z) is not available for this change.`);
+    }
+
+    const saved = await useStore.getState().saveFile(v.base);
+    const action = decideAdoptAction(saved, useStore.getState().cfg.autoRun);
+    if (action === "saveFailed") { useStore.getState().toast("error", "Adopt: could not save, so the variant is kept — fix the conflict and try again."); return; }
     set({ showing: null });
-    await store.startRun();
+    if (action === "startRun") await useStore.getState().startRun();
+    // action === "autoRun": saveFile already scheduled the run itself; calling startRun() again would duplicate it.
   },
 }));
 
