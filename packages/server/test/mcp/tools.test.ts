@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os"; import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -57,6 +57,27 @@ describe("knowledge tools", () => {
     expect((await call(c, "dsl_examples", { query: "ema" })).json.length).toBeGreaterThan(0);
     expect((await call(c, "config_reference", { key: "risk" })).text).toMatch(/max_daily_loss/);
     expect((await call(c, "instruments_reference")).text).toMatch(/contractSize/);
+    await c.close();
+  });
+  it("paginates a long DSL page instead of silently dropping the tail", async () => {
+    const c = await mcpClient(base, "t0k");
+    const full = readFileSync(path.join(import.meta.dirname, "..", "..", "assets", "dsl", "indicators.md"), "utf8");
+    expect(full.length).toBeGreaterThan(8000);
+    const markerRe = /\n\[truncated: call again with offset=(\d+)\]$/;
+
+    const first = await call(c, "dsl_reference", { topic: "indicators" });
+    expect(first.text.length).toBeLessThanOrEqual(8000);
+    const m1 = markerRe.exec(first.text);
+    expect(m1).not.toBeNull();
+    const page1 = first.text.slice(0, m1!.index);
+    expect(full.startsWith(page1)).toBe(true);
+
+    const second = await call(c, "dsl_reference", { topic: "indicators", offset: Number(m1![1]) });
+    const m2 = markerRe.exec(second.text);
+    const page2 = m2 ? second.text.slice(0, m2.index) : second.text;
+    // the second page starts exactly where the first left off - no overlap, nothing skipped
+    expect(full.slice(page1.length, page1.length + page2.length)).toBe(page2);
+    if (!m2) expect(page1.length + page2.length).toBe(full.length);
     await c.close();
   });
 });
