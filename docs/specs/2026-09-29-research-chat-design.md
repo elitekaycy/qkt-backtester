@@ -1,0 +1,248 @@
+# Research chat: an AI assistant in the studio, driving it through MCP
+
+Status: design for review (2026-09-29). Nothing here is built yet; section 2 records what was verified by throwaway probes.
+
+## 1. What it is for
+
+A **Chat** tab in the bottom dock (beside Pipeline | Problems | Terminal) where the user talks, in plain language,
+about the strategy that is open, and the assistant can **see** the run on screen (trades, charts, numbers), the strategy,
+`qkt.config.yaml` and `instruments.yaml`, and **act**: create strategies, turn an idea into working DSL, change brackets
+and parameters, add config and instrument entries, run backtests, grids and walk-forwards, compare the results.
+
+Example: "on the chart no trade hits take-profit, they go straight to stop-loss; try inverting" -> the assistant reads an
+exact exit diagnosis, builds variants (swap stop and target; a 1.5R target), runs them, and shows a table the user can
+Adopt from.
+
+Everything the chat can do stays doable by hand, and everything the chat does is visible, reversible and checked.
+
+**Success criteria**
+- The two example tasks (fix a bracket from an exit diagnosis; code a new idea from a description) complete correctly on
+  the cheapest model tier, with the DSL passing `qkt parse` before the user sees it.
+- Uses the user's Claude Pro/Max through the unmodified Claude Code binary: $0 extra, within Anthropic's terms (section 8).
+- A normal message costs little of the plan's allowance (Haiku by default; target under ~30k tokens per task).
+- No change reaches the user's files without their click, except creating a new file they asked for.
+- Results the assistant tunes on are checked on data it never saw (section 6), so "make the results we want" does not
+  quietly become curve-fitting.
+
+## 2. Verified before designing (throwaway probes, 2026-09-29)
+
+| Claim | How it was checked | Result |
+|---|---|---|
+| Claude Code runs headless with only our tools | `claude -p --tools "" --strict-mcp-config --mcp-config ... --allowedTools "mcp__studio__*" --permission-mode dontAsk --output-format stream-json` (v2.1.284) | works; built-in tools off, only MCP tools callable |
+| Haiku can fix the bracket case from a digest | probe MCP server with `diagnose_exits` + `check_strategy` (real `qkt parse`) | 3 turns, 30 s; right diagnosis (median favourable move 3.1 vs a 24 target), proposed TP 6 / SL 12, source passed `qkt parse`; API-equivalent $0.038 |
+| Haiku can code a new idea from the docs | probe with `dsl_reference` (qkt's real DSL docs) + `check_strategy` | 8 turns, 41 s; correct multi-timeframe strategy (RSI cross, 4h EMA filter, % bracket), valid first try; $0.070, mostly reading 5 full doc pages |
+| MCP over HTTP with a bearer token | `@modelcontextprotocol/sdk` 1.31 streamable HTTP, `"type":"http"` in `--mcp-config` | works |
+| Conversations continue | `--session-id <uuid>` then `--resume <uuid>` | works; turn 2 answered from memory with no tool call |
+| Sign-in without the studio touching credentials | `claude auth login` / `claude auth status` exist | yes |
+| No turn limit flag in the CLI | `claude --help` | none: the studio enforces limits itself (section 5) |
+
+Lessons that shape the design: the model does well when **tools return decisive, exact digests**; cost is dominated by
+**reading** (the CLI's ~18k-token system prompt, replaced by ours; full doc pages, replaced by a compact cheat sheet).
+
+## 3. Architecture
+
+```
+ browser  Chat tab ── HTTP + SSE ──► studio server (Node, in the container)
+                                       │
+                                       ├── chat/     conversation manager
+                                       │     one `claude -p` process per message, resumed by session id;
+                                       │     streams its JSON events to the browser; enforces limits; records usage
+                                       │
+                                       ├── mcp/      studio MCP server at /mcp (streamable HTTP, token)
+                                       │     tools: context · knowledge · analysis · authoring · experiments · runs
+                                       │     every tool calls the studio's existing code (runner, file API, check,
+                                       │     trip queries, bars) - no second code path
+                                       │
+                                       └── core/ digests   pure functions: exit/entry diagnostics, what-if brackets,
+                                                           run comparison (unit-testable, used by tools and UI)
+```
+
+- **The MCP server is the product; the chat is one client of it.** The same `/mcp` endpoint works from Claude Code on the
+  user's laptop (over Tailscale, with the token), so phase 1 is useful before any chat UI exists.
+- **The agent is replaceable.** The chat manager talks to "an agent process that speaks stream-json with MCP"; Claude
+  Code is the first implementation. An API-key backend (section 9) plugs in behind the same interface.
+- **`/mcp` authentication**: the studio's access token (what the laptop uses; on the same terms as the rest of the API) or a
+  random per-process token the chat manager creates for each agent process and revokes when it exits.
+- Chat state lives in the workspace's studio folder (`.qkt-studio/chat/`): conversation index (sqlite, next to the run
+  index) and per-message usage. Claude Code keeps its own session transcripts in its config directory.
+
+## 4. The MCP tools (detailed and flexible)
+
+Design rules for every tool:
+- **Exact, computed by the studio.** Numbers come from the same derived files the UI shows (roundtrips, summary,
+  analytics, bars), never estimated by the model.
+- **Compact by default, detail on request.** Outputs are small JSON (target under 2k tokens) with a `more` handle
+  (`limit`/`offset`, `fields`) for detail.
+- **Structured where common, free-form where needed.** Common edits have structured tools a small model uses reliably;
+  anything else goes through a free-form source path that is always validated.
+- **Every write is checked.** Parse + lint always; for strategies also a **dry run**: a bars run over the last 5 trading
+  days that every stream has data for (skipped, and said so, when there is no such data). The tool returns the diagnostics
+  with line numbers; a strategy that does not parse is never saved.
+- **Names are stable and descriptions are short**, because every description is sent on every call.
+
+### 4.1 Context
+| Tool | Returns |
+|---|---|
+| `get_context` | the open file (path, text size, cursor line, selection), the run on screen (id, strategy, window, tier, status, headline numbers), the Run settings window, workspace files summary |
+| `list_files(dir?)` / `read_file(path, from_line?, to_line?)` | workspace files (strategies, config, instruments, notes); jailed to the workspace |
+| `list_runs(strategy?, limit)` / `get_run(id)` | past runs with their window, tier, params, headline numbers, error if failed |
+
+### 4.2 Knowledge (so a cheap model does not need to know qkt)
+| Tool | Returns |
+|---|---|
+| `dsl_reference(topic?)` | no topic: a **cheat sheet** (~2-3k tokens: file shape, SYMBOLS, rules, conditions, CROSSES, POSITION, actions, SIZING, BRACKET forms incl. `BY n PCT` and `AT`, PARAM, common indicators, 3 short examples) plus the topic list; with a topic: that page of qkt's `docs/reference/dsl/*.md` |
+| `dsl_examples(query)` | the closest examples from the workspace, qkt's `examples/` and `strategies/` (by keyword) |
+| `config_reference(key?)` | every `qkt.config.yaml` key with meaning, type, default (from the studio's config schema and "show every option" reference) |
+| `instruments_reference(symbol?)` | instruments.yaml fields and the entry qkt would use for a symbol |
+| `data_status(symbol?)` | what data exists: timeframes, first/last day, complete windows (the Data section's scan) |
+
+### 4.3 Analysis (computed, decisive)
+| Tool | Returns |
+|---|---|
+| `run_summary(run?)` | the summary the UI shows (net, trades, win rate, PF, drawdown, Sharpe...), rejections, warnings |
+| `diagnose_exits(run?)` | how trades ended (stop / target / rule / end-of-run), per side; distribution of maximum favourable and adverse excursion before exit, in price and in R; bars to exit; **what-if table**: for a small grid of stop/target distances, how many trades would have hit target first, and net, simulated on the run's bars (labelled "estimate on bars; confirm with a variant") |
+| `diagnose_entries(run?)` | entries by hour, weekday, session, trend context (price vs a slow EMA), and win rate/avg R in each; streaks |
+| `trades(run?, filter, sort, fields, limit)` | the journal's trade query (side, symbol, exit reason, R, P&L, duration, time filters), compact rows |
+| `trade_detail(run?, id, bars_before, bars_after)` | one trade: entry/exit/stop/target, and the OHLC bars around it (compact arrays) - what the chart shows |
+| `compare_runs(a, b)` | side-by-side headline numbers and the trades that differ |
+| `equity_stats(run?)` | drawdown periods, monthly returns, longest flat spell |
+
+### 4.4 Authoring (new files directly; existing files only through the user)
+| Tool | Effect |
+|---|---|
+| `check_strategy(source)` | parse + lint + dry run, nothing saved: the model's scratchpad |
+| `create_strategy(name, source, dir?)` | new file in `strategies/` (refused if it exists or does not pass the check); opens in the editor |
+| `propose_strategy_edit(path, edits)` | `edits` = list of `{find, replace}` or a full `source`; produces a **proposal** (diff) the user applies or rejects; nothing written |
+| `set_bracket(path, rule, stop, target)` / `set_param(path, name, value)` / `set_sizing(path, rule, sizing)` | structured edits, returned as a proposal like the above |
+| `get_config()` / `propose_config(changes)` | read the config; propose key changes (`{key: value}`, dotted keys), validated against the config schema before the user sees the diff |
+| `get_instrument(symbol)` / `propose_instrument(symbol, fields)` | same for `instruments.yaml` |
+
+`propose_*` never writes. Proposals appear in the chat as diffs with **Apply** / **Reject**; Apply goes through the file
+API (etag, conflict banner, one undo step in the editor). A proposal against a file the user changed since is marked stale.
+
+### 4.5 Experiments (variants on copies; the tuning loop)
+| Tool | Effect |
+|---|---|
+| `create_variants(base, variants: [{name, edits or source or set_bracket/set_param}])` | copies of the base strategy under `.qkt-studio/experiments/<id>/`, each checked; the user's file is untouched |
+| `run_experiment(id, window?, tier?)` | runs base + variants through the runner (parallel, cached like any run); returns **train-window** numbers only (section 6) |
+| `experiment_status(id)` | progress, and the table once done |
+| `sweep(base, param or bracket ranges, window?)` | the Lab grid over a strategy's params or bracket distances, as an experiment |
+
+The user sees each experiment as a table in the chat (train and test columns) with **Adopt** per row. Adopt turns that
+variant into a proposal against the original file (4.4). The model cannot adopt.
+
+### 4.6 Runs and jobs
+| Tool | Effect |
+|---|---|
+| `run_backtest(path, from?, to?, tier?, params?)` | a normal run (shows on the chart when it is the open file); waits up to 3 min, else returns the id |
+| `run_walkforward(path, ...)` / `job_status(id)` / `cancel(id)` | the Lab's walk-forward and job control |
+| `build_bars(symbol, tf, from, to)` | **proposal only**: the user confirms data jobs in the chat |
+
+Not exposed: deleting files, the terminal, settings, data-source changes, anything outside the workspace.
+
+## 5. The agent process (Claude Code on the user's plan)
+
+Per user message, the chat manager runs (as the workspace user, in the container):
+
+```
+claude -p --model <haiku|sonnet|opus> --tools "" --strict-mcp-config --mcp-config <studio /mcp + token>
+       --allowedTools "mcp__studio__*" --permission-mode dontAsk --system-prompt <studio prompt>
+       --output-format stream-json --verbose --include-partial-messages
+       (--session-id <new uuid> | --resume <uuid>)
+```
+
+- **System prompt** (ours, short): role, "use only studio tools", "check before proposing", "tune on train, never
+  claim results from test", "be brief", plus the open file's path and run id. Replacing the CLI's default prompt cuts the
+  fixed cost per call.
+- **Models**: Haiku by default; the message box has **Think harder** (Sonnet for that message) and, in settings, Opus.
+- **Limits enforced by the studio** (the CLI has no turn limit): at most 25 tool calls and 5 minutes per message, one
+  message in flight per workspace; Stop kills the process group (the runner's existing mechanism) and any runs it started.
+- **Streaming**: stream-json events become chat items: text deltas, tool calls (collapsed "ran backtest · 3.2 s"), tool
+  results feeding tables/proposals, and the final `result` (turns, tokens, API-equivalent cost).
+- **Usage shown per message**: tokens and "counts toward your Claude plan" (the API-equivalent figure in a tooltip).
+
+## 6. Keeping it honest: train and test
+
+"Tweak until the results look good" finds rules that fit the past by chance. So experiments split the window:
+- The window is divided into **train** (first 75%, default) and **test** (last 25%, adjustable).
+- `run_experiment`, `sweep` and the analysis tools on experiment runs give the **model only train numbers**; the chat table
+  shows the user both columns. The model tunes on train; the user judges on test.
+- When a variant's train result improves but its test result gets worse than the base, the table flags it
+  ("better on train, worse on test: likely over-fitted").
+- Walk-forward is one tool call away for a stricter check, and the prompt tells the model to suggest it before adoption.
+
+## 7. The Chat tab
+
+- **Dock tab "Chat"** next to Pipeline | Problems | Terminal. It follows the pane rules shipped in 0.1.3 (opening it
+  un-maximizes what hides it).
+- **Header**: conversation title (per strategy file by default), New conversation, model (Haiku / Think harder), plan status.
+- **Messages**: markdown text; tool calls as compact steps you can expand (arguments, result); **experiment tables** with
+  Adopt; **proposal diffs** with Apply / Reject; run links that open the run on the chart.
+- **Context chips** above the box: the open file and the run on screen, attached automatically; removable.
+- **Stop** while it works (same place and look as the run Stop).
+- **First use**: if Claude Code is not signed in (`claude auth status`), a card explains the one-time sign-in and shows
+  the command to run inside the container; the studio never asks for or stores the token.
+
+## 8. Sign-in, terms, and what the studio must never do
+
+From Anthropic's legal and compliance page (checked 2026-09-29): the terms do not prevent "an end user from signing in
+to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude
+Code"; they forbid routing Pro/Max credentials "on behalf of their users" and require that developers "may not collect,
+store, or intermediate Claude.ai credentials or session tokens - sign-in to a Claude account must complete through
+Anthropic's own flow"; and plan limits "assume ordinary, individual usage".
+
+So:
+- The image ships the **unmodified** Claude Code binary (pinned version, installed as published).
+- The user signs in once with `docker exec -it -u 1000 qkt-backtester claude auth login` (Anthropic's flow). Credentials
+  live in Claude Code's own config directory on a separate volume (`/home/studio/.claude`), not in the workspace; the
+  studio never reads, copies or proxies them. `/mcp` has its own token, unrelated to Claude credentials.
+- One person's studio, one person's plan: the chat is not offered to other users of a shared studio unless each signs in
+  with their own account (multi-user is out of scope).
+- **No background agent loops**: the assistant only runs when the user sends a message.
+
+## 9. Other backends (later)
+
+- **Anthropic API key** (same binary, `ANTHROPIC_API_KEY` in Claude Code's environment, set by the user): pay per token,
+  Haiku ~$1/$5 per million in/out; useful when the plan's limit is reached.
+- **Cheapest API models** (Gemini Flash-Lite, gpt-5-nano, DeepSeek Flash: fractions of a cent per message) through a
+  small in-server loop (Vercel AI SDK + MCP client) against the same `/mcp`. Phase 3, only if needed.
+- Gemini CLI's free Google login is no longer available (withdrawn 2026-06) and its terms forbid third-party use of its
+  login; Codex with ChatGPT Plus is permitted and would fit the same process interface if the user adds it.
+
+## 10. Failure handling
+
+| Situation | Behaviour |
+|---|---|
+| Claude Code missing or signed out | setup card (7); chat disabled with the reason |
+| Plan limit reached / rate limited | the CLI's message shown as-is, with "try later" and the API-key option |
+| Tool error | returned to the model as a tool error with the studio's message (it can correct and retry) |
+| DSL does not parse | not saved; the model gets the exact errors from `qkt parse` |
+| A run the model started fails | the failure (normalized error, e.g. the bracket-below-zero explanation) goes back to the model and shows in the chat |
+| Limits exceeded (25 calls / 5 min) | process stopped; message ends with "stopped at the limit"; partial results kept |
+| The user edits the file while the chat works | proposals built on the old text are marked stale; variants are copies, unaffected |
+| Studio restart mid-message | the message is marked interrupted; the conversation resumes from Claude Code's session |
+
+## 11. Testing
+
+- **Digests (core)**: pure functions on recorded roundtrips/bars fixtures, including the real "no take-profit" run.
+- **MCP tools (server)**: each tool through the real MCP client (SDK) against a scratch workspace with real qkt: jail,
+  write rules (no existing-file writes), check-before-save, train/test separation (the model-facing result has no test
+  numbers), compact output sizes.
+- **Chat manager**: a fake `claude` binary that replays recorded stream-json (including tool calls, errors, limits) to
+  test streaming, Stop, limits, resume, usage accounting, without spending tokens.
+- **Browser e2e**: the Chat tab with the fake binary: send, see steps, a table, Adopt -> proposal -> Apply -> file
+  changed and the run re-done; a proposal going stale.
+- **Live check (manual, opt-in)**: the two section-2 tasks against real Haiku, recorded with tokens and pass/fail, before
+  each release that changes tools or prompt.
+
+## 12. Phases
+
+1. **MCP server + digests + experiments backend** (sections 4, 6). Useful immediately from Claude Code on the laptop.
+2. **Chat tab + agent process** (sections 5, 7, 8, 10) in the image, with the sign-in card.
+3. **Other backends** (section 9) if the plan's limits or cost make it worthwhile.
+
+## 13. Open questions
+
+- Train/test split default (75/25) and whether the user wants a fixed test period instead (e.g. always the last 3 months).
+- Conversation scope: one per strategy file (default) or free-standing conversations as well.
+- Whether Opus is offered in the model menu (heavy on the plan's allowance) or Sonnet is the ceiling.
