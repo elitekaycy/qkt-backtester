@@ -81,13 +81,20 @@ export function normalizeError(stderr: string, exitCode: number | null): RunErro
     return { kind: "bad_config_yaml", message: `Config is not valid YAML${detail ? `: ${detail}` : ""}`, line: pos ? +pos[1]! : undefined, col: pos ? +pos[2]! : undefined };
   }
 
-  const cov = /incomplete (?:built bars|data) for ([^\n:]+?)(?::| \(|\s)/.exec(text);
-  const covLine = /(\d+)\/(\d+) trading days/.exec(text);
+  // "incomplete built bars for BACKTEST:NZDUSD: 0/26 trading days; missing ..." (bars) or "incomplete data for EURUSD:" (ticks);
+  // the coverage count is the one for THAT symbol: qkt prints a coverage line per symbol, and the others may be complete
+  const cov = /incomplete (?:built bars|data) for ([A-Za-z0-9_.\-]+(?::[A-Za-z0-9_.\-]+)?)/.exec(text);
   if (/IncompleteDataException|incomplete (built bars|data) for/.test(text)) {
     const hint = parseBuildBarsHint(text);
-    const covered = covLine ? +covLine[1]! : null;
+    const full = cov?.[1], bare = full?.split(":").pop();
+    const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const covLine = full ? (new RegExp(`${esc(full)}: (\\d+)/(\\d+) trading days`).exec(text) ?? new RegExp(`coverage (?:\\S+:)?${esc(bare!)} (\\d+)/(\\d+) trading days`).exec(text)) : null;
+    const covered = covLine ? +covLine[1]! : null, total = covLine ? +covLine[2]! : null;
     const kind = covered === 0 ? "missing_data" : "incomplete_data";
-    return { kind, message: `${kind === "missing_data" ? "No data" : "Incomplete data"}${cov ? ` for ${cov[1]!.trim()}` : ""}${hint ? `. Fix: ${hint}` : ""}` };
+    const tf = hint ? /--tf (\S+)/.exec(hint)?.[1] : undefined;
+    const what = bare ? ` for ${bare}${tf ? ` ${tf} bars` : ""}` : "";
+    const count = covLine ? ` (${covered} of ${total} trading days in the window have data)` : "";
+    return { kind, message: `${kind === "missing_data" ? "No data" : "Incomplete data"}${what}${count}${hint ? `. Fix: ${hint}` : ""}` };
   }
   const nomkt = /no market data for (\S+)/.exec(text);
   if (nomkt) return { kind: "missing_data", message: `No market data for ${nomkt[1]} in the requested range` };

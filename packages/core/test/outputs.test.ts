@@ -105,3 +105,22 @@ describe("extractJsonDocs", () => {
     expect(extractJsonDocs('{"a": [1, 2')).toEqual([]);
   });
 });
+
+describe("incomplete data names the symbol that is short, with its own coverage", () => {
+  it("a second symbol with no bars: the first symbol's full coverage does not hide it, and the broker is not the name", () => {
+    const text = [
+      "qkt: bar coverage BACKTEST:XAUUSD 26/26 trading days (15m)",
+      "qkt: bar coverage BACKTEST:NZDUSD 0/26 trading days (30m)",
+      "Exception in thread \"main\" com.qkt.backtest.IncompleteDataException: --bars: incomplete built bars for BACKTEST:NZDUSD: 0/26 trading days; missing 2026-08-11,2026-08-12. Run: qkt data build-bars NZDUSD --tf 30m --from 2026-08-11 --to 2026-09-10",
+      "  re-run with --allow-incomplete to proceed anyway",
+    ].join("\n");
+    expect(normalizeError(text)).toMatchObject({
+      kind: "missing_data",
+      message: "No data for NZDUSD 30m bars (0 of 26 trading days in the window have data). Fix: qkt data build-bars NZDUSD --tf 30m --from 2026-08-11 --to 2026-09-10",
+    });
+  });
+  it("ticks: the tick coverage line of that symbol", () => {
+    const text = "qkt: tick coverage EURUSD 7/9 trading days\nqkt: error: incomplete data for EURUSD:\n  2026-09-07  incomplete (empty hours 19,20,21)\n  re-run with --allow-incomplete to proceed anyway";
+    expect(normalizeError(text)).toMatchObject({ kind: "incomplete_data", message: expect.stringMatching(/^Incomplete data for EURUSD \(7 of 9 trading days/) });
+  });
+});

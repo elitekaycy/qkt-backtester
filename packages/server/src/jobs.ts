@@ -9,6 +9,7 @@ import { resolveInJail } from "./jail.js";
 import { downsampleEquity } from "./postprocess.js";
 import { cleanupPartialFiles, validBarFile, validGzip } from "./cleanup.js";
 import { invalidateScan } from "./data-scan.js";
+import { ownFolder } from "./no-data.js";
 import { spawnGroup, type ProcHandle } from "./proc.js";
 import { Runner, RunRequestError } from "./runner.js";
 
@@ -126,6 +127,17 @@ export class Jobs {
     invalidateScan();
   }
 
+  /**
+   * Run a job that writes into `dir`. A folder that is a link into another store (a read-only archive mounted beside this
+   * one) first becomes a folder of links to the same files, so qkt writes here and never into the archive.
+   */
+  private runWritable(job: Job, dir: string, args: string[]): void {
+    void ownFolder(dir).then(
+      () => { if (this.cancelled.has(job.id)) return this.finish(job, "cancelled", { kind: "cancelled", message: "Stopped before it started." }); this.runProcess(job, args); },
+      (e: NodeJS.ErrnoException) => this.finish(job, "failed", { kind: "internal", message: e.code === "EACCES" || e.code === "EROFS" || e.code === "EPERM" ? `The data source is read-only here (${e.code}): ${dir} cannot be written. Mount it writable to build or fetch into it.` : e.message }),
+    );
+  }
+
   private runProcess(job: Job, args: string[], after?: (code: number | null, stderr: string) => Promise<void>): void {
     job.command = `${this.cfg.qktBin} ${args.map(quote).join(" ")}`;
     const proc = spawnGroup(this.cfg.qktBin, args, { cwd: this.cfg.workspace, env: this.env(), timeoutMs: 60 * 60_000, onLine: (l) => this.pushLog(job, l) });
@@ -143,7 +155,7 @@ export class Jobs {
     this.validateRange(req);
     const job = this.create("build-bars");
     this.meta.set(job.id, { sinceMs: Date.now(), dir: path.join(this.cfg.dataRoot, "bars", "BACKTEST", req.symbol, req.tf), pattern: /^\d{4}-\d{2}-\d{2}\.bin$/, validate: validBarFile });
-    this.runProcess(job, ["data", "build-bars", req.symbol, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
+    this.runWritable(job, path.join(this.cfg.dataRoot, "bars", "BACKTEST", req.symbol, req.tf), ["data", "build-bars", req.symbol, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
     return job;
   }
 
@@ -152,7 +164,7 @@ export class Jobs {
     need(req.broker && NAME.test(req.broker), "broker must be a plain identifier");
     const job = this.create("fetch");
     this.meta.set(job.id, { sinceMs: Date.now(), dir: path.join(this.cfg.dataRoot, "symbols", req.symbol), pattern: /\.csv\.gz$/, validate: validGzip });
-    this.runProcess(job, ["fetch", `${req.broker}:${req.symbol}`, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
+    this.runWritable(job, path.join(this.cfg.dataRoot, "symbols", req.symbol), ["fetch", `${req.broker}:${req.symbol}`, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
     return job;
   }
 
