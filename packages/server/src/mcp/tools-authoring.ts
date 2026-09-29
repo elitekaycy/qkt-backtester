@@ -26,7 +26,7 @@ export function registerAuthoringTools(s: McpServer, ctx: ToolCtx): void {
       await fs.mkdir(path.dirname(abs), { recursive: true });
       try { await fs.writeFile(abs, source.endsWith("\n") ? source : `${source}\n`, { flag: "wx" }); }
       catch { return fail(`${rel} already exists; pick another name, or change it with propose_strategy_edit / try_change`); }
-      ctx.events.emit({ t: "open", path: rel });
+      ctx.events.emit({ t: "open_file", path: rel });
       return ok({ path: rel, warnings: brief(r.diagnostics) });
     }));
 

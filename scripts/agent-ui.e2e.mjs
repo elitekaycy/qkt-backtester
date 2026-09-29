@@ -2,9 +2,9 @@
 // Needs a running studio (BASE) with the demo data / a sample strategy (STRATEGY, default strategies/ema_cross.qkt).
 // Adopt (and auto-save) writes the bracket into STRATEGY: run it once per workspace, or remove that BRACKET before a rerun.
 import { createRequire } from "node:module";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-const require = createRequire(new URL("../packages/web/package.json", import.meta.url));
+const require = createRequire(new URL("../packages/web/package.json", import.meta.url));   // both deps are devDependencies of the web package
+const { Client } = await import(require.resolve("@modelcontextprotocol/sdk/client/index.js"));
+const { StreamableHTTPClientTransport } = await import(require.resolve("@modelcontextprotocol/sdk/client/streamableHttp.js"));
 const puppeteer = require("puppeteer-core");
 const BASE = (process.env.BASE ?? "http://127.0.0.1:8080/").replace(/\/?$/, "/");
 const STRAT = process.env.STRATEGY ?? "strategies/ema_cross.qkt";

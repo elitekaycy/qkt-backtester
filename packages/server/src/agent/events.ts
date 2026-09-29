@@ -3,7 +3,7 @@ export type StudioEvent =
   | { t: "variant"; variantId: string; runId: string }
   | { t: "proposal"; id: string }
   | { t: "split" }
-  | { t: "open"; path: string }
+  | { t: "open_file"; path: string }
   | { t: "run"; runId: string };
 /** Effects of tool calls the UI must show (a variant to display, a proposal to review): one SSE stream per browser tab. */
 export class EventBus {

@@ -80,8 +80,8 @@ export const useAgent = create<{
     });
     src.addEventListener("proposal", () => void get().refresh());
     src.addEventListener("split", () => void get().refresh());
-    // "open" is also the EventSource's own connection event, which carries no data: only the studio's message has a path
-    src.addEventListener("open", (m) => {
+    // not "open": that is the EventSource's own connection event; the data guard stays as a second line of defence
+    src.addEventListener("open_file", (m) => {
       const data = (m as MessageEvent).data as unknown;
       if (typeof data === "string") void useStore.getState().openFile((JSON.parse(data) as { path: string }).path);
     });

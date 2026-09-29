@@ -8,9 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.31.0
-        version: 1.31.0(zod@3.25.76)
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.4
@@ -109,6 +106,9 @@ importers:
         specifier: ^5.0.8
         version: 5.0.15(@types/react@19.3.0)(react@19.3.0)
     devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.31.0
+        version: 1.31.0(zod@3.25.76)
       '@types/react':
         specifier: ^19.1.0
         version: 19.3.0
