@@ -88,7 +88,7 @@ Design rules for every tool:
 ### 4.1 Context
 | Tool | Returns |
 |---|---|
-| `get_context` | the open file (path, text size, cursor line, selection), the run on screen (id, strategy, window, tier, status, headline numbers), the Run settings window, workspace files summary |
+| `get_context` | the full view behind the reference sent with each message: the open file (path, size, cursor line, selection), the run on screen (id, strategy, window, tier, status, headline numbers), visible chart range, selected trade, variant showing, split, Run settings window, workspace files summary |
 | `list_files(dir?)` / `read_file(path, from_line?, to_line?)` | workspace files (strategies, config, instruments, notes); jailed to the workspace |
 | `list_runs(strategy?, limit)` / `get_run(id)` | past runs with their window, tier, params, headline numbers, error if failed |
 
@@ -206,14 +206,24 @@ claude -p --model <haiku|sonnet> --tools "" --strict-mcp-config --mcp-config <st
 
 - **Dock tab "Chat"** next to Pipeline | Problems | Terminal. It follows the pane rules shipped in 0.1.3 (opening it
   un-maximizes what hides it).
-- **Header**: conversation title (per strategy file by default), New conversation, model (Haiku / Think harder), the
-  **split chip**, plan status.
+- **One chat, context inferred.** A single conversation panel (not one per file). Every message automatically carries a
+  small **view reference**: the open file, the run on screen, the visible date range, the selected trade, the variant
+  showing, the split - references, not contents; the model fetches what it needs through the tools. So "stop 2 %",
+  "why did this trade lose" and "do the same in the ema strategy" work without naming anything: files and runs are
+  resolved by name through `list_files`/`list_runs`, and when a name is ambiguous the model asks one short question.
+- **Optional @ mentions** for precision: typing `@` opens a picker of strategies (`@ema`), `@config`, `@instruments`,
+  `@chart` (run, visible range, selected trade, variant), `@trade#12`, `@run`, `@split`, symbols (`@XAUUSD`). A mention
+  adds that reference to the message; nothing requires it.
+- **Header**: New chat, model (Haiku / Think harder), the **split chip**, plan status. Past chats are kept and listed;
+  when a chat grows long a hint offers a fresh one (the view reference carries over), since every message re-reads the
+  history.
 - **The variant view**: after `try_change`, the chart, KPIs and journal show the variant's run with a bar above the chart:
   "Variant: stop 2 % · net +190 vs -412 (test part +40 vs -150) · Adopt · Discard · Back to original". The original
   run stays one click away; several variants appear as a small switcher.
 - **Messages**: markdown text; tool calls as compact steps you can expand (arguments, result); **variant cards and
   comparison tables** with Adopt; **proposal diffs** (config, instruments, direct edits) with Apply / Reject; run links that open the run on the chart.
-- **Context chips** above the box: the open file and the run on screen, attached automatically; removable.
+- **Context chips** above the box show the view reference that will be sent (open file, run, selected trade...); each
+  can be removed for that message.
 - **Stop** while it works (same place and look as the run Stop).
 - **First use**: if Claude Code is not signed in (`claude auth status`), a card explains the one-time sign-in and shows
   the command to run inside the container; the studio never asks for or stores the token.
@@ -278,4 +288,6 @@ So:
 
 ## 13. Open questions
 
-- Conversation scope: one per strategy file (default) or free-standing conversations as well.
+None at the time of writing; decisions so far: Claude Pro/Max through the Claude Code binary; Haiku default, Sonnet
+ceiling; changes tried on copies with Adopt; the split visible and changeable from the chat; one chat with inferred
+context and optional @ mentions.
