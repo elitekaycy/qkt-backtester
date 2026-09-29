@@ -93,12 +93,12 @@ function Shell() {
       }
       if (e.key === "F6" && !mod && !e.altKey) { e.preventDefault(); cycleRegion(e.shiftKey ? -1 : 1); return; }
       if (mod && e.key === "k") { e.preventDefault(); u.set({ palette: !u.palette }); }
-      else if (mod && e.key === "j") { e.preventDefault(); u.set({ journalOpen: !u.journalOpen }); }
+      else if (mod && e.key === "j") { e.preventDefault(); if (u.journalOpen) u.set({ journalOpen: false }); else u.openJournal(); }
       else if (mod && e.key === "b") { e.preventDefault(); u.toggleCollapse("sidebar"); }
       else if (mod && e.key === ",") { e.preventDefault(); u.set({ runSettings: !u.runSettings }); }
       else if (mod && e.key === ".") { e.preventDefault(); void s.killAll(); }
       else if (mod && e.key === "`") { e.preventDefault(); u.toggleCollapse("dock"); }
-      else if (mod && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); u.set({ section: (["files", "data", "runs"] as const)[Number(e.key) - 1]! }); }
+      else if (mod && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); u.showSection((["files", "data", "runs"] as const)[Number(e.key) - 1]!); }
       else if (mod && e.key === "Enter" && !e.defaultPrevented) { e.preventDefault(); if (!s.running) void s.startRun(); }
       else if (e.key === "?" && !typing && !mod) { e.preventDefault(); u.set({ shortcuts: true }); }
     };

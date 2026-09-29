@@ -39,7 +39,7 @@ export function RunSettings() {
       try { const { jobId } = await api.buildBars({ symbol, tf, from: t.first, to: addDays(t.last, 1) }); trackJob(jobId, `Build ${symbol} ${tf} bars`); }
       catch (e) { useStore.getState().toast("error", (e as Error).message); }
     }
-    ui.set({ runSettings: false, section: "data" });
+    ui.set({ runSettings: false }); ui.showSection("data");
   }
 
   return (
@@ -67,7 +67,7 @@ export function RunSettings() {
               {mode.blocked.map((b) => <div key={b.stream} className="ink2">{b.stream}: {b.reason}</div>)}
               <div className="row">
                 {mode.blocked.some((b) => b.fix === "build-bars") && <button className="btn sm" onClick={() => void buildMissing()}><Hammer size={14} />Build missing bars</button>}
-                <button className="btn sm ghost" onClick={() => ui.set({ runSettings: false, section: "data" })}>Open Data</button>
+                <button className="btn sm ghost" onClick={() => { ui.set({ runSettings: false }); ui.showSection("data"); }}>Open Data</button>
               </div>
             </div>
           )
@@ -78,7 +78,7 @@ export function RunSettings() {
             <div className="ink2">The run may be refused or hit missing days. The end date is exclusive.</div>
             <div className="row" style={{ flexWrap: "wrap" }}>
               <button className="btn sm" onClick={() => setCfg({ from: mode!.longest!.from, to: mode!.longest!.to })}>Use the longest complete window</button>
-              <button className="btn sm ghost" onClick={() => { ui.set({ runSettings: false, section: "data" }); }}>Open Data</button>
+              <button className="btn sm ghost" onClick={() => { ui.set({ runSettings: false }); ui.showSection("data"); }}>Open Data</button>
             </div>
           </div>
         )}

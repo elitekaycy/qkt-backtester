@@ -27,6 +27,8 @@ const isStrategy = (p: string | null | undefined): p is string => !!p && p.endsW
 const CONFIG = "qkt.config.yaml";
 
 let closeEvents: (() => void) | null = null;
+/** A run being submitted: the server has not answered with its id yet. Stop sets `stop`, and the run is cancelled the moment the id arrives. */
+let launching: { stop: boolean } | null = null;
 let autoTimer: ReturnType<typeof setTimeout> | null = null;
 let toastSeq = 1;
 
@@ -92,7 +94,8 @@ interface State {
 
   refreshTree(path?: string): Promise<void>;
   toggleDir(path: string): Promise<void>;
-  openFile(path: string): Promise<void>;
+  /** Open a file in the editor and show the editor; `reveal` false when restoring tabs at start-up. */
+  openFile(path: string, reveal?: boolean): Promise<void>;
   closeFile(path: string): void;
   setActive(path: string): void;
   setContent(path: string, content: string): void;
@@ -156,8 +159,8 @@ export const useStore = create<State>((set, get) => ({
     const root = get().tree[""] ?? [];
     const strategies = get().tree["strategies"] ?? [];
     const first = strategies.find((e) => e.type === "file" && e.name.endsWith(".qkt")) ?? root.find((e) => e.name.endsWith(".qkt"));
-    if (root.some((e) => e.name === CONFIG)) await get().openFile(CONFIG);
-    if (first) await get().openFile(first.path);
+    if (root.some((e) => e.name === CONFIG)) await get().openFile(CONFIG, false);
+    if (first) await get().openFile(first.path, false);
     await get().refreshRuns();
     // a run still in progress on the server (the page was reloaded, or it was started in another tab): follow it again
     const live = get().runs.find((r) => ["queued", "checking", "running", "postprocessing"].includes(r.status));
@@ -192,7 +195,8 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({ expanded: { ...s.expanded, [path]: open } }));
     if (open) await get().refreshTree(path);
   },
-  async openFile(path) {
+  async openFile(path, reveal = true) {
+    if (reveal) useUi.getState().reveal("editor");
     const ex = get().openFiles.find((f) => f.path === path);
     if (ex) { get().setActive(path); return; }
     try {
@@ -335,6 +339,8 @@ export const useStore = create<State>((set, get) => ({
     const declared = new Map((f ? parseStrategyInfo(f.content).params : []).map((p) => [p.name, p.default]));
     const overrides = Object.fromEntries(Object.entries(cfg.paramsByStrategy[strategy] ?? {}).filter(([k, v]) => declared.has(k) && v !== "" && v !== declared.get(k)));
     closeEvents?.();
+    const me = { stop: false };
+    launching = me;
     set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null, announce: `Running ${strategy.split("/").pop()}…` }));
     try {
       const tier = opts.tier ?? cfg.tier;
@@ -342,8 +348,13 @@ export const useStore = create<State>((set, get) => ({
       const options: RunOptions = tier === "full" ? { ...common, broker, execution, slippage } : common;
       const clean = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined && v !== "")) as RunOptions;
       const { runId } = await api.submit({ strategy, from: cfg.from, to: cfg.to, tier, params: overrides, allowIncomplete: opts.allowIncomplete ?? cfg.allowIncomplete, force: opts.force, auto: opts.auto, options: clean });
+      if (launching === me) launching = null;
+      // Stop was pressed while the server was still accepting the run: cancel it now (a cached, finished run is left alone)
+      if (me.stop) { await api.cancel(runId, true).catch(() => undefined); await get().refreshRuns(); return; }
       get().attachRun(runId);
     } catch (e) {
+      if (launching === me) launching = null;
+      if (me.stop) return;
       set({ running: false, resultsStale: false, submitError: e instanceof ApiError && e.status === 400 ? e.message : null });
       get().toast("error", (e as Error).message);
     }
@@ -377,8 +388,15 @@ export const useStore = create<State>((set, get) => ({
     });
   },
   async stopRun() {
+    if (!get().running) return;
+    if (launching) {
+      launching.stop = true;
+      set({ running: false, run: null, progress: null, runId: get().results?.runId ?? null, resultsStale: false });
+      get().toast("ok", "Stopped. The run is cancelled as soon as the server accepts it, and its files are removed.");
+      return;
+    }
     const id = get().runId;
-    if (!id || !get().running) return;
+    if (!id) return;
     closeEvents?.();
     await api.cancel(id, true).catch(() => undefined);
     set({ running: false, run: null, progress: null, runId: get().results?.runId ?? null, resultsStale: false });
@@ -387,6 +405,7 @@ export const useStore = create<State>((set, get) => ({
   },
   async killAll() {
     closeEvents?.();
+    if (launching) launching.stop = true;
     try {
       const k = await api.kill();
       set((s) => ({ running: false, run: null, progress: null, resultsStale: false, runId: s.results?.runId ?? null, jobs: s.jobs.map((j) => (j.status === "running" ? { ...j, status: "cancelled" as const } : j)) }));
@@ -501,6 +520,7 @@ export const useStore = create<State>((set, get) => ({
     if (!t) { set({ selectedTrip: null }); return; }
     const end = t.exitTs ?? t.entryTs;
     const pad = Math.max((end - t.entryTs) * 1.5, 6 * 3_600_000);
+    if (focus) useUi.getState().reveal("chart");
     set((s) => ({ selectedTrip: t, focus: focus ? { from: t.entryTs - pad, to: end + pad, nonce: (s.focus?.nonce ?? 0) + 1 } : s.focus }));
   },
 

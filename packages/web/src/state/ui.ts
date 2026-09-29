@@ -23,6 +23,15 @@ interface Ui extends Persisted {
   resetPane(p: Pane): void;
   openJournal(section?: JournalSection): void;
   toggleSection(s: Section): void;
+  /**
+   * Make a pane visible because the user asked for something in it: leaves a maximized pane that hides it, un-collapses it,
+   * and closes the journal drawer when it covers it. Only for user actions: a run opening the dock must not undo a layout.
+   */
+  reveal(p: Pane): void;
+  /** Show a sidebar section (a rail icon, a shortcut, "Open Data"), leaving whatever maximized pane hides the sidebar. */
+  showSection(s: Section): void;
+  /** Open a dock tab the user asked for. */
+  showDock(tab: DockTab): void;
   reset(): void;
 }
 
@@ -61,8 +70,26 @@ export const useUi = create<Ui>((set, get) => ({
     else if (p === "chart") u.set({ previewW: DEFAULTS.previewW, collapsed: { ...u.collapsed, chart: false }, maxed });
     else u.set({ previewW: DEFAULTS.previewW, dockH: DEFAULTS.dockH, collapsed: { editor: false, chart: false }, maxed });
   },
-  openJournal(section) { get().set({ journalOpen: true, ...(section ? { journalSection: section } : {}) }); },
-  toggleSection(s) { get().set({ section: get().section === s ? null : s }); },
+  // the journal is drawn over the workbench, which a maximized sidebar hides
+  openJournal(section) { get().set({ journalOpen: true, ...(get().maxed === "sidebar" ? { maxed: null } : {}), ...(section ? { journalSection: section } : {}) }); },
+  toggleSection(s) {
+    const u = get();
+    // with another pane maximized the sidebar is hidden: its icon brings it back instead of closing it
+    if (u.maxed && u.maxed !== "sidebar") u.set({ section: s, maxed: null });
+    else u.set({ section: u.section === s ? null : s, maxed: u.maxed === "sidebar" && u.section === s ? null : u.maxed });
+  },
+  reveal(p) {
+    const u = get();
+    const patch: Partial<Ui> = {};
+    if (u.maxed && u.maxed !== p) patch.maxed = null;
+    if ((p === "editor" || p === "chart") && u.collapsed[p]) patch.collapsed = { ...u.collapsed, [p]: false };
+    if (p === "dock" && !u.dockOpen) patch.dockOpen = true;
+    if (p !== "sidebar" && u.journalOpen) patch.journalOpen = false;
+    if (p === "sidebar" && !u.section) patch.section = "files";
+    if (Object.keys(patch).length) u.set(patch);
+  },
+  showSection(s) { const u = get(); u.set({ section: s, ...(u.maxed && u.maxed !== "sidebar" ? { maxed: null } : {}) }); },
+  showDock(tab) { get().reveal("dock"); get().set({ dockTab: tab }); },
   // "Reset layout" restores panes and sizes only: editor preferences (vim, auto-save, font size) are the user's, not layout
   reset() { const { vim, autosave, fontSize } = get(); get().set({ ...DEFAULTS, vim, autosave, fontSize, journalOpen: false, maxed: null }); },
 }));

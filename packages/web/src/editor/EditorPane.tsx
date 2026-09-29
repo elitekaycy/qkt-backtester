@@ -68,7 +68,7 @@ export function EditorPane() {
       // Monaco owns these chords while the editor has focus; forward them to the app so shortcuts work everywhere.
       const K = m.KeyCode, C = m.KeyMod.CtrlCmd, ui = () => useUi.getState();
       ed.addCommand(C | K.KeyK, () => ui().set({ palette: !ui().palette }));
-      ed.addCommand(C | K.KeyJ, () => ui().set({ journalOpen: !ui().journalOpen }));
+      ed.addCommand(C | K.KeyJ, () => { if (ui().journalOpen) ui().set({ journalOpen: false }); else ui().openJournal(); });
       ed.addCommand(C | K.KeyB, () => ui().set({ section: ui().section ? null : "files" }));
       ed.addCommand(C | K.Comma, () => ui().set({ runSettings: !ui().runSettings }));
       ed.addCommand(C | K.Period, () => void store.getState().killAll());
