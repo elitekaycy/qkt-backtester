@@ -5,6 +5,7 @@ import { DASH, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph, fmtWindow } from "../u
 import { ChartColumn, CircleCheck, TriangleAlert } from "../ui/icons.js";
 import { PaneControls } from "../ui/PaneControls.js";
 import { ChartsBody } from "./Charts.js";
+import { SplitChip } from "./SplitChip.js";
 import { VariantBar } from "./VariantBar.js";
 
 /** `d`: the change against the previous run of this strategy, with `better` saying whether it went the good way. */
@@ -48,6 +49,7 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
         {meta && <span className="muted hide-md nowrap" style={{ fontSize: "var(--fs-xs)" }} title={`Run window [${meta.from}, ${meta.to}) UTC`}>{fmtWindow(meta.from, meta.to)}</span>}
         {stale && <span className="badge warn">previous run</span>}
         <span className="grow" style={{ flex: 1 }} />
+        <SplitChip />
         <button className="btn sm" onClick={() => open()} disabled={!results}><ChartColumn size={14} />Journal</button>
         <PaneControls pane="chart" />
       </div>
