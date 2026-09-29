@@ -49,11 +49,14 @@ Lessons that shape the design: the model does well when **tools return decisive,
 ```
  browser  Chat tab ── HTTP + SSE ──► studio server (Node, in the container)
                                        │
-                                       ├── chat/     conversation manager
+                                       ├── chat/     (phase 2) conversation manager
                                        │     one `claude -p` process per message, resumed by session id;
                                        │     streams its JSON events to the browser; enforces limits; records usage
                                        │
-                                       ├── mcp/      studio MCP server at /mcp (streamable HTTP, token)
+                                       ├── agent/    what tools do on the user's behalf: events to the UI, view state,
+                                       │             proposals, variants (+ the REST routes the UI shows them with)
+                                       │
+                                       ├── mcp/      studio MCP server at /api/mcp: endpoint + thin tool adapters
                                        │     tools: context · knowledge · analysis · authoring · try/compare/split · runs
                                        │     every tool calls the studio's existing code (runner, file API, check,
                                        │     trip queries, bars) - no second code path

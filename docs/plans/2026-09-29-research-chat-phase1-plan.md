@@ -49,13 +49,19 @@ tab, Claude Code process, sign-in) gets its own plan after this lands.
 
 ## File Structure
 
+Layout rule: `server/src/mcp/` holds only the MCP endpoint and tool adapters; `server/src/agent/` holds what the tools do on
+the user's behalf (events, view state, proposals, variants) and the REST routes the UI uses to show it; phase 2 adds
+`server/src/chat/`. Things the studio would have without the AI stay at the `server/src/` root (`split.ts`, `run-data.ts`,
+`check.ts`); pure logic lives in `core/src/` (`dslops.ts`, `diagnose.ts`, `split.ts`).
+
+
 Created:
 - `packages/server/src/run-data.ts` — shared loaders for a run's derived files (trips with cache, summary, meta, run.json); used by run routes and tools.
 - `packages/server/src/check.ts` — `checkQktSource()`: qkt parse + lint of a source string (extracted from check-routes).
-- `packages/server/src/events.ts` — in-process event bus + `GET /api/events` (SSE) for tool effects the UI must show.
-- `packages/server/src/view-state.ts` — what the browser is looking at (`POST /api/view`), read by `get_context`.
-- `packages/server/src/proposals.ts` — proposals (file edits, config/instrument changes, data jobs) + `GET/POST /api/proposals...`.
-- `packages/server/src/variants.ts` — variant copies, their runs, and `GET/DELETE /api/variants...`.
+- `packages/server/src/agent/events.ts` — in-process event bus + `GET /api/events` (SSE) for tool effects the UI must show.
+- `packages/server/src/agent/view-state.ts` — what the browser is looking at (`POST /api/view`), read by `get_context`.
+- `packages/server/src/agent/proposals.ts` — proposals (file edits, config/instrument changes, data jobs) + `GET/POST /api/proposals...`.
+- `packages/server/src/agent/variants.ts` — variant copies, their runs, and `GET/DELETE /api/variants...`.
 - `packages/server/src/split.ts` — split setting + `GET/PUT /api/split` + `GET /api/runs/:id/parts`.
 - `packages/server/src/mcp/index.ts` — `/api/mcp` route and the per-request `McpServer`.
 - `packages/server/src/mcp/tools-context.ts`, `tools-knowledge.ts`, `tools-analysis.ts`, `tools-authoring.ts`, `tools-try.ts`, `tools-runs.ts` — tool groups, each `register(server, ctx)`.
@@ -66,7 +72,7 @@ Created:
 - `packages/core/src/split.ts` — split cut time and per-part metrics.
 - `packages/web/src/state/agent.ts` — Zustand slice: variants, proposals, split, event stream.
 - `packages/web/src/preview/VariantBar.tsx`, `packages/web/src/shell/Proposals.tsx`, `packages/web/src/preview/SplitChip.tsx`.
-- Tests: `packages/core/test/{diagnose,dslops,split}.test.ts`, `packages/server/test/mcp.test.ts`, `scripts/mcp-live.mjs` (opt-in live check), `scripts/agent-ui.e2e.mjs`.
+- Tests: `packages/core/test/{diagnose,dslops,split}.test.ts`, `packages/server/test/mcp/tools.test.ts` (the tools end to end, through a real MCP client), `scripts/mcp-live.mjs` (opt-in live check), `scripts/agent-ui.e2e.mjs`.
 
 Modified: `packages/server/src/{main.ts,run-routes.ts,check-routes.ts,settings.ts}`, `packages/server/package.json`,
 `packages/core/src/index.ts`, `packages/web/src/{state/store.ts,preview/PreviewPane.tsx,preview/Charts.tsx,shell/App.tsx}`,
@@ -249,9 +255,9 @@ git commit -m "refactor(server): shared run data loader and source check"
 ### Task 2: The MCP endpoint, the event stream, view state and context tools
 
 **Files:**
-- Create: `packages/server/src/mcp/index.ts`, `packages/server/src/mcp/util.ts`, `packages/server/src/mcp/tools-context.ts`, `packages/server/src/events.ts`, `packages/server/src/view-state.ts`
+- Create: `packages/server/src/mcp/index.ts`, `packages/server/src/mcp/util.ts`, `packages/server/src/mcp/tools-context.ts`, `packages/server/src/agent/events.ts`, `packages/server/src/agent/view-state.ts`
 - Modify: `packages/server/package.json` (dependencies), `packages/server/src/main.ts`
-- Test: `packages/server/test/mcp.test.ts`
+- Test: `packages/server/test/mcp/tools.test.ts`
 
 **Interfaces:**
 - Consumes: `RunData` (Task 1), `Runner.list(strategy?, limit?)`, `resolveInJail`.
@@ -270,14 +276,14 @@ Expected: both in `packages/server/package.json` dependencies.
 - [ ] **Step 2: Write the failing test** (an MCP client against the real app on a random port)
 
 ```ts
-// packages/server/test/mcp.test.ts
+// packages/server/test/mcp/tools.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import os from "node:os"; import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createStudio } from "../src/main.js";
-import { testConfig, realData, haveData } from "./helpers.js";
+import { createStudio } from "../../src/main.js";
+import { testConfig, realData, haveData } from "../helpers.js";
 
 export async function mcpClient(base: string, token?: string) {
   const c = new Client({ name: "test", version: "0" });
@@ -322,13 +328,13 @@ describe("/api/mcp", () => {
 
 - [ ] **Step 3: Run it to see it fail**
 
-Run: `cd packages/server && npx vitest run test/mcp.test.ts`
+Run: `cd packages/server && npx vitest run test/mcp/tools.test.ts`
 Expected: FAIL (`/api/mcp` 404 or module not found).
 
 - [ ] **Step 4: Implement the event bus, view state and util**
 
 ```ts
-// packages/server/src/events.ts
+// packages/server/src/agent/events.ts
 import type { FastifyInstance } from "fastify";
 export type StudioEvent =
   | { t: "variant"; variantId: string; runId: string }
@@ -356,7 +362,7 @@ export function registerEvents(app: FastifyInstance, bus: EventBus): void {
 ```
 
 ```ts
-// packages/server/src/view-state.ts
+// packages/server/src/agent/view-state.ts
 import type { FastifyInstance } from "fastify";
 export interface View {
   openFile: string | null; cursorLine: number | null; selection: string | null; runId: string | null;
@@ -386,8 +392,8 @@ import type { ServerConfig } from "../config.js";
 import type { Runner } from "../runner.js";
 import type { Jobs } from "../jobs.js";
 import type { RunData } from "../run-data.js";
-import type { EventBus } from "../events.js";
-import type { ViewState } from "../view-state.js";
+import type { EventBus } from "../agent/events.js";
+import type { ViewState } from "../agent/view-state.js";
 
 export interface ToolCtx { cfg: ServerConfig; runner: Runner; jobs: Jobs; data: RunData; events: EventBus; view: ViewState }
 export const MAX_CHARS = 8000;
@@ -505,13 +511,13 @@ In `main.ts`, after building `data`: `const events = new EventBus(); const view 
 
 - [ ] **Step 7: Run the test**
 
-Run: `cd packages/server && npx vitest run test/mcp.test.ts`
+Run: `cd packages/server && npx vitest run test/mcp/tools.test.ts`
 Expected: PASS (both tests).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/server/package.json pnpm-lock.yaml packages/server/src/{mcp,events.ts,view-state.ts,main.ts} packages/server/test/mcp.test.ts
+git add packages/server/package.json pnpm-lock.yaml packages/server/src/{mcp,agent,main.ts} packages/server/test/mcp/tools.test.ts
 git commit -m "feat(server): MCP endpoint at /api/mcp with context tools, view state and an event stream"
 ```
 
@@ -523,7 +529,7 @@ git commit -m "feat(server): MCP endpoint at /api/mcp with context tools, view s
 - Create: `packages/server/assets/dsl/cheatsheet.md`, `scripts/sync-dsl-docs.mjs`, `packages/server/src/mcp/tools-knowledge.ts`
 - Create (by running the sync script): `packages/server/assets/dsl/{index,strategy-block,conditions,expressions,indicators,actions,bracket,sizing,now,series,schedule}.md`, `packages/server/assets/dsl/examples/*.qkt`
 - Modify: `packages/server/src/mcp/index.ts` (register), `docker/Dockerfile` (copy assets)
-- Test: `packages/server/test/mcp.test.ts` (add), `packages/server/test/cheatsheet.test.ts`
+- Test: `packages/server/test/mcp/tools.test.ts` (add), `packages/server/test/cheatsheet.test.ts`
 
 **Interfaces:**
 - Consumes: `ToolCtx`, `ok/fail/guard` (Task 2), `completeConfig` and `instrumentsTemplate` (`scaffold.ts`), `scanSymbolIn` (`data-scan.ts`), `listStrategies`.
@@ -632,7 +638,7 @@ Run: `cd packages/server && npx vitest run test/cheatsheet.test.ts` — Expected
 - [ ] **Step 4: Add the failing MCP test**
 
 ```ts
-// append to packages/server/test/mcp.test.ts
+// append to packages/server/test/mcp/tools.test.ts
 describe("knowledge tools", () => {
   it("serve the cheat sheet, a page, examples and the config reference", async () => {
     const c = await mcpClient(base, "t0k");
@@ -649,7 +655,7 @@ describe("knowledge tools", () => {
 });
 ```
 
-Run: `npx vitest run test/mcp.test.ts` — Expected: FAIL (`Tool dsl_reference not found`).
+Run: `npx vitest run test/mcp/tools.test.ts` — Expected: FAIL (`Tool dsl_reference not found`).
 
 - [ ] **Step 5: Implement `tools-knowledge.ts`**
 
@@ -732,7 +738,7 @@ Add `registerKnowledgeTools(s, ctx);` to `buildMcp` in `mcp/index.ts`. In `docke
 
 - [ ] **Step 6: Run the tests**
 
-Run: `cd packages/server && npx vitest run test/mcp.test.ts test/cheatsheet.test.ts` — Expected: PASS.
+Run: `cd packages/server && npx vitest run test/mcp/tools.test.ts test/cheatsheet.test.ts` — Expected: PASS.
 
 - [ ] **Step 7: Commit**
 
@@ -927,7 +933,7 @@ git commit -m "feat(core): exit diagnostics - excursions and what-if brackets on
 **Files:**
 - Create: `packages/server/src/mcp/tools-analysis.ts`
 - Modify: `packages/server/src/run-routes.ts` (move `parseTripQuery` to `run-data.ts` and re-export), `packages/server/src/run-data.ts` (add `barsFor`), `packages/server/src/mcp/index.ts`
-- Test: `packages/server/test/mcp.test.ts` (add, using a real run on real data)
+- Test: `packages/server/test/mcp/tools.test.ts` (add, using a real run on real data)
 
 **Interfaces:**
 - Consumes: `RunData` (Task 1), `diagnoseExits` (Task 4), `analyze`, `queryTrips`, `readBars` (core).
@@ -939,7 +945,7 @@ git commit -m "feat(core): exit diagnostics - excursions and what-if brackets on
 - [ ] **Step 1: Write the failing test** (runs a real bars backtest on the repo's real data fixture, like `api.test.ts` does)
 
 ```ts
-// append to packages/server/test/mcp.test.ts
+// append to packages/server/test/mcp/tools.test.ts
 describe.skipIf(!haveData)("analysis tools", () => {
   it("summarise, diagnose and list the trades of a real run", async () => {
     const s2 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
@@ -965,7 +971,7 @@ describe.skipIf(!haveData)("analysis tools", () => {
 });
 ```
 
-Run: `npx vitest run test/mcp.test.ts -t "analysis"` — Expected: FAIL (`Tool run_summary not found`).
+Run: `npx vitest run test/mcp/tools.test.ts -t "analysis"` — Expected: FAIL (`Tool run_summary not found`).
 
 - [ ] **Step 2: Add `barsFor` and move `parseTripQuery`** — cut `parseTripQuery` from `run-routes.ts` into `run-data.ts` (export it; `run-routes.ts` imports it from there). Then:
 
@@ -1079,7 +1085,7 @@ export function registerAnalysisTools(s: McpServer, ctx: ToolCtx): void {
 
 Register it in `buildMcp`: `registerAnalysisTools(s, ctx);`.
 
-- [ ] **Step 4: Run** — `npx vitest run test/mcp.test.ts` — Expected: PASS.
+- [ ] **Step 4: Run** — `npx vitest run test/mcp/tools.test.ts` — Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -1532,9 +1538,9 @@ git commit -m "feat(core): DSL change operations - brackets, params, sizing, con
 Tools never edit an existing file; they create proposals the user applies. New strategy files are created directly.
 
 **Files:**
-- Create: `packages/server/src/proposals.ts`, `packages/server/src/mcp/schemas.ts`, `packages/server/src/mcp/tools-authoring.ts`
+- Create: `packages/server/src/agent/proposals.ts`, `packages/server/src/mcp/schemas.ts`, `packages/server/src/mcp/tools-authoring.ts`
 - Modify: `packages/server/src/main.ts` (construct + routes), `packages/server/src/mcp/util.ts` (`ToolCtx.proposals`), `packages/server/src/mcp/index.ts`
-- Test: `packages/server/test/mcp.test.ts` (add)
+- Test: `packages/server/test/mcp/tools.test.ts` (add)
 
 **Interfaces:**
 - Consumes: `applyChanges`, `lineDiff`, `ChangeError`, `checkConfig` (core); `checkQktSource` (Task 1); `EventBus` (Task 2); `resolveInJail`; `Jobs.buildBars`.
@@ -1548,7 +1554,7 @@ Tools never edit an existing file; they create proposals the user applies. New s
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// append to packages/server/test/mcp.test.ts
+// append to packages/server/test/mcp/tools.test.ts
 describe("authoring tools", () => {
   it("check, create, and propose edits that only a user apply writes", async () => {
     const c = await mcpClient(base, "t0k");
@@ -1585,20 +1591,20 @@ describe("authoring tools", () => {
 
 Add `import { readFileSync } from "node:fs";` to the test file's imports.
 
-Run: `npx vitest run test/mcp.test.ts -t "authoring"` — Expected: FAIL (`Tool check_strategy not found`).
+Run: `npx vitest run test/mcp/tools.test.ts -t "authoring"` — Expected: FAIL (`Tool check_strategy not found`).
 
-- [ ] **Step 2: Implement `proposals.ts`**
+- [ ] **Step 2: Implement `agent/proposals.ts`**
 
 ```ts
-// packages/server/src/proposals.ts
+// packages/server/src/agent/proposals.ts
 import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ServerConfig } from "./config.js";
+import type { ServerConfig } from "../config.js";
 import type { EventBus } from "./events.js";
-import type { Jobs } from "./jobs.js";
-import { resolveInJail } from "./jail.js";
+import type { Jobs } from "../jobs.js";
+import { resolveInJail } from "../jail.js";
 
 export interface Proposal {
   id: string; kind: "file" | "job"; title: string;
@@ -1779,7 +1785,7 @@ export function registerAuthoringTools(s: McpServer, ctx: ToolCtx): void {
 
 Register `registerAuthoringTools(s, ctx)` in `buildMcp`.
 
-- [ ] **Step 5: Run** — `npx vitest run test/mcp.test.ts` — Expected: PASS.
+- [ ] **Step 5: Run** — `npx vitest run test/mcp/tools.test.ts` — Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1795,7 +1801,7 @@ git commit -m "feat(mcp): authoring tools - check, create strategies, and propos
 **Files:**
 - Create: `packages/core/src/split.ts`, `packages/server/src/split.ts`
 - Modify: `packages/core/src/index.ts`, `packages/server/src/settings.ts` (`split` field), `packages/server/src/main.ts`, `packages/server/src/mcp/index.ts`
-- Test: `packages/core/test/split.test.ts`, `packages/server/test/mcp.test.ts` (add)
+- Test: `packages/core/test/split.test.ts`, `packages/server/test/mcp/tools.test.ts` (add)
 
 **Interfaces:**
 - Consumes: `RoundTrip`, `analyze` is not needed (small own stats).
@@ -1914,7 +1920,7 @@ Export from `packages/core/src/index.ts`. Run: `npx vitest run test/split.test.t
 - [ ] **Step 3: Server: setting, routes, tools — failing test first**
 
 ```ts
-// append to packages/server/test/mcp.test.ts
+// append to packages/server/test/mcp/tools.test.ts
 describe("the split", () => {
   it("is readable and changeable from tools and the API, and announced to the UI", async () => {
     const c = await mcpClient(base, "t0k");
@@ -1933,7 +1939,7 @@ describe("the split", () => {
 });
 ```
 
-Run: `cd packages/server && npx vitest run test/mcp.test.ts -t "split"` — Expected: FAIL.
+Run: `cd packages/server && npx vitest run test/mcp/tools.test.ts -t "split"` — Expected: FAIL.
 
 - [ ] **Step 4: Implement server split**
 
@@ -1947,7 +1953,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DEFAULT_SPLIT, describeSplit, parseSplit, partsOf, type Split } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
 import { loadSettings, saveSettings } from "./settings.js";
-import type { EventBus } from "./events.js";
+import type { EventBus } from "./agent/events.js";
 import type { RunData } from "./run-data.js";
 import { ok, guard, type ToolCtx } from "./mcp/util.js";
 
@@ -1984,7 +1990,7 @@ export function registerSplitTools(s: McpServer, ctx: ToolCtx): void {
 
 Register routes in `main.ts` (`registerSplitRoutes(a, cfg, events, data)`) and tools in `buildMcp` (`registerSplitTools(s, ctx)`).
 
-- [ ] **Step 5: Run** — `cd packages/server && npx vitest run test/mcp.test.ts` — Expected: PASS.
+- [ ] **Step 5: Run** — `cd packages/server && npx vitest run test/mcp/tools.test.ts` — Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
@@ -1998,9 +2004,9 @@ git commit -m "feat: the split - a user setting that divides every run into a fi
 ### Task 9: Try a change: variants, their runs, and the comparison
 
 **Files:**
-- Create: `packages/server/src/variants.ts`, `packages/server/src/mcp/tools-try.ts`
+- Create: `packages/server/src/agent/variants.ts`, `packages/server/src/mcp/tools-try.ts`
 - Modify: `packages/server/src/main.ts`, `packages/server/src/mcp/util.ts` (`ToolCtx.variants`), `packages/server/src/mcp/index.ts`
-- Test: `packages/server/test/mcp.test.ts` (add; real runs, skipped without the local data store)
+- Test: `packages/server/test/mcp/tools.test.ts` (add; real runs, skipped without the local data store)
 
 **Interfaces:**
 - Consumes: `applyChanges`, `lineDiff`, `partsOf` (core); `checkQktSource`; `Runner.submit/waitFor/list`; `RunData`; `getSplit` (Task 8); `EventBus`; `changesSchema` (Task 7).
@@ -2014,7 +2020,7 @@ git commit -m "feat: the split - a user setting that divides every run into a fi
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// append to packages/server/test/mcp.test.ts
+// append to packages/server/test/mcp/tools.test.ts
 describe.skipIf(!haveData)("try_change", () => {
   it("runs the change on a copy, compares it with the base, announces it, and never touches the base file", async () => {
     const s3 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
@@ -2049,22 +2055,22 @@ describe.skipIf(!haveData)("try_change", () => {
 });
 ```
 
-Run: `npx vitest run test/mcp.test.ts -t "try_change"` — Expected: FAIL (`Tool try_change not found`).
+Run: `npx vitest run test/mcp/tools.test.ts -t "try_change"` — Expected: FAIL (`Tool try_change not found`).
 
-- [ ] **Step 2: Implement `variants.ts`**
+- [ ] **Step 2: Implement `agent/variants.ts`**
 
 ```ts
-// packages/server/src/variants.ts
+// packages/server/src/agent/variants.ts
 import type { FastifyInstance } from "fastify";
 import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { applyChanges, lineDiff, type Change, type Tier } from "@qkt-studio/core";
-import type { ServerConfig } from "./config.js";
-import type { Runner } from "./runner.js";
+import type { ServerConfig } from "../config.js";
+import type { Runner } from "../runner.js";
 import type { EventBus } from "./events.js";
-import { checkQktSource } from "./check.js";
-import { resolveInJail } from "./jail.js";
+import { checkQktSource } from "../check.js";
+import { resolveInJail } from "../jail.js";
 
 export interface Variant {
   id: string; label: string; base: string; baseText: string; path: string; changes: Change[]; diff: string; notes: string[];
@@ -2152,7 +2158,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { partsOf, type Change, type Tier } from "@qkt-studio/core";
 import { getSplit } from "../split.js";
-import type { Variant } from "../variants.js";
+import type { Variant } from "../agent/variants.js";
 import { changesSchema } from "./schemas.js";
 import { ok, fail, guard, type ToolCtx } from "./util.js";
 
@@ -2223,7 +2229,7 @@ git commit -m "feat(mcp): try_change - run a change on a copy beside its base, c
 **Files:**
 - Create: `packages/server/src/mcp/tools-runs.ts`
 - Modify: `packages/server/src/mcp/index.ts`
-- Test: `packages/server/test/mcp.test.ts` (add)
+- Test: `packages/server/test/mcp/tools.test.ts` (add)
 
 **Interfaces:**
 - Consumes: `Runner.submit/waitFor/cancel`, `Jobs.grid/walkForward/get/cancel`, `compareVariant` is not used; `partsOf`, `getSplit`, `Proposals.create`.
@@ -2232,7 +2238,7 @@ git commit -m "feat(mcp): try_change - run a change on a copy beside its base, c
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// append to packages/server/test/mcp.test.ts
+// append to packages/server/test/mcp/tools.test.ts
 describe.skipIf(!haveData)("run and job tools", () => {
   it("run_backtest waits and reports; sweep returns first-part numbers only; data jobs are proposals", async () => {
     const s4 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
@@ -2254,7 +2260,7 @@ describe.skipIf(!haveData)("run and job tools", () => {
 });
 ```
 
-Run: `npx vitest run test/mcp.test.ts -t "run and job"` — Expected: FAIL.
+Run: `npx vitest run test/mcp/tools.test.ts -t "run and job"` — Expected: FAIL.
 
 - [ ] **Step 2: Implement**
 
@@ -2313,7 +2319,7 @@ export function registerRunTools(s: McpServer, ctx: ToolCtx): void {
 
 (`Job` in `jobs.ts` has `id, kind, status, log, progress?, result?, error?`; a grid's `kind` is `"grid"`.) Register `registerRunTools(s, ctx)` in `buildMcp`.
 
-- [ ] **Step 3: Run** — `cd packages/server && npx vitest run test/mcp.test.ts` — Expected: PASS.
+- [ ] **Step 3: Run** — `cd packages/server && npx vitest run test/mcp/tools.test.ts` — Expected: PASS.
 
 - [ ] **Step 4: Commit**
 
