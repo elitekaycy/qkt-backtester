@@ -53,8 +53,10 @@ docker run -d --name qkt-backtester --restart unless-stopped \
 - **Port**: publish on `127.0.0.1` only. The studio runs strategies and has a terminal, so never expose it to the
   internet. Reach it through an SSH tunnel, or over a private network such as Tailscale (see *Access*).
 - **Data store** (`/data`): the folder with `bars/` and `symbols/` (qkt's layout). Mount it `:ro` to guarantee the studio
-  never changes it; *Build bars*, *Fill from ticks* and *Fetch* then fail with a permission error, which is what you want for a shared
-  archive. Mount it read-write only for a store the studio may build into.
+  never changes it; *Build bars*, *Fill from ticks*, *Fetch* and *Accept as no data* then fail with a permission error, which is
+  what you want for a shared archive. Mount it read-write only for a store the studio may build into. Days accepted as
+  having no data are empty qkt day files plus a record in `.studio-no-data.json` at the store's root; each can be undone
+  from the symbol's calendar.
 - **Workspace** (`/workspace`): your strategies, `qkt.config.yaml`, `instruments.yaml`, `.env` and every run's output
   (`runs/`). An empty folder is seeded with a starter config and two sample strategies on a symbol your data has.
   Back this folder up; it is the only state the studio keeps.

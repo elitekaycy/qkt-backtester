@@ -44,6 +44,8 @@
 .sd-tbl tr[aria-selected="true"] td { background: var(--accent-soft); }
 .sd-tbl tr:focus-visible { outline: 2px solid var(--accent-hi); outline-offset: -2px; }
 .sd-gaps { font-size: var(--fs-sm); }
+.sd-nodata { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 8px; }
+.sd-nodata .banner { width: 100%; align-items: flex-start; }
 .sd-strat { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; padding: 3px 0; }
 
 /* calendar heat-map */

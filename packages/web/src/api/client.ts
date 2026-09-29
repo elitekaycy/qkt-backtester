@@ -125,6 +125,9 @@ export const api = {
     return { cols: unpackBars(await r.arrayBuffer()), sourceCount: Number(r.headers.get("X-Bars-Source-Count") ?? 0), missingDays: Number(r.headers.get("X-Bars-Missing-Days") ?? 0), emptyDays: Number(r.headers.get("X-Bars-Empty-Days") ?? 0) };
   },
 
+  noData: () => req<{ dataRoot: string; entries: NoDataEntry[] }>("/api/data/no-data"),
+  acceptNoData: (b: NoDataReq) => req<{ accepted: string[]; skipped: Array<{ day: string; reason: string }> }>("/api/data/no-data", { method: "POST", body: JSON.stringify(b) }),
+  undoNoData: (b: NoDataReq) => req<{ undone: string[] }>("/api/data/no-data/undo", { method: "POST", body: JSON.stringify(b) }),
   buildBars: (b: { symbol: string; tf: string; from: string; to: string }) => req<{ jobId: string }>("/api/data/build-bars", { method: "POST", body: JSON.stringify(b) }),
   fetchData: (b: { broker: string; symbol: string; tf: string; from: string; to: string }) => req<{ jobId: string }>("/api/data/fetch", { method: "POST", body: JSON.stringify(b) }),
   grid: (b: object) => req<{ jobId: string }>("/api/jobs/grid", { method: "POST", body: JSON.stringify(b) }),
@@ -172,3 +175,6 @@ export function openRunEvents(runId: string, onEvent: (e: RunEventMsg) => void, 
   es.onerror = () => { if (ended) return; /* EventSource retries by itself while readyState is CONNECTING */ if (es.readyState === EventSource.CLOSED) onEnd?.(); };
   return () => { ended = true; es.close(); };
 }
+
+export interface NoDataEntry { broker: string; symbol: string; tf: string; day: string; at: string; wrote: boolean }
+export interface NoDataReq { broker: string; symbol: string; tf: string; days: string[] }
