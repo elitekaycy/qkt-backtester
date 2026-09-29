@@ -2,11 +2,11 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  analyze, filterTrips, parseStrategyInfo, isTerminal, MC_MAX_SIMS, overlayTrips, queryTrips, runMonteCarlo, type McMethod, type TripQuery, type TripSort,
+  analyze, filterTrips, parseStrategyInfo, isTerminal, MC_MAX_SIMS, overlayTrips, queryTrips, runMonteCarlo, type McMethod,
 } from "@qkt-studio/core";
 import { resolveInJail } from "./jail.js";
 import { Runner, RunRequestError, type RunRequest } from "./runner.js";
-import type { RunData } from "./run-data.js";
+import { parseTripQuery, type RunData } from "./run-data.js";
 
 const ARTIFACT_TOPS = new Set(["logs", "engine", "source", "robustness", "derived"]);
 const MIME: Record<string, string> = {
@@ -23,19 +23,6 @@ const time = (v: unknown): number | undefined => {
   const d = Date.parse(String(v));
   return Number.isNaN(d) ? undefined : d;
 };
-
-export function parseTripQuery(q: Record<string, string | undefined>): TripQuery {
-  const sorts: TripSort[] = ["entryTs", "exitTs", "pnl", "holdMs", "qty"];
-  return {
-    side: q.side === "long" || q.side === "short" ? q.side : undefined,
-    outcome: (["win", "loss", "breakeven", "open", "closed"] as const).find((o) => o === q.outcome),
-    symbol: q.symbol || undefined, strategy: q.strategy || undefined, strategies: q.strategies !== undefined ? q.strategies.split(",").filter(Boolean) : undefined,
-    fromTs: time(q.from), toTs: time(q.to), minHoldMs: num(q.minHold), maxHoldMs: num(q.maxHold), minPnl: num(q.minPnl), maxPnl: num(q.maxPnl),
-    exit: (["stop", "target", "signal", "open"] as const).find((x) => x === q.exit),
-    exitFromTs: time(q.exitFrom), exitToTs: time(q.exitTo), minQty: num(q.minQty), maxQty: num(q.maxQty), id: num(q.id), minR: num(q.minR), maxR: num(q.maxR), weekday: num(q.weekday), hour: num(q.hour), day: /^\d{4}-\d{2}-\d{2}$/.test(q.day ?? "") ? q.day : undefined,
-    sort: sorts.find((s) => s === q.sort), dir: q.dir === "desc" ? "desc" : "asc", offset: num(q.offset), limit: num(q.limit),
-  };
-}
 
 export function registerRunRoutes(app: FastifyInstance, runner: Runner, data: RunData): void {
   const notFound = (reply: FastifyReply, what = "not found") => reply.code(404).send({ error: what });

@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { STUDIO_VERSION } from "../postprocess.js";
 import { registerContextTools } from "./tools-context.js";
 import { registerKnowledgeTools } from "./tools-knowledge.js";
+import { registerAnalysisTools } from "./tools-analysis.js";
 import type { ToolCtx } from "./util.js";
 
 /** Every tool group registers here; later tasks add their `register...` calls to this list. */
@@ -11,6 +12,7 @@ export function buildMcp(ctx: ToolCtx): McpServer {
   const s = new McpServer({ name: "qkt-studio", version: STUDIO_VERSION }, { instructions: "Tools of the qkt backtesting studio. Prefer try_change for any strategy change; read dsl_reference before writing DSL." });
   registerContextTools(s, ctx);
   registerKnowledgeTools(s, ctx);
+  registerAnalysisTools(s, ctx);
   return s;
 }
 

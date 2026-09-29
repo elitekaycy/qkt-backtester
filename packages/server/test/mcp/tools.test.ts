@@ -21,6 +21,7 @@ let studio: Awaited<ReturnType<typeof createStudio>>, base: string, ws: string;
 beforeAll(async () => {
   ws = realpathSync(mkdtempSync(path.join(os.tmpdir(), "ws-")));
   mkdirSync(path.join(ws, "strategies"));
+  writeFileSync(path.join(ws, "qkt.config.yaml"), "starting_balance: 10000\n");
   writeFileSync(path.join(ws, "strategies", "ema.qkt"), "STRATEGY ema VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN gold.close > 0\n    THEN BUY gold SIZING 0.1\n");
   studio = await createStudio(testConfig(ws, { token: "t0k" }));
   await studio.app.listen({ port: 0, host: "127.0.0.1" });
@@ -80,4 +81,28 @@ describe("knowledge tools", () => {
     if (!m2) expect(page1.length + page2.length).toBe(full.length);
     await c.close();
   });
+});
+
+describe.skipIf(!haveData)("analysis tools", () => {
+  it("summarise, diagnose and list the trades of a real run", async () => {
+    const s2 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
+    await s2.app.listen({ port: 0, host: "127.0.0.1" });
+    const b2 = `http://127.0.0.1:${(s2.app.server.address() as { port: number }).port}`;
+    writeFileSync(path.join(ws, "strategies", "bracket.qkt"), "STRATEGY bracket VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold.close, 21)\n     AND POSITION.gold = 0\n    THEN BUY gold SIZING 0.1\n        BRACKET { STOP_LOSS BY 5, TAKE_PROFIT BY 20 }\n");
+    const { runId } = await s2.runner.submit({ strategy: "strategies/bracket.qkt", from: "2024-10-01", to: "2024-10-15", tier: "draft" });
+    await s2.runner.waitFor(runId);
+    const c = await mcpClient(b2, "t0k");
+    const sum = await call(c, "run_summary", { run: runId });
+    expect(sum.json.trades).toBeGreaterThan(0);
+    const d = await call(c, "diagnose_exits", { run: runId });
+    expect(d.json.exits.stop + d.json.exits.target + d.json.exits.signal + d.json.exits.open).toBe(d.json.trades);
+    expect(d.json.bracket.medianStop).toBeCloseTo(5, 1);
+    expect(d.json.whatIf.length).toBeGreaterThan(0);
+    const t = await call(c, "trades", { run: runId, limit: 3 });
+    expect(t.json.rows.length).toBeLessThanOrEqual(3);
+    const one = await call(c, "trade_detail", { run: runId, id: t.json.rows[0].id, bars_before: 5, bars_after: 5 });
+    expect(one.json.bars.length).toBeGreaterThan(5);
+    expect((await call(c, "run_summary", { run: "nope" })).isError).toBe(true);
+    await c.close(); await s2.app.close();
+  }, 120_000);
 });
