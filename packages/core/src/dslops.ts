@@ -40,7 +40,7 @@ function segment(src: string): Seg {
     for (let i = rulesLine + 1; i < regionEnd; i++) if (/^\s+WHEN\b/.test(lines[i]!)) starts.push(i);
     starts.forEach((s, k) => {
       let end = k + 1 < starts.length ? starts[k + 1]! : regionEnd;
-      while (end > s && !lines[end - 1]!.trim()) end--;
+      while (end > s && (!lines[end - 1]!.trim() || /^\s*--/.test(lines[end - 1]!))) end--;
       const then = lines.slice(s, end).findIndex((l) => /^\s+THEN\b/.test(l));
       const thenAt = then < 0 ? end : s + then;
       let bracket: [number, number] | null = null;
@@ -136,9 +136,11 @@ function apply1(src: string, c: Change, notes: string[]): string {
         if (r.bracket) {
           const [a, z] = r.bracket, text = lines.slice(a, z).join(" ");
           const inner = /\{([\s\S]*)\}/.exec(text)?.[1] ?? "";
-          const parts = splitTop(inner).map((p) => p.replace(/\s+/g, " "));
-          const set = (key: string, spec: string | null) => { if (!spec) return; const i = parts.findIndex((p) => p.startsWith(key)); if (i >= 0) parts[i] = `${key} ${spec}`; else parts.push(`${key} ${spec}`); };
-          set("STOP_LOSS", stop); set("TAKE_PROFIT", target);
+          let parts = splitTop(inner).map((p) => p.replace(/\s+/g, " "));
+          // Normalize all legs to underscore form
+          parts = parts.map((p) => p.replace(/^STOP\s+LOSS\b/i, "STOP_LOSS").replace(/^TAKE\s+PROFIT\b/i, "TAKE_PROFIT"));
+          const set = (regex: RegExp, keyUnderscore: string, spec: string | null) => { if (!spec) return; const i = parts.findIndex((p) => regex.test(p)); if (i >= 0) { const part = parts[i]!; const modifierMatch = part.match(/(\s+(?:TRAILING|STEP|TIGHTEN).*)$/i); const modifiers = modifierMatch?.[1] ?? ""; parts[i] = `${keyUnderscore} ${spec}${modifiers}`; } else parts.push(`${keyUnderscore} ${spec}`); };
+          set(/^STOP[ _]LOSS\b/i, "STOP_LOSS", stop); set(/^TAKE[ _]PROFIT\b/i, "TAKE_PROFIT", target);
           lines.splice(a, z - a, `${indentOf(lines[a]!)}BRACKET { ${parts.join(", ")} }`);
           done.unshift(`rule ${r.n}`);
         } else {

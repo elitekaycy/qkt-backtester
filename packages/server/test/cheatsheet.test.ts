@@ -23,4 +23,10 @@ describe("the DSL cheat sheet", () => {
     ]).source;
     expect((await checkQktSource(testConfig("/tmp"), out)).diagnostics.filter((d) => d.severity === "error")).toEqual([]);
   });
+
+  it("set_bracket on two-word trailing-stop bracket syntax produces valid qkt", async () => {
+    const baseWithTrailing = "STRATEGY trailing_test VERSION 1\n\nSYMBOLS\n    btc = BACKTEST:BTCUSD EVERY 15m\n\nRULES\n    WHEN ema(btc.close, 9) CROSSES ABOVE ema(btc.close, 21)\n    THEN BUY btc SIZING 0.1\n        BRACKET {\n          STOP LOSS TRAILING 5 AFTER MFE >= 10,\n          TAKE PROFIT BY 50\n        }\n";
+    const out = applyChanges(baseWithTrailing, [{ op: "set_bracket", target: 100 }]).source;
+    expect((await checkQktSource(testConfig("/tmp"), out)).diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+  });
 });

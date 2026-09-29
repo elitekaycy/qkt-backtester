@@ -103,3 +103,57 @@ describe("lineDiff and describeRules", () => {
     expect(describeRules(SRC).map((r) => [r.n, r.entry])).toEqual([[1, true], [2, true], [3, false]]);
   });
 });
+
+describe("comments and two-word bracket spellings", () => {
+  it("trims trailing comment lines so remove_rule, set_bracket, and add_condition respect them", () => {
+    const srcWithComments = `STRATEGY test VERSION 1
+
+SYMBOLS
+    gold = BACKTEST:XAUUSD EVERY 15m
+
+RULES
+    WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold.close, 21)
+    THEN BUY gold SIZING 0.1
+    -- documentation for rule 2
+
+    WHEN ema(gold.close, 9) CROSSES BELOW ema(gold.close, 21)
+     AND gold.close > 100  -- condition comment
+    THEN SELL gold SIZING 0.1
+`;
+    // remove_rule on rule 1 should keep the comment above rule 2
+    const removed = applyChanges(srcWithComments, [{ op: "remove_rule", match: "CROSSES ABOVE" }]).source;
+    expect(removed).toContain("-- documentation for rule 2");
+    expect(removed).not.toContain("CROSSES ABOVE");
+
+    // set_bracket on rule 1 (no bracket) should put BRACKET right after THEN
+    const withBracket = applyChanges(srcWithComments, [{ op: "set_bracket", rule: 1, stop: 2 }]).source;
+    expect(withBracket).toContain("THEN BUY gold SIZING 0.1\n        BRACKET { STOP_LOSS BY 2 }");
+
+    // add_condition on rule 2 should preserve the condition comment
+    const withCond = applyChanges(srcWithComments, [{ op: "add_condition", rule: 2, expr: "gold.open < 100" }]).source;
+    expect(withCond).toContain("-- condition comment");
+    expect(withCond).toContain("AND gold.open < 100");
+  });
+
+  it("handles both STOP_LOSS/STOP LOSS and TAKE_PROFIT/TAKE PROFIT spellings", () => {
+    const srcWithTwoWord = `STRATEGY test VERSION 1
+
+SYMBOLS
+    btc = BACKTEST:BTCUSD EVERY 15m
+
+RULES
+    WHEN ema(btc.close, 9) CROSSES ABOVE ema(btc.close, 21)
+    THEN BUY btc SIZING 0.1
+        BRACKET {
+          STOP LOSS TRAILING 5 AFTER MFE >= 10,
+          TAKE PROFIT BY 50
+        }
+`;
+    // set_bracket with target should replace TAKE PROFIT but keep STOP LOSS TRAILING
+    const result = applyChanges(srcWithTwoWord, [{ op: "set_bracket", target: 100 }]).source;
+    expect(result).toContain("STOP_LOSS TRAILING 5 AFTER MFE >= 10");
+    expect(result).toContain("TAKE_PROFIT BY 100");
+    expect(result).not.toContain("TAKE PROFIT BY 50");
+    expect(result.match(/TAKE_PROFIT/g)!.length).toBe(1); // exactly one take-profit leg
+  });
+});
