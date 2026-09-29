@@ -10,6 +10,7 @@ import { downsampleEquity } from "./postprocess.js";
 import { cleanupPartialFiles, validBarFile, validGzip } from "./cleanup.js";
 import { invalidateScan } from "./data-scan.js";
 import { ownFolder } from "./no-data.js";
+import { barCountOf } from "./barfile.js";
 import { spawnGroup, type ProcHandle } from "./proc.js";
 import { Runner, RunRequestError } from "./runner.js";
 
@@ -131,9 +132,9 @@ export class Jobs {
    * Run a job that writes into `dir`. A folder that is a link into another store (a read-only archive mounted beside this
    * one) first becomes a folder of links to the same files, so qkt writes here and never into the archive.
    */
-  private runWritable(job: Job, dir: string, args: string[]): void {
+  private runWritable(job: Job, dir: string, args: string[], after?: () => Promise<void>): void {
     void ownFolder(dir).then(
-      () => { if (this.cancelled.has(job.id)) return this.finish(job, "cancelled", { kind: "cancelled", message: "Stopped before it started." }); this.runProcess(job, args); },
+      () => { if (this.cancelled.has(job.id)) return this.finish(job, "cancelled", { kind: "cancelled", message: "Stopped before it started." }); this.runProcess(job, args, after && (() => after())); },
       (e: NodeJS.ErrnoException) => this.finish(job, "failed", { kind: "internal", message: e.code === "EACCES" || e.code === "EROFS" || e.code === "EPERM" ? `The data source is read-only here (${e.code}): ${dir} cannot be written. Mount it writable to build or fetch into it.` : e.message }),
     );
   }
@@ -155,7 +156,22 @@ export class Jobs {
     this.validateRange(req);
     const job = this.create("build-bars");
     this.meta.set(job.id, { sinceMs: Date.now(), dir: path.join(this.cfg.dataRoot, "bars", "BACKTEST", req.symbol, req.tf), pattern: /^\d{4}-\d{2}-\d{2}\.bin$/, validate: validBarFile });
-    this.runWritable(job, path.join(this.cfg.dataRoot, "bars", "BACKTEST", req.symbol, req.tf), ["data", "build-bars", req.symbol, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot]);
+    const dir = path.join(this.cfg.dataRoot, "bars", "BACKTEST", req.symbol, req.tf), since = Date.now();
+    // qkt writes an EMPTY bar file for a day whose tick file holds no ticks (a source outage), and qkt reads an empty file as
+    // a closed market: a build would silently turn a data gap into a "closed" day. Those files are removed again, so the day
+    // stays missing until someone decides it really had no trading (Accept as no data).
+    const dropEmpty = async () => {
+      const dropped: string[] = [];
+      for (const name of await fs.readdir(dir).catch(() => [] as string[])) {
+        if (!/^\d{4}-\d{2}-\d{2}\.bin$/.test(name)) continue;
+        const file = path.join(dir, name), st = await fs.lstat(file).catch(() => null);
+        if (!st || st.isSymbolicLink() || st.mtimeMs < since - 1000) continue;
+        if ((await barCountOf(file)) === 0) { await fs.unlink(file).catch(() => undefined); dropped.push(name.slice(0, 10)); }
+      }
+      dropped.sort();
+      if (dropped.length) this.pushLog(job, `${dropped.length} day(s) have a tick file with no ticks in it, so no bars: ${dropped.slice(0, 8).join(", ")}${dropped.length > 8 ? ` and ${dropped.length - 8} more` : ""}. They stay missing. If the market was really closed then, use Accept as no data in the symbol's calendar.`);
+    };
+    this.runWritable(job, dir, ["data", "build-bars", req.symbol, "--tf", req.tf, "--from", req.from, "--to", req.to, "--data-root", this.cfg.dataRoot], dropEmpty);
     return job;
   }
 
