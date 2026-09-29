@@ -348,8 +348,11 @@ function rescan(dataRoot: string): Promise<ScanReport> {
 }
 export async function scanCached(dataRoot: string, refresh = false): Promise<ScanReport> {
   const age = cache && cache.root === dataRoot ? Date.now() - cache.at : Infinity;
-  if (!refresh && age < 30_000) return cache!.report;
-  if (!refresh && age < 10 * 60_000) { void rescan(dataRoot).catch(() => undefined); return cache!.report; }
+  // fresh for ten times what the scan cost (30 s at least): a large store (hundreds of thousands of files, minutes to
+  // scan) is not rescanned in the background every half minute next to whatever else the machine runs
+  const fresh = Math.max(30_000, 10 * (cache?.report.ms ?? 0));
+  if (!refresh && age < fresh) return cache!.report;
+  if (!refresh && age < Math.max(10 * 60_000, 3 * fresh)) { void rescan(dataRoot).catch(() => undefined); return cache!.report; }
   return rescan(dataRoot);
 }
 export const invalidateScan = () => { cache = null; inflight = null; generation++; };

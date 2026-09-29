@@ -45,6 +45,7 @@ export async function createStudio(cfg: ServerConfig) {
 export async function seedIfEmpty(cfg: ServerConfig): Promise<string[] | null> {
   const entries = (await readdir(cfg.workspace).catch(() => [] as string[])).filter((n) => n !== ".qkt-studio" && n !== "runs");
   if (entries.length) return null;
+  console.error("qkt-backtester: empty workspace: scanning the data store to seed it (a large store takes a few minutes)");
   const scan = await scanCached(cfg.dataRoot).catch(() => null);
   return (await scaffoldWorkspace(cfg.workspace, scan)).created;
 }

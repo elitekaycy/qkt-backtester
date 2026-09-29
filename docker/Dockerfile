@@ -56,6 +56,7 @@ ENV NODE_ENV=production LANG=C.UTF-8 \
     NODE_OPTIONS=--disable-warning=ExperimentalWarning
 EXPOSE 8080
 VOLUME ["/workspace", "/data"]
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/health',{headers:process.env.STUDIO_TOKEN?{authorization:'Bearer '+process.env.STUDIO_TOKEN}:{}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+# start period: an empty workspace on a large data store is seeded from a full scan first (minutes on ~500k files)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/health',{headers:process.env.STUDIO_TOKEN?{authorization:'Bearer '+process.env.STUDIO_TOKEN}:{}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 ENTRYPOINT ["tini", "--", "studio-entrypoint"]
 CMD ["node", "/app/server/dist/main.js"]
