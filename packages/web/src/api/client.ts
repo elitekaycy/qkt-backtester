@@ -31,7 +31,7 @@ export const setToken = (t: string) => { try { localStorage.setItem(TOKEN_KEY, t
 /** Forget the saved token (a shared computer); the next load asks for it again. */
 export const forgetToken = () => { try { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ } };
 
-const withToken = (url: string): string => {
+export const withToken = (url: string): string => {
   const t = getToken();
   return t ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(t)}` : url;
 };
@@ -150,7 +150,20 @@ export const api = {
   walkForward: (b: object) => req<{ jobId: string }>("/api/jobs/walkforward", { method: "POST", body: JSON.stringify(b) }),
   job: (id: string) => req<Job>(`/api/jobs/${id}`),
   cancelJob: (id: string) => req<{ cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" }),
+
+  variants: () => req<{ variants: import("../state/agent.js").VariantInfo[] }>("/api/variants"),
+  variant: (id: string) => req<import("../state/agent.js").VariantInfo & { source: string | null }>(`/api/variants/${encodeURIComponent(id)}`),
+  discardVariant: (id: string) => req<void>(`/api/variants/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  proposals: () => req<{ proposals: import("../state/agent.js").ProposalInfo[] }>("/api/proposals"),
+  applyProposal: (id: string) => req<unknown>(`/api/proposals/${encodeURIComponent(id)}/apply`, { method: "POST" }),
+  rejectProposal: (id: string) => req<unknown>(`/api/proposals/${encodeURIComponent(id)}/reject`, { method: "POST" }),
+  split: () => req<{ split: Record<string, unknown>; text: string }>("/api/split"),
+  setSplit: (split: Record<string, unknown>) => req<{ split: Record<string, unknown>; text: string }>("/api/split", { method: "PUT", body: JSON.stringify(split) }),
+  runParts: (id: string) => req<{ cut: string | null; first: PartStats; test: PartStats | null }>(`/api/runs/${encodeURIComponent(id)}/parts`),
+  reportView: (v: unknown) => req<unknown>("/api/view", { method: "POST", body: JSON.stringify(v) }),
 };
+
+export interface PartStats { from: string; to: string; trades: number; net: number; winRate: number | null; profitFactor: number | null; avgR: number | null }
 
 function tripParams(q: TripQuery): Record<string, unknown> {
   return {
