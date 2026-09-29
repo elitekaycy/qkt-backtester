@@ -4,25 +4,30 @@ Status: design for review (2026-09-29). Nothing here is built yet; section 2 rec
 
 ## 1. What it is for
 
-A **Chat** tab in the bottom dock (beside Pipeline | Problems | Terminal) where the user talks, in plain language,
-about the strategy that is open, and the assistant can **see** the run on screen (trades, charts, numbers), the strategy,
-`qkt.config.yaml` and `instruments.yaml`, and **act**: create strategies, turn an idea into working DSL, change brackets
-and parameters, add config and instrument entries, run backtests, grids and walk-forwards, compare the results.
+Turning the thought in the user's head into the exact strategy change, **and seeing it on the chart**, as fast as
+possible, in plain English. It is not an idea generator: the user brings the idea; the assistant maps the words onto
+the studio's tools, mixes and calls them, and fills the gaps (which alias is gold, which rule, what a date means to the
+DSL), so the result appears in seconds.
 
-Example: "on the chart no trade hits take-profit, they go straight to stop-loss; try inverting" -> the assistant reads an
-exact exit diagnosis, builds variants (swap stop and target; a 1.5R target), runs them, and shows a table the user can
-Adopt from.
+Examples it must handle in one short exchange each:
+- "make the stop-loss 2 percent and let's see" -> the change on a copy, run, shown on the chart next to the original.
+- "check for EMA 12 on gold crossing above RSI 14 on fx" -> the condition written against the right aliases and
+  timeframes, run, shown (with the studio's one-line warning that these two lines are on different scales).
+- "I noticed we lose when we trade on 2026-08-14; omit that date" -> an exclusion on that date (the tool converts it to
+  the DSL's day number), run, shown; with a one-line note that excluding past losers fits the past.
+- "what's the split? make the test the last 2 months" -> the split changes, and every view recomputes (section 6).
+- Also, by hand or through the chat: new strategy files, new keys in `qkt.config.yaml`, new entries in `instruments.yaml`.
 
-Everything the chat can do stays doable by hand, and everything the chat does is visible, reversible and checked.
+Principles: **the user's intent rules** (the studio warns, it never refuses a legal change); **every change is visible and
+one click to keep or drop**; **exact numbers come from the studio, never from the model**; **cheap and fast** (Haiku by
+default, Sonnet at most; one tool call per simple request).
 
 **Success criteria**
-- The two example tasks (fix a bracket from an exit diagnosis; code a new idea from a description) complete correctly on
-  the cheapest model tier, with the DSL passing `qkt parse` before the user sees it.
+- A simple change ("stop 2 %", "param fast = 12", "skip Fridays") reaches the chart in one tool call and one run: target
+  under ~15 s plus the run's own time on Haiku.
+- The examples above complete correctly on Haiku; any DSL passes `qkt parse` before the user sees it.
 - Uses the user's Claude Pro/Max through the unmodified Claude Code binary: $0 extra, within Anthropic's terms (section 8).
-- A normal message costs little of the plan's allowance (Haiku by default; target under ~30k tokens per task).
 - No change reaches the user's files without their click, except creating a new file they asked for.
-- Results the assistant tunes on are checked on data it never saw (section 6), so "make the results we want" does not
-  quietly become curve-fitting.
 
 ## 2. Verified before designing (throwaway probes, 2026-09-29)
 
@@ -49,7 +54,7 @@ Lessons that shape the design: the model does well when **tools return decisive,
                                        │     streams its JSON events to the browser; enforces limits; records usage
                                        │
                                        ├── mcp/      studio MCP server at /mcp (streamable HTTP, token)
-                                       │     tools: context · knowledge · analysis · authoring · experiments · runs
+                                       │     tools: context · knowledge · analysis · authoring · try/compare/split · runs
                                        │     every tool calls the studio's existing code (runner, file API, check,
                                        │     trip queries, bars) - no second code path
                                        │
@@ -120,16 +125,31 @@ Design rules for every tool:
 `propose_*` never writes. Proposals appear in the chat as diffs with **Apply** / **Reject**; Apply goes through the file
 API (etag, conflict banner, one undo step in the editor). A proposal against a file the user changed since is marked stale.
 
-### 4.5 Experiments (variants on copies; the tuning loop)
+### 4.5 Try a change (the fast path), compare, and the split
 | Tool | Effect |
 |---|---|
-| `create_variants(base, variants: [{name, edits or source or set_bracket/set_param}])` | copies of the base strategy under `.qkt-studio/experiments/<id>/`, each checked; the user's file is untouched |
-| `run_experiment(id, window?, tier?)` | runs base + variants through the runner (parallel, cached like any run); returns **train-window** numbers only (section 6) |
-| `experiment_status(id)` | progress, and the table once done |
-| `sweep(base, param or bracket ranges, window?)` | the Lab grid over a strategy's params or bracket distances, as an experiment |
+| `try_change(base?, changes, label?, window?, tier?)` | **one call does it all**: copies the base strategy (default: the open file) to `.qkt-studio/variants/`, applies `changes`, checks, runs, and returns the variant's numbers side by side with the base run (split into the two parts when a split is set), plus the studio's warnings. The chart and journal switch to the variant at once (section 7). The user's file is untouched |
+| `try_variants(base?, variants: [{label, changes}], window?)` | several at once ("try stop 1, 2 and 3 %"); returns a comparison table |
+| `sweep(base?, ranges, window?)` | automatic search over params or bracket distances (the Lab grid) |
+| `get_split()` / `set_split(split)` | the current split and changing it: `{none}`, `{test_pct: 25}`, `{test_last: "3 months"}` or `{test_from: "2026-07-01"}`. The change applies at once to every view (section 6) |
+| `list_variants()` / `discard_variant(id)` | housekeeping |
 
-The user sees each experiment as a table in the chat (train and test columns) with **Adopt** per row. Adopt turns that
-variant into a proposal against the original file (4.4). The model cannot adopt.
+**Changes** are a list of operations, so the model maps words to operations rather than writing DSL:
+
+| Operation | Example request -> operation |
+|---|---|
+| `set_bracket {rule?, stop?, target?}` (`"2 PCT"`, `"12"`, `"AT <expr>"`) | "stop-loss 2 %" -> `{stop: "2 PCT"}` on every bracketed rule |
+| `set_param {name, value}` / `set_sizing {rule?, sizing}` | "fast EMA 12" -> `{name: "fast", value: 12}` |
+| `add_condition {rule?, expr, mode: and\|or}` / `remove_condition {rule?, match}` | "EMA 12 of gold crosses above RSI 14 of fx" -> `{expr: "ema(gold.close, 12) CROSSES ABOVE rsi(fx.close, 14)"}` |
+| `exclude {dates?, weekdays?, hours_utc?, calendar_window?, rule?}` | "omit 2026-08-14" -> `{dates: ["2026-08-14"]}`; the tool writes `AND NOT (NOW.date_utc IN [20679])` |
+| `add_rule {source}` / `remove_rule {match}` | new entry or exit rules |
+| `add_symbol {alias, symbol, tf}` | "use NZDUSD 4h as fx" |
+| `replace_text {find, replace}` / `source {text}` | anything the operations above do not cover (always checked) |
+
+Every operation is applied by the studio's own editor for the DSL (it knows rules, aliases and brackets), validated, and
+reported back as the exact diff. Rules are addressed by their order (`rule: 2`) or by a text match.
+
+**Adopt** (a user click, never the model) turns a variant into an edit of the original file, one undo step in the editor.
 
 ### 4.6 Runs and jobs
 | Tool | Effect |
@@ -145,39 +165,54 @@ Not exposed: deleting files, the terminal, settings, data-source changes, anythi
 Per user message, the chat manager runs (as the workspace user, in the container):
 
 ```
-claude -p --model <haiku|sonnet|opus> --tools "" --strict-mcp-config --mcp-config <studio /mcp + token>
+claude -p --model <haiku|sonnet> --tools "" --strict-mcp-config --mcp-config <studio /mcp + token>
        --allowedTools "mcp__studio__*" --permission-mode dontAsk --system-prompt <studio prompt>
        --output-format stream-json --verbose --include-partial-messages
        (--session-id <new uuid> | --resume <uuid>)
 ```
 
-- **System prompt** (ours, short): role, "use only studio tools", "check before proposing", "tune on train, never
-  claim results from test", "be brief", plus the open file's path and run id. Replacing the CLI's default prompt cuts the
+- **System prompt** (ours, short): role, "use only studio tools", "map the request onto the fewest tool calls (prefer
+  try_change)", "do what the user asks; relay the studio's warnings in one line, never refuse a legal change", "be brief", plus the open file's path and run id. Replacing the CLI's default prompt cuts the
   fixed cost per call.
-- **Models**: Haiku by default; the message box has **Think harder** (Sonnet for that message) and, in settings, Opus.
+- **Models**: Haiku by default; the message box has **Think harder** (Sonnet for that message). Sonnet is the ceiling:
+  Opus is not offered.
 - **Limits enforced by the studio** (the CLI has no turn limit): at most 25 tool calls and 5 minutes per message, one
   message in flight per workspace; Stop kills the process group (the runner's existing mechanism) and any runs it started.
 - **Streaming**: stream-json events become chat items: text deltas, tool calls (collapsed "ran backtest · 3.2 s"), tool
   results feeding tables/proposals, and the final `result` (turns, tokens, API-equivalent cost).
 - **Usage shown per message**: tokens and "counts toward your Claude plan" (the API-equivalent figure in a tooltip).
 
-## 6. Keeping it honest: train and test
+## 6. The split, and warnings instead of refusals
 
-"Tweak until the results look good" finds rules that fit the past by chance. So experiments split the window:
-- The window is divided into **train** (first 75%, default) and **test** (last 25%, adjustable).
-- `run_experiment`, `sweep` and the analysis tools on experiment runs give the **model only train numbers**; the chat table
-  shows the user both columns. The model tunes on train; the user judges on test.
-- When a variant's train result improves but its test result gets worse than the base, the table flags it
-  ("better on train, worse on test: likely over-fitted").
-- Walk-forward is one tool call away for a stricter check, and the prompt tells the model to suggest it before adoption.
+**The split is the user's, visible and changeable at will.**
+- A setting of the workspace: none, a percentage for the last part (`test 25 %`, the default), the last N days/weeks/
+  months, or a start date. Shown as a chip in the chat header and in the variant bar ("Split: last 3 months").
+- Changed by clicking the chip or by asking in the chat ("make the test the last 2 months", "no split"): `set_split`.
+- **It reflects everywhere at once**: variant and sweep results are recomputed per part from trades already run (no
+  re-run needed, the split only partitions them by exit time), the chart shades the test part, and the journal can filter
+  to either part.
+- In sweeps the model is shown the first part only, the table shows both, and rows better on the first part but worse on
+  the second are flagged as likely over-fitted. For the user's own requested changes both parts are shown to everyone.
+
+**Warnings, not refusals.** The request is implemented as asked; what the studio knows goes along in one line:
+- **Different scales**: two symbols' prices, or a price against an oscillator (the editor's `cross_scales` check, shipped
+  in 0.1.7): "these lines are on different scales and may never cross".
+- **Fitting the past**: excluding specific past dates, or a sweep's best row: "this removes the trades you saw lose;
+  it will look better on this window by construction" - the split's second part shows whether it holds up.
+- **Refused by qkt**: brackets below zero, empty windows, missing data - the studio's normalized error explains it and the
+  model proposes the fix (e.g. "use 0.0020 on NZDUSD, or a PCT").
 
 ## 7. The Chat tab
 
 - **Dock tab "Chat"** next to Pipeline | Problems | Terminal. It follows the pane rules shipped in 0.1.3 (opening it
   un-maximizes what hides it).
-- **Header**: conversation title (per strategy file by default), New conversation, model (Haiku / Think harder), plan status.
-- **Messages**: markdown text; tool calls as compact steps you can expand (arguments, result); **experiment tables** with
-  Adopt; **proposal diffs** with Apply / Reject; run links that open the run on the chart.
+- **Header**: conversation title (per strategy file by default), New conversation, model (Haiku / Think harder), the
+  **split chip**, plan status.
+- **The variant view**: after `try_change`, the chart, KPIs and journal show the variant's run with a bar above the chart:
+  "Variant: stop 2 % · net +190 vs -412 (test part +40 vs -150) · Adopt · Discard · Back to original". The original
+  run stays one click away; several variants appear as a small switcher.
+- **Messages**: markdown text; tool calls as compact steps you can expand (arguments, result); **variant cards and
+  comparison tables** with Adopt; **proposal diffs** (config, instruments, direct edits) with Apply / Reject; run links that open the run on the chart.
 - **Context chips** above the box: the open file and the run on screen, attached automatically; removable.
 - **Stop** while it works (same place and look as the run Stop).
 - **First use**: if Claude Code is not signed in (`claude auth status`), a card explains the one-time sign-in and shows
@@ -226,23 +261,21 @@ So:
 
 - **Digests (core)**: pure functions on recorded roundtrips/bars fixtures, including the real "no take-profit" run.
 - **MCP tools (server)**: each tool through the real MCP client (SDK) against a scratch workspace with real qkt: jail,
-  write rules (no existing-file writes), check-before-save, train/test separation (the model-facing result has no test
-  numbers), compact output sizes.
+  write rules (no existing-file writes), check-before-save, the split (set_split recomputes results without re-running;
+  sweeps give the model only the first part), compact output sizes.
 - **Chat manager**: a fake `claude` binary that replays recorded stream-json (including tool calls, errors, limits) to
   test streaming, Stop, limits, resume, usage accounting, without spending tokens.
-- **Browser e2e**: the Chat tab with the fake binary: send, see steps, a table, Adopt -> proposal -> Apply -> file
-  changed and the run re-done; a proposal going stale.
+- **Browser e2e**: the Chat tab with the fake binary: send, see steps, the variant on the chart, change the split and
+  see every view recompute, Adopt -> file changed and the run re-done; a proposal going stale.
 - **Live check (manual, opt-in)**: the two section-2 tasks against real Haiku, recorded with tokens and pass/fail, before
   each release that changes tools or prompt.
 
 ## 12. Phases
 
-1. **MCP server + digests + experiments backend** (sections 4, 6). Useful immediately from Claude Code on the laptop.
+1. **MCP server + digests + try_change, the split and the variant view backend** (sections 4, 6). Useful immediately from Claude Code on the laptop.
 2. **Chat tab + agent process** (sections 5, 7, 8, 10) in the image, with the sign-in card.
 3. **Other backends** (section 9) if the plan's limits or cost make it worthwhile.
 
 ## 13. Open questions
 
-- Train/test split default (75/25) and whether the user wants a fixed test period instead (e.g. always the last 3 months).
 - Conversation scope: one per strategy file (default) or free-standing conversations as well.
-- Whether Opus is offered in the model menu (heavy on the plan's allowance) or Sonnet is the ceiling.
