@@ -10,6 +10,7 @@ import { fillableDays, gapDaysIn, monthGrids, yearChip } from "../util/datawindo
 import { CircleAlert, CircleCheck, CircleX, Database, Folder, Hammer, Info, Plus, RotateCcw, TriangleAlert, Zap } from "../ui/icons.js";
 import { BuildForm } from "./dataParts.js";
 import { DataExplainer } from "./DataExplainer.js";
+import { NoDataPanel } from "./NoDataPanel.js";
 import { DataSourceDialog } from "./DataSourceDialog.js";
 
 type Detail = Awaited<ReturnType<typeof api.symbolDetail>>;
@@ -74,6 +75,7 @@ export function SymbolDialog() {
   const [pickSource, setPickSource] = useState(false);
   const [anchorDay, setAnchorDay] = useState<string | null>(null);
   const [build, setBuild] = useState(false);
+  const [heatKey, setHeatKey] = useState(0);
   const buildBtn = useRef<HTMLButtonElement>(null);
 
   const load = async (sym: string) => {
@@ -211,7 +213,7 @@ export function SymbolDialog() {
               <section className="sd-sec">
                 <h3>Calendar · {cur.label} <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· click a day to start a range, click another to end it</span></h3>
                 <div className="legend" aria-hidden="true"><span><i className="hc s-o" />ok</span><span><i className="hc s-c" />closed</span><span><i className="hc s-t" />thin</span><span><i className="hc s-m" />missing</span></div>
-                <Heatmap symbol={symbol!} kind={cur.kind} source={source || undefined} onPick={pick} sel={{ from, to }} />
+                <Heatmap key={heatKey} symbol={symbol!} kind={cur.kind} source={source || undefined} onPick={pick} sel={{ from, to }} />
                 {gaps.length > 0 && (
                   <div className="sd-gaps">
                     <b>{gaps.length}{gaps.length >= 40 ? "+" : ""} gap{gaps.length === 1 ? "" : "s"}</b>
@@ -220,6 +222,11 @@ export function SymbolDialog() {
                       {gaps.slice(0, 24).map((g) => <button key={g.from} className="chip" onClick={() => jumpGap(g)}>{g.from}{rangeDays(g) > 1 ? ` → ${addDays(g.to, -1)}` : ""}</button>)}
                     </div>
                   </div>
+                )}
+                {/* accepting writes day files, so only into the default source (the one builds write to) */}
+                {!cur.isTicks && !source && !(cur.r as TfReport).qktReads && (
+                  <NoDataPanel symbol={symbol!} broker={(cur.r as TfReport).broker} tf={(cur.r as TfReport).tf} from={from} to={to} missing={cur.r.missing}
+                    onChanged={() => { setHeatKey((k) => k + 1); void load(symbol!); void useStore.getState().refreshData(true); }} />
                 )}
               </section>
             )}

@@ -34,7 +34,9 @@ beforeAll(() => {
   }
   const tdir = path.join(store, "symbols", "TST");
   mkdirSync(tdir, { recursive: true });
-  for (let i = 0; i < 28; i++) if (!isWeekend(i) && i !== 11) writeFileSync(path.join(tdir, `${D(i)}.csv.gz`), gzipSync("timestamp,symbol\n"));  // Jan 12 weekday missing
+  // hourly ticks Sunday to Friday (qkt's fx week; a header-only or sparse file would count as missing), through Fri Jan 26; Jan 12 missing
+  const isSaturday = (i: number) => new Date(Date.UTC(2024, 0, 1) + i * 86_400_000).getUTCDay() === 6;
+  for (let i = 0; i < 26; i++) if (!isSaturday(i) && i !== 11) writeFileSync(path.join(tdir, `${D(i)}.csv.gz`), gzipSync("timestamp,bid,ask\n" + Array.from({ length: 24 }, (_, h) => `${Date.UTC(2024, 0, 1) + i * 86_400_000 + h * 36e5 + 6e4},1,1.1\n`).join("")));
   writeFileSync(path.join(tdir, "manifest.json"), JSON.stringify({ source: "unit-test" }));
   const only = path.join(store, "symbols", "TICKSONLY"); mkdirSync(only, { recursive: true });
   for (let i = 0; i < 5; i++) writeFileSync(path.join(only, `${D(i)}.csv.gz`), gzipSync("x"));
@@ -55,7 +57,7 @@ describe("scanStore on a store with known gaps", () => {
     expect(b.gaps).toEqual([{ from: "2024-01-10", to: "2024-01-11" }, { from: "2024-01-17", to: "2024-01-18" }]);
     expect(b.usable).toEqual([{ from: "2024-01-01", to: "2024-01-10" }, { from: "2024-01-11", to: "2024-01-17" }, { from: "2024-01-18", to: "2024-01-29" }]);
   });
-  it("ticks: weekend absence is normal, a missing weekday is a gap", async () => {
+  it("ticks: an absent Saturday is normal, a missing weekday is a gap", async () => {
     const t = (await scanStore(store)).symbols.find((s) => s.symbol === "TST")!.ticks!;
     expect(t).toMatchObject({ source: "unit-test", first: "2024-01-01", last: "2024-01-26", missing: 1 });
     expect(t.gaps).toEqual([{ from: "2024-01-12", to: "2024-01-13" }]);

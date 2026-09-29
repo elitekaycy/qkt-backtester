@@ -10,6 +10,7 @@ import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
 import { completeConfig, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
 import { rangeDays, longest } from "@qkt-studio/core";
+import { acceptNoData, readAccepted, undoNoData } from "./no-data.js";
 
 const looksLikeStore = async (dir: string) =>
   (await fs.stat(path.join(dir, "bars")).then((s) => s.isDirectory(), () => false)) || (await fs.stat(path.join(dir, "symbols")).then((s) => s.isDirectory(), () => false));
@@ -205,6 +206,24 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
 
   /** Every PORTFOLIO in the workspace with its members, and which portfolios each strategy file belongs to (for the Files tree). */
   app.get("/api/portfolios", async () => listPortfolios(cfg.workspace, await listStrategies(cfg.workspace)));
+
+  /** Days accepted as having no data in the default source (see no-data.ts). */
+  app.get("/api/data/no-data", async () => ({ dataRoot: cfg.dataRoot, entries: await readAccepted(cfg.dataRoot) }));
+  type NoDataBody = { broker: string; symbol: string; tf: string; days: string[] };
+  const noData = (fn: typeof acceptNoData | typeof undoNoData) => async (req: { body: NoDataBody }, reply: import("fastify").FastifyReply) => {
+    try {
+      const r = await fn(cfg.dataRoot, req.body ?? ({} as NoDataBody));
+      if ("error" in r) return reply.code(400).send(r);
+      invalidateScan();
+      return r;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "EROFS" || code === "EPERM") return reply.code(409).send({ error: `The data source is read-only here (${code}), so no day file can be written. Mount it writable to accept days.` });
+      throw e;
+    }
+  };
+  app.post<{ Body: NoDataBody }>("/api/data/no-data", noData(acceptNoData));
+  app.post<{ Body: NoDataBody }>("/api/data/no-data/undo", noData(undoNoData));
 
   /** Kill switch: stop every run and job, and remove the partial output they leave behind. */
   app.post("/api/kill", async () => {
