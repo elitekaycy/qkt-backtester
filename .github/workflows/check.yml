@@ -125,6 +125,8 @@ jobs:
           BASE=http://127.0.0.1:8080/ STRATEGY=strategies/slow.qkt FROM=2024-01-01 TO=2024-03-30 OPTIONS='{}' node scripts/display-truth.e2e.mjs
       - name: a whole session - create, run, edit with auto-run, ticks, grid, apply - shows the right numbers at every step
         run: BASE=http://127.0.0.1:8080/ WIN_FROM=2024-01-02 WIN_TO=2024-03-30 TICK_FROM=2024-01-08 TICK_TO=2024-01-13 node scripts/walkthrough.e2e.mjs
+      - name: tools drive the UI - try_change shows a variant, the split follows, Adopt is one undo step
+        run: BASE=http://127.0.0.1:8080/ STRATEGY=strategies/ema_cross.qkt node scripts/agent-ui.e2e.mjs
       - name: Esc in the vim editor survives browser extensions that blur on Esc
         run: BASE=http://127.0.0.1:8080/ STRATEGY=ema_cross.qkt node scripts/vim-esc.e2e.mjs
       - name: token mode stays healthy

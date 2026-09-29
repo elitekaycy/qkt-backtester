@@ -1,7 +1,7 @@
 {
   "name": "qkt-backtester",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.2.0",
   "type": "module",
   "engines": {
     "node": ">=22.5"
@@ -15,8 +15,9 @@
     "docker:build": "docker build -f docker/Dockerfile -t qkt-backtester:local ."
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@types/node": "^22.0.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^3.2.0"
   }
 }
