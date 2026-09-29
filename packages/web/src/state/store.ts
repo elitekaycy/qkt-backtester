@@ -122,6 +122,7 @@ interface State {
   setOption<K extends keyof RunOptions>(key: K, value: RunOptions[K] | undefined): void;
   selectRun(id: string): Promise<void>;
   loadResults(id: string): Promise<void>;
+  attachRun(runId: string): void;
   refreshRuns(): Promise<void>;
 
   setFilters(patch: Partial<TripQuery>): void;
@@ -158,6 +159,9 @@ export const useStore = create<State>((set, get) => ({
     if (root.some((e) => e.name === CONFIG)) await get().openFile(CONFIG);
     if (first) await get().openFile(first.path);
     await get().refreshRuns();
+    // a run still in progress on the server (the page was reloaded, or it was started in another tab): follow it again
+    const live = get().runs.find((r) => ["queued", "checking", "running", "postprocessing"].includes(r.status));
+    if (live && !get().running) get().attachRun(live.id);
     if (!get().cfg.from || !get().cfg.to) await get().applyDefaultRange();
     void get().refreshData();
   },
@@ -338,33 +342,39 @@ export const useStore = create<State>((set, get) => ({
       const options: RunOptions = tier === "full" ? { ...common, broker, execution, slippage } : common;
       const clean = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined && v !== "")) as RunOptions;
       const { runId } = await api.submit({ strategy, from: cfg.from, to: cfg.to, tier, params: overrides, allowIncomplete: opts.allowIncomplete ?? cfg.allowIncomplete, force: opts.force, auto: opts.auto, options: clean });
-      set({ runId });
-      closeEvents = openRunEvents(runId, (e) => {
-        if (get().runId !== runId) return;
-        if (e.t === "run") set({ run: e.run });
-        else if (e.t === "progress") set({ progress: e });
-        else set((s) => ({ logs: [...s.logs.slice(-299), `${e.level === "warn" ? "warning: " : ""}${e.message}`] }));
-      }, () => {
-        void (async () => {
-          if (get().runId !== runId) return;
-          const run = await api.run(runId).catch(() => null);
-          set({ running: false, run: run ?? get().run });
-          if (run?.status === "done") {
-            await get().loadResults(runId);
-            const sm = get().results?.summary;
-            set({ announce: sm ? `Run finished: ${sm.trades} closed trade${sm.trades === 1 ? "" : "s"}, net P&L ${fmtMoney(sm.totalPnl)}.` : "Run finished." });
-          } else set({ resultsStale: false, announce: run?.status === "failed" ? `Run failed: ${run.error?.message ?? "see the pipeline"}` : "Run stopped." });
-          if (run?.error && run.error.file && run.error.line) {
-            const path = run.error.file === CONFIG ? CONFIG : run.error.file;
-            get().setDiagnostics(path, "run", [{ severity: "error", code: run.error.kind, message: run.error.message, line: run.error.line, col: run.error.col ?? 1, endCol: (run.error.col ?? 1) + 1 }]);
-          } else for (const p of Object.keys(get().problems)) get().setDiagnostics(p, "run", []);
-          await get().refreshRuns();
-        })();
-      });
+      get().attachRun(runId);
     } catch (e) {
       set({ running: false, resultsStale: false, submitError: e instanceof ApiError && e.status === 400 ? e.message : null });
       get().toast("error", (e as Error).message);
     }
+  },
+  /** Follow a run to its end: its status, progress and log, then its results. Used for a new run and, after a page
+   *  load, for a run the server is still working on, so the Stop button is there whenever something runs. */
+  attachRun(runId) {
+    closeEvents?.();
+    set({ runId, running: true });
+    closeEvents = openRunEvents(runId, (e) => {
+      if (get().runId !== runId) return;
+      if (e.t === "run") set({ run: e.run });
+      else if (e.t === "progress") set({ progress: e });
+      else set((s) => ({ logs: [...s.logs.slice(-299), `${e.level === "warn" ? "warning: " : ""}${e.message}`] }));
+    }, () => {
+      void (async () => {
+        if (get().runId !== runId) return;
+        const run = await api.run(runId).catch(() => null);
+        set({ running: false, run: run ?? get().run });
+        if (run?.status === "done") {
+          await get().loadResults(runId);
+          const sm = get().results?.summary;
+          set({ announce: sm ? `Run finished: ${sm.trades} closed trade${sm.trades === 1 ? "" : "s"}, net P&L ${fmtMoney(sm.totalPnl)}.` : "Run finished." });
+        } else set({ resultsStale: false, announce: run?.status === "failed" ? `Run failed: ${run.error?.message ?? "see the pipeline"}` : "Run stopped." });
+        if (run?.error && run.error.file && run.error.line) {
+          const path = run.error.file === CONFIG ? CONFIG : run.error.file;
+          get().setDiagnostics(path, "run", [{ severity: "error", code: run.error.kind, message: run.error.message, line: run.error.line, col: run.error.col ?? 1, endCol: (run.error.col ?? 1) + 1 }]);
+        } else for (const p of Object.keys(get().problems)) get().setDiagnostics(p, "run", []);
+        await get().refreshRuns();
+      })();
+    });
   },
   async stopRun() {
     const id = get().runId;

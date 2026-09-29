@@ -6,7 +6,7 @@ import { revealAt } from "../editor/EditorPane.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { addDays, fmtDur, fmtWindow } from "../util/format.js";
-import { Circle, CircleCheck, CircleDashed, CircleX, Copy, Hammer, OctagonX, Play, TriangleAlert } from "../ui/icons.js";
+import { Square, Circle, CircleCheck, CircleDashed, CircleX, Copy, Hammer, OctagonX, Play, TriangleAlert } from "../ui/icons.js";
 
 const LABEL: Record<string, string> = { project: "Project", config: "Config", parse: "Parse", coverage: "Data check", backtest: "Backtest", postprocess: "Post-process", render: "Render" };
 const ORDER = ["project", "config", "parse", "coverage", "backtest", "postprocess", "render"] as const;
@@ -76,7 +76,7 @@ export function PipelineTab() {
         </> : <span className="muted">Nothing has run yet</span>}
         <span className="grow" />
         {running && progress && <span className="ink2 num nowrap">{progress.fills} fills · {fmtDur(progress.elapsedMs)}</span>}
-        {running ? <button className="btn danger sm" onClick={() => void store().killAll()}><OctagonX size={14} />Stop</button>
+        {running ? <button className="btn danger sm" title="Stop this run and delete its files" aria-label="Stop this run and delete its files" onClick={() => void store().stopRun()}><Square size={12} fill="currentColor" />Stop</button>
           : <button className="btn sm" disabled={!strategy} onClick={() => void store().startRun()}><Play size={13} fill="currentColor" />Run</button>}
       </div>
       {running && <div className={`progress${phase === "coverage" || !progress ? " indet" : ""}`}><i style={{ width: phase === "backtest" && progress?.etaMs ? `${Math.min(97, (progress.elapsedMs / (progress.elapsedMs + progress.etaMs)) * 100)}%` : undefined }} /></div>}

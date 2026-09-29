@@ -13,7 +13,7 @@ import {
   type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
 } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
-import { RunIndex, type IndexRow } from "./index-db.js";
+import { RunIndex, STARTUP_MS, type IndexRow } from "./index-db.js";
 import { JailError, resolveInJail, toRel } from "./jail.js";
 import { DERIVED_VERSION, postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
 import { execQkt, spawnGroup, type ProcHandle } from "./proc.js";
@@ -667,7 +667,7 @@ export class Runner {
     const days = Math.max(1, (Date.parse(r.to) - Date.parse(r.from)) / DAY_MS);
     const tick = setInterval(() => {
       const elapsed = Date.now() - a.startedMs;
-      this.emit(a, { t: "progress", phase: a.phase, fills: r.counts!.fills, orders: r.counts!.orders, elapsedMs: elapsed, etaMs: perDay ? Math.max(0, Math.round(perDay * days - elapsed)) : null });
+      this.emit(a, { t: "progress", phase: a.phase, fills: r.counts!.fills, orders: r.counts!.orders, elapsedMs: elapsed, etaMs: perDay !== null ? Math.max(0, Math.round(STARTUP_MS + perDay * days - elapsed)) : null });
     }, 250);
 
     const proc = spawnGroup(this.cfg.qktBin, args, {
