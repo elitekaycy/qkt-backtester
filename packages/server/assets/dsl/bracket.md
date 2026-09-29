@@ -1,0 +1,236 @@
+# BRACKET
+
+A `BRACKET` attaches a stop-loss and a take-profit to an entry as one atomic group. The broker submits them together; when either side fills, the other auto-cancels (one-cancels-other semantics).
+
+## Shape
+
+<!-- qkt-doc: grammar -->
+```qkt
+BUY <stream> SIZING <size>
+    BRACKET {
+      STOP_LOSS <distance_or_price>,
+      TAKE_PROFIT <distance_or_price>
+    }
+```
+
+Or, less verbose, the bare form (without the `BRACKET { ... }` wrapper) when you only need a stop:
+
+<!-- qkt-doc: grammar -->
+```qkt
+BUY <stream> SIZING <size>
+    STOP_LOSS <distance_or_price>
+```
+
+## Distance specifications
+
+Both `STOP_LOSS` and `TAKE_PROFIT` accept these forms:
+
+### `BY <points>` — fixed distance in quote currency
+
+```qkt
+BRACKET {
+  STOP_LOSS BY 100,
+  TAKE_PROFIT BY 300
+}
+```
+
+For BTC at $67,000 long, stop at $66,900, target at $67,300. The units match the symbol's quote (USD for crypto, pips for FX *but converted to price points*).
+
+### `BY <pct> PCT` — percent of entry price
+
+```qkt
+BRACKET {
+  STOP_LOSS BY 1.0 PCT,
+  TAKE_PROFIT BY 3.0 PCT
+}
+```
+
+For BTC at $67,000 long, stop at $66,330, target at $69,010.
+The value is a percentage, not a fraction: `1 PCT` means 1%. Stop-loss percentages
+must be at least 0.01 and less than 50; take-profit percentages must also be at least
+0.01. Smaller values are rejected with a percent-units hint because they commonly
+indicate a fraction-scale input such as `0.004` where `0.4` was intended.
+
+> **Compatibility:** runtimes before commit `788a90f1` interpreted this operand as a
+> fraction (`0.004` meant 0.4%). Current runtimes use percentage points, so the
+> economically equivalent value is `0.4`. Migrate old strategy sources and parameter
+> grids before replaying them on a current runtime.
+
+### `AT <price_expression>` — absolute price
+
+```qkt
+BRACKET {
+  STOP_LOSS AT btc.close - atr(btc, 14) * 2,
+  TAKE_PROFIT AT btc.close + atr(btc, 14) * 6
+}
+```
+
+Computed at action-execute time. `btc.close` is the entry price (the close of the bar that fired the rule). Arithmetic, indicator calls, and `LET`-bound values all work.
+
+That bar close is only the placement-time estimate. For fill-anchored fixed brackets,
+live execution modifies venue protection to the actual fill geometry after acceptance.
+If the venue rejects that modification, qkt reports a protection failure and arms an
+engine-held stop at the intended fill-anchored level. Engine-held protection requires
+healthy tick delivery.
+
+### Mixing
+
+You can mix forms in one bracket:
+
+```qkt
+BRACKET {
+  STOP_LOSS BY 2.0 PCT,                                  -- percent stop
+  TAKE_PROFIT AT btc.close + atr(btc, 14) * 6            -- ATR target
+}
+```
+
+## Scale-out (multi-leg take-profit) — not implemented
+
+A bracket carries exactly one take-profit. A fractional multi-leg take-profit
+(`TAKE_PROFIT { 0.33 AT ..., 0.33 AT ... }`) does not parse and has no AST; earlier
+revisions of this page documented one that was never built.
+
+To bank a position in pieces today, choose one of:
+
+- **Repeat the entry instead of splitting the exit.** `BUY btc SIZING 0.01 TIMES 3` with a
+  different `TAKE_PROFIT` per action gives three independently-exiting positions and is the
+  closest equivalent. See [TIMES](times.md).
+- **`RESIZE`** trims an open position toward a target size, but it is not usable alongside a
+  `BRACKET` on the same position — see the gotchas below.
+
+## Complete protection
+
+`STOP_LOSS` and `TAKE_PROFIT` are currently a complete bracket pair. A bare
+stop or take-profit, including one inherited from `DEFAULTS`, is rejected at
+compile time. Use a `BRACKET` with both legs and keep any additional
+rule-driven `CLOSE` condition alongside it.
+
+## Trailing stop
+
+Trailing stops aren't a `BRACKET` leg — they're an order type on the entry itself:
+
+```qkt
+BUY btc SIZING 0.1 ORDER_TYPE = TRAILING BY atr(btc, 14) * 2
+SELL btc SIZING 0.1 ORDER_TYPE = TRAILING PCT 5
+```
+
+See [the stop-loss recipe](../../how-to/add-stop-loss.md#trailing-stop) for semantics and engine-vs-broker routing.
+
+## Armed trailing stop
+
+`STOP LOSS TRAILING <distance> AFTER MFE >= <threshold>` adds a one-way armed trailing stop as a bracket leg. The stop sits at a fixed distance from the entry until the trade's maximum favorable excursion (MFE) crosses `<threshold>`, then converts to a trailing stop at the same distance from the running favorable extreme.
+
+```qkt
+BUY btc SIZING 0.1 BRACKET {
+  STOP LOSS TRAILING 5 AFTER MFE >= 10,
+  TAKE PROFIT BY 50
+}
+```
+
+Semantics:
+
+- **Pre-arm:** stop sits at `entry − distance` (BUY) or `entry + distance` (SELL).
+- **Arming:** when MFE crosses `<threshold>`, the stop arms and starts tracking the favorable extreme.
+- **Post-arm:** stop sits at `hwm − distance` (BUY) or `hwm + distance` (SELL), where `hwm` is the running favorable extreme since fill.
+- Arming is one-way: once armed, the stop never disarms.
+- The same `<distance>` value applies pre and post — only the reference point shifts (entry → hwm).
+
+`<distance>` must be positive and `<threshold>` non-negative; `<threshold>` of zero means "trail from inception." Either may be an expression such as `atr(btc.candle, 14) * 2`: it is evaluated once when the order is built, from the signal bar, and the trail keeps that fixed distance from then on. If an operand is still undefined during warm-up, or evaluates to a value outside those bounds, the order is skipped. Inside a `STACK` bracket both must be numeric literals. `TAKE PROFIT TRAILING` is rejected at parse time — armed trailing is stop-only.
+
+Risk-based sizing (`SIZING RISK $ N`) sees `<distance>` as the worst-case stop distance regardless of arming state.
+
+The arming logic is always engine-managed: brokers that support native brackets see only the entry and TP; the engine owns the stop and re-evaluates its level on every tick.
+
+See [Phase 36 — Armed trailing stop](../../phases/phase-36-armed-trailing-stop.md) for the worked examples and known limitations.
+
+## Stepped stop ratchet
+
+A stepped stop locks discrete, direction-relative profit milestones:
+
+```qkt
+BUY btc SIZING 0.1 BRACKET {
+  STOP LOSS BY 50
+    STEP TO BREAKEVEN AFTER MFE >= 30
+    STEP TO ENTRY + 40 AFTER MFE >= 70,
+  TAKE PROFIT BY 120
+}
+```
+
+The initial stop is 50 points from the fill. At 30 points of MFE it moves to
+entry; at 70 points it moves to 40 points of locked profit. `BREAKEVEN + <d>`
+and `ENTRY + <d>` are equivalent direction-relative targets, so the same source
+works for long and short entries.
+
+Thresholds must be strictly increasing and target distances non-negative. The
+initial distance, thresholds and targets may be expressions (for example
+`STOP LOSS BY atr(btc.candle, 14) * 2 STEP TO BREAKEVEN AFTER MFE >= atr(btc.candle, 14)`):
+they are evaluated once when the order is built and fixed for the life of the
+trade, and an undefined or invalid evaluation skips the order. Inside a `STACK`
+bracket they must be numeric literals. Each step is consumed once. A target that
+would widen the current stop is skipped with an operator warning.
+
+## Time-tightening stop
+
+A time-tightening stop reduces its risk distance on the injected engine clock:
+
+```qkt
+BUY btc SIZING 0.1 BRACKET {
+  STOP LOSS BY 60 TIGHTEN BY 10 EVERY 15m FLOOR 20,
+  TAKE PROFIT BY 120
+}
+```
+
+It starts 60 points from the fill, tightens by 10 points per completed 15-minute
+interval, and stops tightening at a 20-point distance. The initial distance,
+tightening delta, and floor must be positive, and the floor cannot exceed the
+initial distance. Like the stepped stop, they may be expressions evaluated once
+when the order is built (numeric literals inside a `STACK` bracket).
+
+Both ratchet forms are engine-managed in paper/backtest and live execution. The
+engine evaluates only live stops for the tick's symbol, persists ratchet progress
+for restart, and never widens a stop. On venues with position modification, each
+tightening transition is also mirrored to the venue position so the tighter stop
+continues protecting it if qkt goes offline.
+
+## How the bracket reaches the broker
+
+The DSL submits one `BRACKET` request to the order manager. From there:
+
+1. **If the broker supports `BRACKET` natively** (MT5 brokers, PaperBroker): the order manager submits the entry + stop + target as one atomic group. The venue handles OCO semantics.
+
+2. **If the broker doesn't** (Bybit Spot via REST): the order manager submits the entry alone. On fill, it submits the stop and target as separate orders linked by OCO state. When one fills, the other auto-cancels via the engine.
+
+The DSL is the same either way. See [Broker integration](../../concepts/broker-integration.md) for the capability matrix.
+
+## Defaults via `DEFAULTS`
+
+If most of your strategies use the same bracket pattern, hoist it:
+
+```qkt
+DEFAULTS {
+  SIZING = 0.1
+  STOP_LOSS = BY atr(SYMBOL, 14) * 2          -- 2-ATR stop
+  TAKE_PROFIT = BY atr(SYMBOL, 14) * 6        -- 6-ATR target (3R)
+}
+
+RULES
+    WHEN signal_condition
+    THEN BUY btc     -- inherits sizing + stop + target
+```
+
+`SYMBOL` substitutes for the rule's stream at compile time. See [LET and DEFAULTS](let-defaults.md).
+
+## Common gotchas
+
+- **Wrong side stop direction.** For a `BUY`, the stop must be **below** the entry price. The parser does check this for absolute prices but can't always check expressions (`btc.close + 100` for a long stop is a logic error). Test on backtest before live.
+- **Bracket stop too close** — MT5 brokers enforce `tradeStopsLevel` minimum distance. Orders too tight reject at the venue. Use `atr * <multiplier>` to scale; if the multiplier produces too-tight stops in low-vol regimes, the order rejects.
+- **There is no `TRAILING_STOP` clause.** Use a trailing entry (`ORDER_TYPE = TRAILING BY <distance>`) or an armed trailing stop leg (`STOP LOSS TRAILING <distance> AFTER MFE >= <threshold>`), both above.
+- **Limit-entry bracket execution.** When the entry is a limit order (`BUY btc SIZING 0.1 ORDER_TYPE = LIMIT AT 67000 BRACKET ...`), the bracket only activates after the limit fills. If the limit never fills, the bracket never sends.
+
+## What this composes with
+
+- [Actions](actions.md) — `BRACKET` is a modifier on `BUY`/`SELL`
+- [SIZING](sizing.md) — risk-based sizing (`PCT RISK`) requires a stop in the bracket (or bare)
+- [Indicators](indicators.md) — ATR is the canonical stop input
+- [Expressions](expressions.md) — arithmetic in stop/target prices
+- [Mean-reversion example](../../examples/mean-reversion.md) — heavy use of scale-out brackets

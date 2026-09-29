@@ -1,0 +1,358 @@
+# Expressions
+
+The values you can compute inside conditions, action parameters, and `LET` bindings. Everything in qkt — numbers, booleans, indicator values, account state — composes the same way.
+
+## Literals
+
+```qkt
+100               -- integer
+1.5               -- decimal
+0.001             -- decimal
+1e-3              -- scientific notation
+"hello"           -- string (mostly for LOG)
+'BUY'             -- single-quoted string also works
+TRUE              -- boolean
+FALSE
+```
+
+There is no `NULL` literal. A missing value comes from data (a lookback past the start of history, an indicator still warming up); test for it with [`IS NULL`](#is-null-is-not-null).
+
+Numbers are parsed as exact decimals internally (BigDecimal). No floating-point drift over thousands of trades.
+Strings support exact, case-sensitive `=` / `==` and `!=` / `<>` comparisons. Ordered comparisons
+(`<`, `<=`, `>`, `>=`) remain numeric-only.
+
+## Arithmetic
+
+<!-- qkt-doc: grammar -->
+```qkt
+a + b             -- addition
+a - b             -- subtraction
+a * b             -- multiplication
+a / b             -- division
+-a                -- unary negation
+```
+
+Standard precedence: `* /` before `+ -`. There is no `%` operator; use `mod(<a>, <b>)` (see [Indicators](indicators.md#math-helpers)). Use parentheses for clarity:
+
+```qkt
+WHEN (btc.high - btc.low) / btc.close > 0.02     -- 2% range
+THEN LOG "volatile bar"
+```
+
+## Comparison and boolean
+
+Covered in [Conditions](conditions.md):
+
+- `=` / `==`, `!=` / `<>`, `<`, `<=`, `>`, `>=`
+- `AND`, `OR`, `NOT`
+- `BETWEEN ... AND ...`
+- `IN [...]`
+- `CROSSES ABOVE`, `CROSSES BELOW`
+- `<expr> IS NULL`, `<expr> IS NOT NULL`
+
+### `IS NULL` / `IS NOT NULL`
+
+```qkt
+EMA(gold.close, 50) IS NULL                 -- true while the indicator hasn't received 50 closes yet
+gold.bid IS NOT NULL AND gold.bid < ASK     -- gate that only fires when a quote is available
+```
+
+Tests whether the inner expression evaluates to "missing" — the internal `Value.Undefined` sentinel produced by indicators that haven't warmed, snapshots that haven't been captured, missing optional fields (`btc.bid` on a no-quote feed), and any arithmetic that propagated an `Undefined`.
+
+`IS NULL` always returns a boolean — it never propagates `Undefined` itself, so it composes safely with `AND` / `OR`. Binds tighter than `AND`, so `fast IS NOT NULL AND slow IS NOT NULL AND CROSSES(fast, slow) ABOVE` parses without parentheses.
+
+## Stream field access
+
+```qkt
+btc.open
+btc.high
+btc.low
+btc.close
+btc.volume
+btc.bid           -- optional (quote feeds only)
+btc.ask
+btc.spread        -- ask - bid, computed when both present
+```
+
+`btc.timestamp` is the bar's start time in epoch milliseconds, and `btc.timestamp[n]` is the start of the bar `n` bars ago. It is not a price series: `ema(btc.timestamp, 9)` is an error. For the strategy's clock use [`NOW`](now.md), with fields such as `NOW.hour_utc` and `NOW.weekday`. There is no `btc.mid` either; compute `(btc.bid + btc.ask) / 2`.
+
+Lookback:
+
+```qkt
+btc.close         -- current closed candle's close
+btc.close[0]      -- same as btc.close
+btc.close[1]      -- previous candle
+btc.close[20]     -- 20 bars ago
+```
+
+Out-of-range returns `null` (which makes any containing comparison `false`).
+
+## Indicator calls
+
+See [Indicators](indicators.md) for the full catalog.
+
+```qkt
+ema(btc.close, 9)            -- numeric series (closed-candle field)
+rsi(btc.close, 14)
+atr(btc.candle, 14)          -- candle series (needs OHLC)
+highest(btc.close, 20)
+vwap(btc.tick, 100)          -- tick series (per-tick price + volume, not candle close)
+```
+
+Treat them as numbers — they slot into any arithmetic context.
+
+### Series argument shape per indicator kind
+
+- **Numeric** (`ema`, `sma`, `rsi`, …): take a stream field like `btc.close`. Strategy-author picks which OHLCV field to feed.
+- **Candle** (`atr`): take `<stream>.candle` (the whole OHLCV record). The indicator reads multiple fields internally.
+- **Tick** (`vwap`): take `<stream>.tick` (raw ticks, not candle-aggregated). Updates on every tick, not only on candle close. Requires `Tick.volume` to be present — live MT5/Bybit feeds carry it; backtest feeds need to provide it explicitly.
+
+## Account references
+
+```qkt
+ACCOUNT.equity         -- cash + open P&L
+ACCOUNT.balance        -- cash only
+ACCOUNT.realized_pnl   -- realized P&L since strategy start
+ACCOUNT.unrealized_pnl -- open-position P&L right now
+ACCOUNT.total_pnl      -- realized + unrealized
+```
+
+```qkt
+LET riskUsd = ACCOUNT.equity * 0.01            -- 1% of equity at risk
+LET riskQty = riskUsd / (atr(btc, 14) * 2)     -- size that loses riskUsd on a 2-ATR stop
+```
+
+### Trade-history accessors (Phase 25-followup #132)
+
+```qkt
+ACCOUNT.last_trade_at    -- epoch ms of the most recent fill on this strategy; null before any trade
+ACCOUNT.last_trade_pnl   -- realized P&L of the most recent closed trade; null before any close
+ACCOUNT.win_streak       -- consecutive closed wins (0 if last close was a loss / no trades yet)
+ACCOUNT.loss_streak      -- consecutive closed losses
+ACCOUNT.dd_pct           -- current drawdown from this strategy's equity peak, as a percent (5.0 = 5%)
+ACCOUNT.realized_today   -- this strategy's closed-trade P&L since UTC midnight
+ACCOUNT.realized_month   -- this strategy's closed-trade P&L since the 1st of the UTC month
+```
+
+`realized_today` and `realized_month` reset at their UTC boundary and survive a daemon restart within the same day or month. They are in account currency; a monthly loss gate in risk units multiplies your per-trade risk:
+
+```qkt
+STRATEGY monthly_gate VERSION 1
+SYMBOLS
+    eur = EXNESS:EURUSD EVERY 30m
+PARAM riskUsd = 50
+RULES
+    -- Stop opening new trades once this month's closed losses reach 3R; exits still run.
+    WHEN eur.close > eur.open AND POSITION.eur = 0 AND ACCOUNT.realized_month > -3 * riskUsd
+    THEN BUY eur SIZING 0.1
+```
+
+`STREAK` exposes the same outcome stream through the issue-facing ladder namespace:
+
+```qkt
+STREAK.wins       -- consecutive closed wins
+STREAK.losses     -- consecutive closed losses
+STREAK.banked     -- realized P&L banked during the current win streak
+
+TRADES.today            -- entry fills recorded for this strategy since UTC midnight
+COOLDOWN.remaining_s    -- seconds left in the configured after-loss cooldown, or 0
+```
+
+`last_trade_at` and `last_trade_pnl` return `Value.Undefined` until the strategy has closed at least one trade — compose with `IS NULL` for safe gating:
+
+```qkt
+-- Cooldown between entries: don't re-enter for an hour after a trade.
+WHEN signal AND POSITION.btc = 0
+ AND (ACCOUNT.last_trade_at IS NULL OR NOW.epoch_ms - ACCOUNT.last_trade_at > 3600000)
+THEN BUY btc SIZING 0.5 PCT RISK BRACKET { STOP_LOSS BY 300, TAKE_PROFIT BY 600 }
+
+-- Self-halt on drawdown: stop trading at 5% DD until equity recovers.
+WHEN signal AND ACCOUNT.dd_pct < 5
+THEN BUY btc SIZING 0.5 PCT RISK BRACKET { STOP_LOSS BY 300, TAKE_PROFIT BY 600 }
+
+-- Loss-streak-aware sizing: scale down after consecutive losses.
+WHEN signal AND STREAK.losses < 2
+THEN BUY btc SIZING 1.0 PCT RISK BRACKET { STOP_LOSS BY 300, TAKE_PROFIT BY 600 }
+WHEN signal AND STREAK.losses >= 2
+THEN BUY btc SIZING 0.5 PCT RISK BRACKET { STOP_LOSS BY 300, TAKE_PROFIT BY 600 }
+```
+
+Win and loss streaks are exclusive — `STREAK.losses >= 1` implies `STREAK.wins = 0` and vice versa. Both return `0` until the strategy has closed at least one trade. The bounded trade-history buffer is persisted with engine state when persistence is enabled; otherwise a fresh process starts with empty streak state.
+
+A "win" is `realized_pnl > 0` for the closing fill; "loss" is `< 0`. Position-opening fills (zero realized) are skipped entirely — they don't count toward either streak.
+
+`STREAK.banked` sums only the consecutive winning closes at the end of history. A loss resets it to `0`, so it can be used to press with banked profit without increasing base risk after a losing close:
+
+```qkt
+THEN BUY btc SIZING RISK $ (100 + 0.30 * STREAK.banked) BRACKET { STOP_LOSS BY 300, TAKE_PROFIT BY 600 }
+```
+
+`TRADES.today` and `COOLDOWN.remaining_s` read the same PACER ledger used by configured per-strategy throttles. `TRADES.today` counts entry fills, not closed round trips.
+
+## Position references
+
+<!-- qkt-doc: grammar -->
+```qkt
+POSITION.<stream>                           -- net quantity (signed) — same as POSITION.<stream>.quantity
+POSITION.<stream>.quantity                  -- explicit form
+POSITION.<stream>.entry_price               -- average entry price
+POSITION.<stream>.pnl                       -- strategy realized + this-symbol unrealized
+POSITION.<stream>.realized_pnl              -- strategy-level realized P&L (see note)
+POSITION.<stream>.unrealized_pnl            -- open P&L on this position
+POSITION.<stream>.holding_duration          -- seconds since the position was opened
+POSITION.<stream>.mfe                       -- max favorable excursion of the PRIMARY leg (price units)
+POSITION.<stream>.mae                       -- max adverse excursion of the PRIMARY leg (price units)
+OPEN_ORDERS.<stream>                        -- active risk-increasing entry-order count
+```
+
+```qkt
+WHEN POSITION.btc > 0
+ AND POSITION.btc.unrealized_pnl > POSITION.btc.entry_price * 0.05    -- 5% in profit
+THEN CLOSE btc
+```
+
+`POSITION.<stream>.mfe` reads the high-water mark of `current_price - entry_price` (for BUY) or `entry_price - current_price` (for SELL) on the PRIMARY leg since it opened. Returns `0` if no primary exists. Same value the stack engine uses for `STACK_AT MFE >= ...` threshold checks; see [STACK_AT](stack-at.md).
+
+`POSITION.<stream>.mae` reads the high-water mark of `entry_price - current_price` (for BUY) or `current_price - entry_price` (for SELL) on the PRIMARY leg since it opened. Returns `0` if no primary exists. Same value the stack engine uses for `STACK_AT MAE >= ... RECOVER ...` arming checks.
+
+`POSITION.<stream>` returns a signed quantity. `POSITION.btc > 0` means long; `POSITION.btc < 0` means short; `POSITION.btc = 0` means flat. Most entry rules guard with `POSITION.btc = 0`.
+
+`OPEN_ORDERS.<stream>` is scoped to the current strategy and resolved stream symbol. It counts active risk-increasing entries in pending, submitted, working, or partially-filled states. It excludes dormant composite children and protective or otherwise risk-reducing exits. Terminal fills, cancellations, rejections, and GTD expiry remove the entry from the count through the same order lifecycle used in replay and live execution.
+
+```qkt
+WHEN setup
+ AND POSITION.gold = 0
+ AND OPEN_ORDERS.gold = 0
+THEN SELL gold ORDER_TYPE = LIMIT AT gold.close + 2 SIZING 1
+```
+
+!!! note "realized_pnl is currently strategy-level"
+    `POSITION.<stream>.realized_pnl` returns the strategy's total realized P&L, not the per-symbol slice. True per-symbol realized requires lot-level accounting — tracked on the [backlog](../../planned.md#phase-28-exploratory).
+
+## Conditional expressions (`CASE`)
+
+<!-- qkt-doc: grammar -->
+```qkt
+CASE
+  WHEN <cond1> THEN <expr1>
+  WHEN <cond2> THEN <expr2>
+  [ ELSE <default_expr> ]
+END
+```
+
+```qkt
+LET size = CASE
+  WHEN atr(btc, 14) > 200 THEN 0.05        -- volatile: small size
+  WHEN atr(btc, 14) > 100 THEN 0.10        -- normal
+  ELSE 0.15                                -- quiet: bigger
+END
+
+RULES
+    WHEN ema(btc.close, 9) CROSSES ABOVE ema(btc.close, 21)
+    THEN BUY btc SIZING size
+```
+
+`CASE` is an **expression**, not a control-flow statement. It evaluates and returns a value; the surrounding context (here `LET size = ...`) decides what to do with it.
+
+If no `WHEN` matches and there's no `ELSE`, the expression returns `null`.
+
+## Math helpers
+
+<!-- qkt-doc: grammar -->
+```qkt
+abs(<expr>)
+max(<a>, <b>)
+min(<a>, <b>)
+sqrt(<expr>)
+log(<expr>)
+exp(<expr>)
+floor(<expr>)
+ceil(<expr>)
+round(<expr>)
+pow(<base>, <exp>)
+```
+
+```qkt
+LET vol_norm = (btc.close - sma(btc.close, 20)) / atr(btc, 14)
+LET signal_strength = abs(vol_norm)
+
+WHEN signal_strength > 2 THEN LOG "strong dislocation" z=vol_norm
+```
+
+## Aggregates
+
+An aggregate folds a series over a window. The function name is followed by one series in parentheses and a `SINCE` window:
+
+<!-- qkt-doc: grammar -->
+```qkt
+sum(<expr>)  SINCE OPEN | T-<N>     -- total
+mean(<expr>) SINCE OPEN | T-<N>     -- average
+max(<expr>)  SINCE OPEN | T-<N>     -- largest value
+min(<expr>)  SINCE OPEN | T-<N>     -- smallest value
+```
+
+- `SINCE T-N` covers the last `N` closed bars of the stream the series is evaluated on. It is `null` until `N` bars have been seen, so it composes with the usual null handling.
+- `SINCE OPEN` covers the bars since the position on that stream was opened. It resets whenever the position opens, closes or flips.
+
+A rolling window also has a two-argument shorthand. Each form is exactly the `SINCE T-N` aggregate beside it, and `N` must be a positive integer literal:
+
+<!-- qkt-doc: grammar -->
+```qkt
+sum(<expr>, N)          -- sum(<expr>) SINCE T-N
+mean(<expr>, N)         -- mean(<expr>) SINCE T-N
+avg(<expr>, N)          -- mean(<expr>) SINCE T-N
+count(<condition>, N)   -- sum(CASE WHEN <condition> THEN 1 ELSE 0 END) SINCE T-N
+```
+
+`max(a, b)` and `min(a, b)` keep meaning the larger and smaller of two values; for a rolling extreme use `max(<expr>) SINCE T-N` or the `highest` / `lowest` indicators (which exclude the current bar). A `SINCE T-N` window adds `N` bars to its stream's automatic warmup.
+
+```qkt
+STRATEGY rolling_count VERSION 1
+SYMBOLS
+    btc = BACKTEST:BTCUSDT EVERY 1d
+LET pct_up_days = count(btc.close > btc.close[1], 20) / 20
+RULES
+    WHEN pct_up_days > 0.7 THEN LOG "70%+ of last 20 bars up"
+```
+
+## Null handling
+
+Expressions return `null` when:
+
+- An indicator isn't warm yet
+- A lookback `[N]` is out of range
+- A division has denominator 0
+- A function gets unexpected input
+
+`null` propagates through arithmetic: `null + 5 = null`. Comparisons with `null` always return `false`. This means **conditions short-circuit safely during warmup** — your rule simply doesn't fire while data is missing.
+
+!!! info "Explicit `IS NULL` / `IS NOT NULL` coming in Phase 24"
+    Phase 24 will add the explicit checks. See [Planned features](../../planned.md#phase-24-risk-sizing-primitives). Today, the silent short-circuit handles every case where you'd want them — your rule simply doesn't fire while an indicator is null.
+
+## Type rules (loose)
+
+The DSL is dynamically typed at the expression level. Most operations coerce sensibly:
+
+- Number + Number → Number
+- Number + Null → Null
+- Boolean AND/OR Boolean → Boolean
+- Comparing Number to Number → Boolean
+- Comparing Number to Null → False
+- String concat is not supported in conditions; strings are only valid in `LOG` action arguments
+
+Mixing types in arithmetic produces a compile error: `5 + "hello"` is a parse-time failure.
+
+## Common gotchas
+
+- **Division by zero returns `null`, not infinity or an error.** A divide-by-zero in a condition makes the condition `false`. Be aware.
+- **Operator precedence.** `AND` binds tighter than `OR`. Parentheses are free.
+- **`a == b` vs `a = b`** — both work. Pick one and stick with it for the project.
+- **No string operations in conditions.** Strings are for `LOG` only. Don't try `WHEN btc.symbol = "BTCUSDT"` (the parser doesn't expose `symbol` on streams).
+- **`null` is opinionated.** Treating null-comparisons as false simplifies most code but can hide bugs. Explicit `IS NULL`/`IS NOT NULL` lands in Phase 24.
+
+## What this composes with
+
+- [Conditions](conditions.md) — the most common host for expressions
+- [Indicators](indicators.md) — produce numbers your expressions consume
+- [SIZING](sizing.md) and [BRACKET](bracket.md) — arithmetic in action parameters
+- [LET](let-defaults.md) — name a complex expression for reuse

@@ -45,3 +45,18 @@ describe("/api/mcp", () => {
     await c.close();
   });
 });
+
+describe("knowledge tools", () => {
+  it("serve the cheat sheet, a page, examples and the config reference", async () => {
+    const c = await mcpClient(base, "t0k");
+    const sheet = await call(c, "dsl_reference");
+    expect(sheet.text).toMatch(/cheat sheet/);
+    expect(sheet.text).toMatch(/topics: .*bracket/);
+    expect((await call(c, "dsl_reference", { topic: "bracket" })).text).toMatch(/STOP_LOSS/);
+    expect((await call(c, "dsl_reference", { topic: "../../etc/passwd" })).isError).toBe(true);
+    expect((await call(c, "dsl_examples", { query: "ema" })).json.length).toBeGreaterThan(0);
+    expect((await call(c, "config_reference", { key: "risk" })).text).toMatch(/max_daily_loss/);
+    expect((await call(c, "instruments_reference")).text).toMatch(/contractSize/);
+    await c.close();
+  });
+});
