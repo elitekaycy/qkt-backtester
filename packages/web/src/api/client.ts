@@ -6,14 +6,30 @@ export class ApiError extends Error {
 }
 
 const TOKEN_KEY = "qkt-studio-token";
+/**
+ * The access token, remembered in this browser (localStorage) so a new tab or a restart does not ask again. A
+ * `?token=` link is saved and then taken out of the address bar, so it does not stay in the history or a shared screen.
+ * A token an older version kept for the tab only (sessionStorage) is carried over.
+ */
 export function getToken(): string | null {
   try {
-    const q = new URLSearchParams(location.search).get("token");
-    if (q) { sessionStorage.setItem(TOKEN_KEY, q); return q; }
-    return sessionStorage.getItem(TOKEN_KEY);
+    const url = new URL(location.href), q = url.searchParams.get("token");
+    if (q) {
+      localStorage.setItem(TOKEN_KEY, q);
+      url.searchParams.delete("token");
+      history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+      return q;
+    }
+    const kept = localStorage.getItem(TOKEN_KEY);
+    if (kept) return kept;
+    const tab = sessionStorage.getItem(TOKEN_KEY);
+    if (tab) { localStorage.setItem(TOKEN_KEY, tab); sessionStorage.removeItem(TOKEN_KEY); }
+    return tab;
   } catch { return null; }
 }
-export const setToken = (t: string) => { try { sessionStorage.setItem(TOKEN_KEY, t); } catch { /* private mode */ } };
+export const setToken = (t: string) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* storage blocked: asked again next time */ } };
+/** Forget the saved token (a shared computer); the next load asks for it again. */
+export const forgetToken = () => { try { localStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(TOKEN_KEY); } catch { /* storage blocked */ } };
 
 const withToken = (url: string): string => {
   const t = getToken();
