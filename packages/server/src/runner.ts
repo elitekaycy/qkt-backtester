@@ -3,7 +3,7 @@ import { prepareDataView, allowedWindow } from "./data-view.js";
 import { configStartingBalance } from "@qkt-studio/core";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
-import { scanCached, seriesDays } from "./data-scan.js";
+import { scanSymbolIn, seriesDays } from "./data-scan.js";
 import { knownParsed, rememberParsed } from "./parse-cache.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -712,9 +712,10 @@ export class Runner {
    */
   private async checkWindowData(a: Active): Promise<void> {
     const r = a.run, req = a.request;
-    const report = await scanCached(a.dataRoot).catch(() => null);
-    if (!report) return;
-    const bySym = new Map(report.symbols.map((s) => [s.symbol, s]));
+    // only the symbols this run reads: a whole-store scan can take minutes on a large archive, and the run would wait for it
+    const syms = [...new Set(a.info.streams.map((s) => s.symbol))];
+    const reports = await Promise.all(syms.map((s) => scanSymbolIn(a.dataRoot, s).catch(() => null)));
+    const bySym = new Map(reports.filter((x): x is NonNullable<typeof x> => x !== null).map((s) => [s.symbol, s]));
     const bases = barBases(a.info.streams, (broker, symbol) => bySym.get(symbol)?.bars.filter((b) => b.broker === broker && b.files > 0 && !b.qktReads).map((b) => b.tf) ?? []);
     const found: Array<{ what: string; days: string[] }> = [];
     const seen = new Set<string>();

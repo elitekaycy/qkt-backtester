@@ -94,7 +94,7 @@ export function PipelineTab() {
                 <>
                   <button className="btn sm primary" onClick={() => void buildBars()}><Hammer size={14} />Build bars</button>
                   <button className="btn sm" onClick={() => void store().startRun({ allowIncomplete: true })}>Run anyway (waive holes)</button>
-                  <button className="btn sm ghost" onClick={() => ui.set({ section: "data" })}>Open Data</button>
+                  <button className="btn sm ghost" onClick={() => ui.showSection("data")}>Open Data</button>
                 </>
               )}
             </div>

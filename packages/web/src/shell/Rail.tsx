@@ -56,7 +56,7 @@ export function Rail() {
         );
       })}
       <Tip label="Journal" kbd="Ctrl+J" side="right">
-        <button className="rail-btn" aria-label="Journal" aria-pressed={ui.journalOpen} onClick={() => ui.set({ journalOpen: !ui.journalOpen })}>
+        <button className="rail-btn" aria-label="Journal" aria-pressed={ui.journalOpen} onClick={() => { if (ui.journalOpen) ui.set({ journalOpen: false }); else ui.openJournal(); }}>
           <ChartColumn size={20} strokeWidth={1.75} />
           {results && !ui.journalOpen && <span className="pip" aria-label="results available" />}
         </button>
