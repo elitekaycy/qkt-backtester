@@ -136,10 +136,8 @@ function apply1(src: string, c: Change, notes: string[]): string {
         if (r.bracket) {
           const [a, z] = r.bracket, text = lines.slice(a, z).join(" ");
           const inner = /\{([\s\S]*)\}/.exec(text)?.[1] ?? "";
-          let parts = splitTop(inner).map((p) => p.replace(/\s+/g, " "));
-          // Normalize all legs to underscore form
-          parts = parts.map((p) => p.replace(/^STOP\s+LOSS\b/i, "STOP_LOSS").replace(/^TAKE\s+PROFIT\b/i, "TAKE_PROFIT"));
-          const set = (regex: RegExp, keyUnderscore: string, spec: string | null) => { if (!spec) return; const i = parts.findIndex((p) => regex.test(p)); if (i >= 0) { const part = parts[i]!; const modifierMatch = part.match(/(\s+(?:TRAILING|STEP|TIGHTEN).*)$/i); const modifiers = modifierMatch?.[1] ?? ""; parts[i] = `${keyUnderscore} ${spec}${modifiers}`; } else parts.push(`${keyUnderscore} ${spec}`); };
+          const parts = splitTop(inner).map((p) => p.replace(/\s+/g, " "));
+          const set = (regex: RegExp, keyUnderscore: string, spec: string | null) => { if (!spec) return; const i = parts.findIndex((p) => regex.test(p)); if (i >= 0) parts[i] = `${keyUnderscore} ${spec}`; else parts.push(`${keyUnderscore} ${spec}`); };
           set(/^STOP[ _]LOSS\b/i, "STOP_LOSS", stop); set(/^TAKE[ _]PROFIT\b/i, "TAKE_PROFIT", target);
           lines.splice(a, z - a, `${indentOf(lines[a]!)}BRACKET { ${parts.join(", ")} }`);
           done.unshift(`rule ${r.n}`);

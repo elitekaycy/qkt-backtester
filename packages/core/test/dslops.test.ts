@@ -149,11 +149,33 @@ RULES
           TAKE PROFIT BY 50
         }
 `;
-    // set_bracket with target should replace TAKE PROFIT but keep STOP LOSS TRAILING
+    // set_bracket with target only should leave stop unchanged in its original spelling
     const result = applyChanges(srcWithTwoWord, [{ op: "set_bracket", target: 100 }]).source;
-    expect(result).toContain("STOP_LOSS TRAILING 5 AFTER MFE >= 10");
+    expect(result).toContain("STOP LOSS TRAILING 5 AFTER MFE >= 10");
     expect(result).toContain("TAKE_PROFIT BY 100");
     expect(result).not.toContain("TAKE PROFIT BY 50");
     expect(result.match(/TAKE_PROFIT/g)!.length).toBe(1); // exactly one take-profit leg
+  });
+
+  it("replaces armed-trailing stop completely when set_bracket sets it, leaving take-profit unchanged", () => {
+    const srcWithTrailing = `STRATEGY test VERSION 1
+
+SYMBOLS
+    btc = BACKTEST:BTCUSD EVERY 15m
+
+RULES
+    WHEN ema(btc.close, 9) CROSSES ABOVE ema(btc.close, 21)
+    THEN BUY btc SIZING 0.1
+        BRACKET {
+          STOP LOSS TRAILING 5 AFTER MFE >= 10,
+          TAKE PROFIT BY 50
+        }
+`;
+    // set_bracket({stop: 8}) should replace entire stop leg, not preserve TRAILING, keep TAKE PROFIT spelling
+    const result = applyChanges(srcWithTrailing, [{ op: "set_bracket", stop: 8 }]).source;
+    expect(result).toContain("STOP_LOSS BY 8");
+    expect(result).toContain("TAKE PROFIT BY 50");
+    expect(result).not.toContain("TRAILING");
+    expect(result.match(/STOP_LOSS/g)!.length).toBe(1); // exactly one stop leg
   });
 });
