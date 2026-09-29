@@ -18,7 +18,8 @@ export function registerRunTools(s: McpServer, ctx: ToolCtx): void {
   s.registerTool("run_backtest", { description: "Run a strategy as the Run button does (it shows on the chart when it is the open file); waits up to 3 minutes.", inputSchema: { path: z.string().optional(), from: z.string().optional(), to: z.string().optional(), tier: z.enum(["draft", "full"]).optional(), params: z.record(z.string()).optional() } },
     (a) => guard(async () => {
       const p = pathOf(ctx, a.path), w = windowOf(ctx, p, a.from, a.to);
-      const { runId, cached } = await ctx.runner.submit({ strategy: p, ...w, tier: (a.tier ?? "draft") as Tier, params: a.params });
+      const { runId, cached, joined } = await ctx.runner.submit({ strategy: p, ...w, tier: (a.tier ?? "draft") as Tier, params: a.params });
+      if (!joined) ctx.started.add(runId); // a joined run is someone else's identical run in flight; this tool did not start it
       const run = await Promise.race([ctx.runner.waitFor(runId), new Promise<null>((r) => setTimeout(() => r(null), 180_000))]);
       ctx.events.emit({ t: "run", runId });
       if (!run) return ok({ runId, status: "running", note: "still running; ask get_run later" });
@@ -26,9 +27,9 @@ export function registerRunTools(s: McpServer, ctx: ToolCtx): void {
       return ok({ runId, cached, status: run.status, error: run.error?.message, net: sm?.totalPnl, trades: sm?.trades, winRate: sm?.winRate, profitFactor: sm?.profitFactor, maxDrawdown: sm?.maxDrawdown });
     }));
   s.registerTool("run_walkforward", { description: "Walk-forward test (the Lab's): optimise params on rolling train windows, test on the next; returns a job id.", inputSchema: { path: z.string().optional(), from: z.string(), to: z.string(), params: z.record(z.array(z.string())), train: z.string().describe("e.g. 90d"), test: z.string().describe("e.g. 30d"), step: z.string().describe("e.g. 30d") } },
-    (a) => guard(async () => ok({ jobId: (await ctx.jobs.walkForward({ strategy: pathOf(ctx, a.path), from: a.from, to: a.to, tier: "draft", params: a.params, train: a.train, test: a.test, step: a.step })).id })));
+    (a) => guard(async () => { const j = await ctx.jobs.walkForward({ strategy: pathOf(ctx, a.path), from: a.from, to: a.to, tier: "draft", params: a.params, train: a.train, test: a.test, step: a.step }); ctx.started.add(j.id); return ok({ jobId: j.id }); }));
   s.registerTool("sweep", { description: "Grid over params (the Lab grid). The job's rows give you the FIRST part of the split only; the user sees both.", inputSchema: { path: z.string().optional(), params: z.record(z.array(z.string())), from: z.string().optional(), to: z.string().optional() } },
-    (a) => guard(async () => { const p = pathOf(ctx, a.path); return ok({ jobId: (await ctx.jobs.grid({ strategy: p, ...windowOf(ctx, p, a.from, a.to), tier: "draft", params: a.params })).id }); }));
+    (a) => guard(async () => { const p = pathOf(ctx, a.path); const j = await ctx.jobs.grid({ strategy: p, ...windowOf(ctx, p, a.from, a.to), tier: "draft", params: a.params }); ctx.started.add(j.id); return ok({ jobId: j.id }); }));
   s.registerTool("job_status", { description: "Progress and results of a job (sweep, walk-forward, data build).", inputSchema: { id: z.string() } },
     ({ id }) => guard(async () => {
       const j = ctx.jobs.get(id);
@@ -45,7 +46,10 @@ export function registerRunTools(s: McpServer, ctx: ToolCtx): void {
       return ok({ ...base, split, rows });
     }));
   s.registerTool("cancel", { description: "Stop a run or job the tools started.", inputSchema: { id: z.string() } },
-    ({ id }) => guard(async () => ok({ cancelled: (await ctx.runner.cancel(id, { purge: true })) || (await ctx.jobs.cancel(id)) })));
+    ({ id }) => guard(async () => {
+      if (!ctx.started.has(id)) return fail("this run/job was started from the studio, not by a tool; stop it there");
+      return ok({ cancelled: (await ctx.runner.cancel(id, { purge: true })) || (await ctx.jobs.cancel(id)) });
+    }));
   s.registerTool("propose_build_bars", { description: "Propose building bars from ticks for a symbol and timeframe; the user starts the job.", inputSchema: { symbol: z.string(), tf: z.string(), from: z.string(), to: z.string() } },
     (a) => guard(async () => {
       const symbol = a.symbol.replace(/^.*:/, "");

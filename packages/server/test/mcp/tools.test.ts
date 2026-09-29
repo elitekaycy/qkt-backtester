@@ -221,6 +221,27 @@ describe.skipIf(!haveData)("run and job tools", () => {
     await c.close(); await s4.app.close();
   }, 300_000);
 
+  it("cancel refuses a run/job not started by a tool, and accepts one that was", async () => {
+    const s6 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
+    await s6.app.listen({ port: 0, host: "127.0.0.1" });
+    const b6 = `http://127.0.0.1:${(s6.app.server.address() as { port: number }).port}`;
+    const c = await mcpClient(b6, "t0k");
+
+    // a run the user started directly (from the Run button), never through a tool
+    const { runId } = await s6.runner.submit({ strategy: "strategies/ema.qkt", from: "2024-10-01", to: "2024-10-15", tier: "draft" });
+    const notOwned = await call(c, "cancel", { id: runId });
+    expect(notOwned.isError).toBe(true);
+    await s6.runner.waitFor(runId);
+    const untouched = await s6.runner.getRun(runId);
+    expect(untouched?.status).not.toBe("cancelled");
+
+    // a run the tool itself started
+    const r = await call(c, "run_backtest", { path: "strategies/ema.qkt", from: "2024-10-01", to: "2024-10-15" });
+    const owned = await call(c, "cancel", { id: r.json.runId });
+    expect(owned.isError).toBeFalsy();
+    await c.close(); await s6.app.close();
+  }, 120_000);
+
   it("propose_build_bars refuses an invalid range before creating a proposal", async () => {
     const s5 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
     await s5.app.listen({ port: 0, host: "127.0.0.1" });

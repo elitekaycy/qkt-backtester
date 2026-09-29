@@ -34,6 +34,7 @@ export async function createStudio(cfg: ServerConfig) {
   await proposals.init();
   const variants = new Variants(cfg, runner, events);
   await variants.init();
+  const started = new Set<string>();
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
@@ -47,7 +48,7 @@ export async function createStudio(cfg: ServerConfig) {
     registerProposalRoutes(a, proposals);
     registerSplitRoutes(a, cfg, events, data);
     registerVariantRoutes(a, cfg, variants);
-    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants });
+    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants, started });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
       hasConfig: existsSync(`${cfg.workspace}/qkt.config.yaml`), maxParallel: cfg.maxParallel,

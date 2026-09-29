@@ -36,6 +36,7 @@ export function registerTryTools(s: McpServer, ctx: ToolCtx): void {
       const base = baseOf(ctx, a.base);
       const v = await ctx.variants.create(base, a.label ?? (a.changes as Change[]).map((c) => c.op).join(", "), a.changes as Change[], await windowFor(ctx, base, a));
       await ctx.variants.run(v);
+      if (v.runId) ctx.started.add(v.runId); // the variant's own run only; its base run may be the user's own
       return ok({ variantId: v.id, label: v.label, diff: v.diff, notes: v.notes, ...(await compareVariant(ctx, v)), shown: "on the user's chart; they can Adopt, Discard or go back" });
     }));
   s.registerTool("try_variants", { description: "Several labelled alternatives at once (e.g. stop 1, 2, 3 %), each run beside the base; returns a comparison table.", inputSchema: { variants: z.array(z.object({ label: z.string(), changes: changesSchema })).min(2).max(6), base: z.string().optional(), ...winArgs } },
@@ -44,6 +45,7 @@ export function registerTryTools(s: McpServer, ctx: ToolCtx): void {
       const made = [];
       for (const x of a.variants) made.push(await ctx.variants.create(base, x.label, x.changes as Change[], window));
       await Promise.all(made.map((v) => ctx.variants.run(v)));
+      for (const v of made) if (v.runId) ctx.started.add(v.runId); // the variants' own runs only; bases may be the user's own
       const rows = [];
       for (const v of made) rows.push({ variantId: v.id, label: v.label, ...(await compareVariant(ctx, v)).variant });
       return ok({ base: (await compareVariant(ctx, made[0]!)).base, variants: rows });

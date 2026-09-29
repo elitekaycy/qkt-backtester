@@ -8,7 +8,11 @@ import type { ViewState } from "../agent/view-state.js";
 import type { Proposals } from "../agent/proposals.js";
 import type { Variants } from "../agent/variants.js";
 
-export interface ToolCtx { cfg: ServerConfig; runner: Runner; jobs: Jobs; data: RunData; events: EventBus; view: ViewState; proposals: Proposals; variants: Variants }
+export interface ToolCtx {
+  cfg: ServerConfig; runner: Runner; jobs: Jobs; data: RunData; events: EventBus; view: ViewState; proposals: Proposals; variants: Variants;
+  /** Run/job ids the tools themselves started (never a run the user started from the Run button, or a base run of a variant): cancel() only touches these. */
+  started: Set<string>;
+}
 export const MAX_CHARS = 8000;
 /** Compact JSON for the model; cut at MAX_CHARS with a note on how to ask for the rest. */
 export function ok(value: unknown, more = "narrow it with limit/offset/fields"): CallToolResult {
