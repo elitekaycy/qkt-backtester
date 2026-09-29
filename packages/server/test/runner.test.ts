@@ -213,6 +213,7 @@ d("failures are caught at the right step, with real positions", () => {
     expect(run.error?.message).toMatch(/qkt data build-bars XAUUSD/);
     expect(run.buildBarsHint).toMatch(/^qkt data build-bars XAUUSD --tf 15m/);
     expect(run.steps.find((s) => s.id === "coverage")!.status).toBe("failed");
+    expect(run.steps.filter((s) => s.status === "running")).toEqual([]); // nothing left "running…" after the failure
     expect(existsSync(path.join(ws, "runs", run.id, "engine"))).toBe(false);
   });
 

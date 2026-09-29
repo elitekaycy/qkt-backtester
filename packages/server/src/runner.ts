@@ -548,7 +548,8 @@ export class Runner {
         st.status = "failed"; st.message = failure.error.message;
         if (st.startedAt) st.ms = Date.now() - Date.parse(st.startedAt);
       }
-      for (const s of r.steps) if (s.status === "pending") s.status = "skipped";
+      // every later step, including one already marked running (qkt reports coverage while the backtest step is open)
+      for (const s of r.steps) if (s !== st && (s.status === "pending" || s.status === "running")) s.status = "skipped";
       r.error = failure.error;
       try { r.status = transition(r.status, "failed"); } catch { r.status = "failed"; }
       r.finishedAt = new Date().toISOString(); r.durationMs = Date.now() - a.startedMs;
@@ -738,6 +739,7 @@ export class Runner {
         const day = new Date(t0 + i * DAY_MS).toISOString().slice(0, 10);
         if (day >= r.from && day < r.to) days.push(day);
       }
+      // days outside the series (before its first file, after its last) are qkt's own coverage failure, with the exact fix
       if (days.length) found.push({ what: r.tier === "draft" ? `${s.symbol} ${base} bars` : `${s.symbol} ticks`, days });
     }
     if (!found.length) return;

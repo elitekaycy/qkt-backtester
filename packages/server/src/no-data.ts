@@ -55,7 +55,7 @@ export function emptyBarDay(broker: string, symbol: string, timeframeMs: number)
  * A timeframe folder that is a link into another store (a read-only archive mounted beside this one) is replaced by a
  * real folder of links to the same files, so a day can be added here without writing to the archive.
  */
-async function ownFolder(dir: string): Promise<void> {
+export async function ownFolder(dir: string): Promise<void> {
   const st = await fs.lstat(dir).catch(() => null);
   if (!st) { await fs.mkdir(dir, { recursive: true }); return; }
   if (!st.isSymbolicLink()) return;

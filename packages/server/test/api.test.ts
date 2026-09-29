@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync, copyFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync, copyFileSync, readdirSync, chmodSync, symlinkSync, lstatSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -375,6 +376,36 @@ d("jobs", () => {
       expect((await s2.app.inject({ method: "POST", url: "/api/data/build-bars", payload: bad })).statusCode).toBe(400);
     }
     await s2.app.close();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("build-bars never overwrites, leaves days without ticks missing, and never writes into a linked archive", async () => {
+    const scratch = realpathSync(mkdtempSync(path.join(os.tmpdir(), "data-")));
+    const sym = path.join(scratch, "symbols", "XAUUSD");
+    mkdirSync(sym, { recursive: true });
+    for (const day of ["2024-10-01", "2024-10-02", "2024-10-03"]) copyFileSync(path.join(realData, "symbols", "XAUUSD", `${day}.csv.gz`), path.join(sym, `${day}.csv.gz`));
+    writeFileSync(path.join(sym, "2024-10-04.csv.gz"), gzipSync("timestamp,symbol,price,volume,bid,ask,bidVolume,askVolume\n")); // source had nothing
+    // the 15m folder is a link into a read-only archive that already holds 2024-10-01 (not the bytes qkt would build)
+    const archive = path.join(scratch, "archive-15m");
+    mkdirSync(archive);
+    const existing = readFileSync(path.join(realData, "bars", "BACKTEST", "XAUUSD", "15m", "2024-10-03.bin"));
+    writeFileSync(path.join(archive, "2024-10-01.bin"), existing);
+    chmodSync(archive, 0o555);
+    mkdirSync(path.join(scratch, "bars", "BACKTEST", "XAUUSD"), { recursive: true });
+    const folder = path.join(scratch, "bars", "BACKTEST", "XAUUSD", "15m");
+    symlinkSync(archive, folder);
+    const s2 = await createStudio({ ...cfg, workspace: realpathSync(mkdtempSync(path.join(os.tmpdir(), "ws2-"))), dataRoot: scratch });
+    const id = (await s2.app.inject({ method: "POST", url: "/api/data/build-bars", payload: { symbol: "XAUUSD", tf: "15m", from: "2024-10-01", to: "2024-10-05" } })).json().jobId;
+    const j = await until(async () => { const x = (await s2.app.inject({ url: `/api/jobs/${id}` })).json(); return x.status !== "running" ? x : false; });
+    expect(j.status).toBe("done");
+    expect(readdirSync(archive)).toEqual(["2024-10-01.bin"]);                              // archive untouched
+    expect(lstatSync(folder).isDirectory() && !lstatSync(folder).isSymbolicLink()).toBe(true);
+    expect(readFileSync(path.join(folder, "2024-10-01.bin")).equals(existing)).toBe(true); // existing day not overwritten
+    expect(existsSync(path.join(folder, "2024-10-02.bin"))).toBe(true);                    // built
+    expect(existsSync(path.join(folder, "2024-10-04.bin"))).toBe(false);                   // no ticks: stays missing
+    expect(j.log.join("\n")).toMatch(/1 day\(s\) have a tick file with no ticks in it, so no bars: 2024-10-04/);
+    await s2.app.close();
+    chmodSync(archive, 0o755);
     rmSync(scratch, { recursive: true, force: true });
   });
 

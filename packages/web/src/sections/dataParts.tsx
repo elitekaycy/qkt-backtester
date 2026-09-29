@@ -4,6 +4,7 @@ import { api } from "../api/client.js";
 import { useStore } from "../state/store.js";
 import { Popover } from "../ui/Popover.js";
 import { addDays } from "../util/format.js";
+import { tfMs } from "@qkt-studio/core/strategy";
 import { yearChip } from "../util/datawindow.js";
 import { CircleAlert, CircleCheck, CircleX, CloudDownload, Hammer } from "../ui/icons.js";
 
@@ -39,6 +40,13 @@ export function BuildForm({ open, onClose, anchor, symbol, tf: tf0 }: { open: bo
   const [from, setFrom] = useState(""), [to, setTo] = useState("");
   const f = from || cur?.ticks?.first || "", t = to || (cur?.ticks?.last ? addDays(cur.ticks.last, 1) : "");
   const tfs = TFS.includes(tf) ? TFS : [tf, ...TFS];
+  // qkt reads the COARSEST built folder whose timeframe divides the strategy's (a 4h strategy on 30m bars when 30m is
+  // the coarsest that divides 4h), whether or not that folder covers the window. A new, coarser folder therefore takes
+  // over from the finer ones for every such strategy, with only the range built into it.
+  const built = (cur?.bars ?? []).filter((b) => b.files > 0 && !b.qktReads).map((b) => b.tf);
+  const ms = tfMs(tf);
+  const finer = ms ? built.filter((b) => b !== tf && (tfMs(b) ?? 0) > 0 && ms % tfMs(b)! === 0).sort((a, b) => tfMs(b)! - tfMs(a)!) : [];
+  const shadows = !built.includes(tf) && finer.length > 0;
   const go = async () => {
     if (!cur) return;
     try { const { jobId } = await api.buildBars({ symbol: cur.symbol, tf, from: f, to: t }); trackJob(jobId, `Build ${cur.symbol} ${tf} bars`); onClose(); }
@@ -57,7 +65,18 @@ export function BuildForm({ open, onClose, anchor, symbol, tf: tf0 }: { open: bo
               <div className="field"><label htmlFor="bb-f">From</label><input id="bb-f" className="input" type="date" value={f} onChange={(e) => setFrom(e.target.value)} /></div>
               <div className="field"><label htmlFor="bb-t">To</label><input id="bb-t" className="input" type="date" value={t} onChange={(e) => setTo(e.target.value)} /></div>
             </div>
-            <div className="hint">Runs <span className="mono">qkt data build-bars</span>. Days already built are skipped, so this also fills gaps. Stop interrupts it and removes any half-written file.</div>
+            {shadows && (
+              <div className="banner warn" role="alert"><CircleAlert size={14} /><span>
+                Probably not needed: qkt already makes {tf} candles from the {finer[0]} bars. Building a {tf} folder makes qkt read it
+                instead of {finer[0]} for every strategy whose timeframe {tf} divides, and it only holds the days you build here, so
+                windows outside them would stop running. To extend the data, build {finer.join(", ")} for the new days instead.
+              </span></div>
+            )}
+            <div className="hint">
+              Runs <span className="mono">qkt data build-bars</span> into <span className="mono">bars/BACKTEST/{cur?.symbol ?? "SYMBOL"}/{tf}/</span>, the folder qkt reads.
+              It never overwrites: a day that already has a file is skipped, so this only fills days that have none. A day whose tick file
+              holds no ticks gets no bars and stays missing. Stop interrupts it and removes any half-written file.
+            </div>
             <button className="btn primary" onClick={() => void go()} disabled={!f || !t}><Hammer size={15} />Build {tf} bars</button>
           </>
         )}
