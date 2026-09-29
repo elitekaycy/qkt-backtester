@@ -18,6 +18,7 @@ import { registerSplitRoutes } from "./split.js";
 import { EventBus, registerEvents } from "./agent/events.js";
 import { ViewState, registerView } from "./agent/view-state.js";
 import { Proposals, registerProposalRoutes } from "./agent/proposals.js";
+import { Variants, registerVariantRoutes } from "./agent/variants.js";
 import { registerMcp } from "./mcp/index.js";
 
 export async function createStudio(cfg: ServerConfig) {
@@ -31,6 +32,8 @@ export async function createStudio(cfg: ServerConfig) {
   const view = new ViewState();
   const proposals = new Proposals(cfg, events, jobs);
   await proposals.init();
+  const variants = new Variants(cfg, runner, events);
+  await variants.init();
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
@@ -43,14 +46,15 @@ export async function createStudio(cfg: ServerConfig) {
     registerView(a, view);
     registerProposalRoutes(a, proposals);
     registerSplitRoutes(a, cfg, events, data);
-    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals });
+    registerVariantRoutes(a, cfg, variants);
+    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
       hasConfig: existsSync(`${cfg.workspace}/qkt.config.yaml`), maxParallel: cfg.maxParallel,
     }));
   });
   app.addHook("onClose", async () => { await runner.close(); });
-  return { app, runner, jobs, data, events, view, proposals };
+  return { app, runner, jobs, data, events, view, proposals, variants };
 }
 
 /**

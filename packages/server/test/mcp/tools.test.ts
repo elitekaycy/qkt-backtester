@@ -168,3 +168,36 @@ describe("the split", () => {
     await c.close();
   });
 });
+
+describe.skipIf(!haveData)("try_change", () => {
+  it("runs the change on a copy, compares it with the base, announces it, and never touches the base file", async () => {
+    const s3 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
+    await s3.app.listen({ port: 0, host: "127.0.0.1" });
+    const b3 = `http://127.0.0.1:${(s3.app.server.address() as { port: number }).port}`;
+    const file = path.join(ws, "strategies", "trybase.qkt");
+    writeFileSync(file, "STRATEGY trybase VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold.close, 21)\n     AND POSITION.gold = 0\n    THEN BUY gold SIZING 0.1\n        BRACKET { STOP_LOSS BY 5, TAKE_PROFIT BY 20 }\n");
+    const before = readFileSync(file, "utf8");
+    const seen: Array<{ t: string }> = [];
+    s3.events.subscribe((e) => seen.push(e));
+    const c = await mcpClient(b3, "t0k");
+    const r = await call(c, "try_change", { base: "strategies/trybase.qkt", changes: [{ op: "set_bracket", target: 5 }], from: "2024-10-01", to: "2024-10-15", tier: "draft" });
+    expect(r.isError).toBe(false);
+    expect(r.json.diff).toMatch(/TAKE_PROFIT BY 5/);
+    expect(r.json.variant.status).toBe("done");
+    expect(r.json.base.status).toBe("done");
+    expect(r.json.variant.trades).toBeGreaterThan(0);
+    expect(r.json.variant.parts.first).toBeDefined();
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(seen.some((e) => e.t === "variant")).toBe(true);
+    // the user saves a new version meanwhile: the next try builds on the new text, the old variant keeps its own copy
+    writeFileSync(file, before.replace("ema(gold.close, 9)", "ema(gold.close, 12)"));
+    const r2 = await call(c, "try_change", { base: "strategies/trybase.qkt", changes: [{ op: "set_bracket", stop: 8 }], from: "2024-10-01", to: "2024-10-15", tier: "draft" });
+    const v1 = await (await fetch(`${b3}/api/variants/${r.json.variantId}`, { headers: { Authorization: "Bearer t0k" } })).json();
+    const v2 = await (await fetch(`${b3}/api/variants/${r2.json.variantId}`, { headers: { Authorization: "Bearer t0k" } })).json();
+    expect(v1.source).toMatch(/ema\(gold\.close, 9\)/);
+    expect(v2.source).toMatch(/ema\(gold\.close, 12\)/);
+    const bad = await call(c, "try_change", { base: "strategies/trybase.qkt", changes: [{ op: "set_bracket", stop: "a lot" }] });
+    expect(bad.isError).toBe(true);
+    await c.close(); await s3.app.close();
+  }, 240_000);
+});
