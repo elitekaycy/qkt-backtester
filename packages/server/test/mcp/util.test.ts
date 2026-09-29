@@ -47,6 +47,14 @@ describe("ToolBudget", () => {
     active.clear();
   });
 
+  it("lets one request through when no tool work is in flight, however large (try_variants on a small host)", () => {
+    const b = new ToolBudget(deps, 2);
+    const r = b.reserve(7);
+    expect(() => b.reserve(1)).toThrow(/^busy: 7 runs queued/);
+    r();
+    expect(b.reserve(1)).toBeTypeOf("function");
+  });
+
   it("runs one tool job at a time", async () => {
     const b = new ToolBudget(deps, 4);
     let finish!: (j: { id: string }) => void;

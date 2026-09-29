@@ -36,6 +36,8 @@ export class Variants {
   async init(): Promise<void> {
     this.items = await this.store.read([]);
     if (!Array.isArray(this.items)) this.items = [];
+    // an unreadable index knows nothing: sweeping against it would delete every variant, so keep the folders
+    if (this.store.corrupt || !this.items.length) return;
     const known = new Set(this.items.map((v) => v.id));
     for (const e of await fs.readdir(path.join(this.cfg.workspace, DIR), { withFileTypes: true }).catch(() => [])) {
       if (e.isDirectory() && !known.has(e.name)) await this.removeDir(e.name);

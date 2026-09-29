@@ -77,7 +77,9 @@ interface BudgetDeps { isActive(id: string): boolean; jobRunning(id: string): bo
 /**
  * Tool-started work in flight: at most `maxRuns` runs active or queued (2 x maxParallel in the studio) and one grid or
  * walk-forward job. Past that a tool gets "busy" instead of piling more onto the queue the user's own Run waits in.
- * Room is reserved synchronously before any await, so parallel tool calls cannot all slip past the check.
+ * Room is reserved synchronously before any await, so parallel tool calls cannot all slip past the check. When no tool
+ * work is in flight one request always goes through, however many runs it needs (try_variants needs up to 7), so a
+ * small host never refuses a request that nothing is competing with.
  */
 export class ToolBudget {
   private runs = new Set<string>();
@@ -94,7 +96,7 @@ export class ToolBudget {
   /** Reserve room for `n` new runs or throw "busy"; call the returned release once their submits have resolved. */
   reserve(n: number): () => void {
     const used = this.inFlight() + this.reserved;
-    if (used + n > this.maxRuns) throw new Error(`busy: ${used} runs queued; wait or cancel (at most ${this.maxRuns} tool runs at once)`);
+    if (used > 0 && used + n > this.maxRuns) throw new Error(`busy: ${used} runs queued; wait or cancel (at most ${this.maxRuns} tool runs at once)`);
     this.reserved += n;
     let released = false;
     return () => { if (!released) { released = true; this.reserved -= n; } };

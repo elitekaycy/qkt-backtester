@@ -167,7 +167,7 @@ export const useAgent = create<{
       if (rebased) { text = rebased.source; useStore.getState().toast("info", `${name} had changed; the variant's changes were applied to your current text`); }
       else plan = "confirm";
     }
-    if (plan === "confirm" && !(await askConfirm({ title: `${name} changed since this variant was made`, message: "Adopt anyway? This replaces your newer text; Ctrl+Z restores it.", confirmLabel: "Adopt anyway", danger: true }))) return;
+    if (plan === "confirm" && !(await askConfirm({ title: `${name} changed since this variant was made`, message: "Adopt anyway? This replaces your newer text (Ctrl+Z in the editor restores it while the file is open).", confirmLabel: "Adopt anyway", danger: true }))) return;
 
     let editedInEditor = false;
     const workspace = useStore.getState().info?.workspace;

@@ -11,6 +11,8 @@ import path from "node:path";
 export class JsonFile<T> {
   private chain: Promise<void> = Promise.resolve();
   private n = 0;
+  /** True after a read found the file present but not valid JSON (it was moved aside). */
+  corrupt = false;
   constructor(private file: string, private indent?: number) {}
 
   /**
@@ -23,6 +25,7 @@ export class JsonFile<T> {
     catch { return fallback; }
     try { return JSON.parse(text) as T; }
     catch {
+      this.corrupt = true;
       const aside = `${this.file}.corrupt-${Date.now()}`;
       await fs.rename(this.file, aside).catch(() => undefined);
       console.error(`${this.file} was not valid JSON: kept as ${path.basename(aside)}, starting empty`);

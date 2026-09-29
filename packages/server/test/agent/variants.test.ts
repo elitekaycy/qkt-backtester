@@ -38,6 +38,17 @@ describe("variant folders", () => {
     expect(existsSync(path.join(vdir(), "orphan1"))).toBe(false);
     expect(dirs().length).toBe(200);
   }, 60_000);
+
+  it("are all kept when the index is corrupt (an unreadable index is not an empty one)", async () => {
+    const v = new Variants(testConfig(ws), {} as Runner, new EventBus());
+    await v.init();
+    const made = await v.commit(prepared("kept"));
+    writeFileSync(path.join(vdir(), "index.json"), "{ not json");
+    const again = new Variants(testConfig(ws), {} as Runner, new EventBus());
+    await again.init();
+    expect(existsSync(path.join(vdir(), made.id))).toBe(true);
+    expect(readdirSync(vdir()).some((f) => f.startsWith("index.json.corrupt-"))).toBe(true);
+  });
 });
 
 describe("Variants.run", () => {

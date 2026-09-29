@@ -36,7 +36,7 @@ export async function createStudio(cfg: ServerConfig) {
   const variants = new Variants(cfg, runner, events);
   await variants.init();
   const started = new Set<string>();
-  const budget = new ToolBudget({ isActive: (id) => runner.isActive(id), jobRunning: (id) => jobs.get(id)?.status === "running" }, 2 * cfg.maxParallel);
+  const budget = new ToolBudget({ isActive: (id) => runner.isActive(id), jobRunning: (id) => jobs.get(id)?.status === "running" }, Math.max(7, 2 * cfg.maxParallel));
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
