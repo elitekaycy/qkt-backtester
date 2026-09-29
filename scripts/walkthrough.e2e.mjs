@@ -91,7 +91,9 @@ ok("auto-run is on by default", (await p.evaluate(() => document.querySelector("
 console.log("1. create a strategy from the Files panel");
 await p.evaluate(() => document.querySelector("button[aria-label='New strategy']")?.click()); await sleep(600);
 // the studio's own name dialog (no native prompt): clear, type the name, Enter
-await p.click("#ask-text", { clickCount: 3 }); await p.keyboard.type(NAME); await p.keyboard.press("Enter"); await sleep(2500);
+await p.waitForSelector("#ask-text"); await p.focus("#ask-text");
+await p.keyboard.down("Control"); await p.keyboard.press("a"); await p.keyboard.up("Control");
+await p.keyboard.type(NAME); await p.keyboard.press("Enter"); await sleep(2500);
 const txt0 = await p.evaluate(() => window.__qktEditor?.getValue() ?? "");
 ok("the new strategy opens in the editor", txt0.includes(`STRATEGY ${NAME} VERSION 1`), txt0.slice(0, 60));
 // the template's stream, whatever the data source holds: "    px = BACKTEST:XAUUSD EVERY 15m"
