@@ -16,6 +16,7 @@ import { applySettings } from "./settings.js";
 import { registerTerminal } from "./terminal.js";
 import { EventBus, registerEvents } from "./agent/events.js";
 import { ViewState, registerView } from "./agent/view-state.js";
+import { Proposals, registerProposalRoutes } from "./agent/proposals.js";
 import { registerMcp } from "./mcp/index.js";
 
 export async function createStudio(cfg: ServerConfig) {
@@ -27,6 +28,8 @@ export async function createStudio(cfg: ServerConfig) {
   await jobs.init();
   const events = new EventBus();
   const view = new ViewState();
+  const proposals = new Proposals(cfg, events, jobs);
+  await proposals.init();
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
@@ -37,14 +40,15 @@ export async function createStudio(cfg: ServerConfig) {
     registerTerminal(a, cfg);
     registerEvents(a, events);
     registerView(a, view);
-    registerMcp(a, { cfg, runner, jobs, data, events, view });
+    registerProposalRoutes(a, proposals);
+    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
       hasConfig: existsSync(`${cfg.workspace}/qkt.config.yaml`), maxParallel: cfg.maxParallel,
     }));
   });
   app.addHook("onClose", async () => { await runner.close(); });
-  return { app, runner, jobs, data, events, view };
+  return { app, runner, jobs, data, events, view, proposals };
 }
 
 /**

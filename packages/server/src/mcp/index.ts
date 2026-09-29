@@ -5,6 +5,7 @@ import { STUDIO_VERSION } from "../postprocess.js";
 import { registerContextTools } from "./tools-context.js";
 import { registerKnowledgeTools } from "./tools-knowledge.js";
 import { registerAnalysisTools } from "./tools-analysis.js";
+import { registerAuthoringTools } from "./tools-authoring.js";
 import type { ToolCtx } from "./util.js";
 
 /** Every tool group registers here; later tasks add their `register...` calls to this list. */
@@ -13,6 +14,7 @@ export function buildMcp(ctx: ToolCtx): McpServer {
   registerContextTools(s, ctx);
   registerKnowledgeTools(s, ctx);
   registerAnalysisTools(s, ctx);
+  registerAuthoringTools(s, ctx);
   return s;
 }
 

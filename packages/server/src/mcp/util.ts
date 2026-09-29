@@ -5,8 +5,9 @@ import type { Jobs } from "../jobs.js";
 import type { RunData } from "../run-data.js";
 import type { EventBus } from "../agent/events.js";
 import type { ViewState } from "../agent/view-state.js";
+import type { Proposals } from "../agent/proposals.js";
 
-export interface ToolCtx { cfg: ServerConfig; runner: Runner; jobs: Jobs; data: RunData; events: EventBus; view: ViewState }
+export interface ToolCtx { cfg: ServerConfig; runner: Runner; jobs: Jobs; data: RunData; events: EventBus; view: ViewState; proposals: Proposals }
 export const MAX_CHARS = 8000;
 /** Compact JSON for the model; cut at MAX_CHARS with a note on how to ask for the rest. */
 export function ok(value: unknown, more = "narrow it with limit/offset/fields"): CallToolResult {

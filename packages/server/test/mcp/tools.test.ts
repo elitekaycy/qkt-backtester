@@ -118,3 +118,36 @@ describe.skipIf(!haveData)("analysis tools", () => {
     await c.close(); await s2.app.close();
   }, 120_000);
 });
+
+describe("authoring tools", () => {
+  it("check, create, and propose edits that only a user apply writes", async () => {
+    const c = await mcpClient(base, "t0k");
+    const bad = await call(c, "check_strategy", { source: "STRATEGY x VERSION 1\n\nRULES\n    WHEN\n" });
+    expect(bad.json.ok).toBe(false);
+    const created = await call(c, "create_strategy", { name: "rsi_dip", source: "STRATEGY rsi_dip VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN rsi(gold.close, 14) CROSSES ABOVE 30\n     AND POSITION.gold = 0\n    THEN BUY gold SIZING 0.1\n" });
+    expect(created.json.path).toBe("strategies/rsi_dip.qkt");
+    expect((await call(c, "create_strategy", { name: "rsi_dip", source: "STRATEGY rsi_dip VERSION 1\n" })).isError).toBe(true); // never overwrites
+    const before = readFileSync(path.join(ws, "strategies", "rsi_dip.qkt"), "utf8");
+    const p = await call(c, "propose_strategy_edit", { path: "strategies/rsi_dip.qkt", changes: [{ op: "set_bracket", stop: "1%", target: "2%" }] });
+    expect(p.json.diff).toMatch(/\+\s+BRACKET \{ STOP_LOSS BY 1 PCT, TAKE_PROFIT BY 2 PCT \}/);
+    expect(readFileSync(path.join(ws, "strategies", "rsi_dip.qkt"), "utf8")).toBe(before); // nothing written yet
+    const hdr = { Authorization: "Bearer t0k" };
+    expect((await fetch(`${base}/api/proposals/${p.json.proposalId}/apply`, { method: "POST", headers: hdr })).status).toBe(200);
+    expect(readFileSync(path.join(ws, "strategies", "rsi_dip.qkt"), "utf8")).toMatch(/STOP_LOSS BY 1 PCT/);
+    // a proposal made on text the user has since changed is refused as stale
+    const p2 = await call(c, "propose_strategy_edit", { path: "strategies/rsi_dip.qkt", changes: [{ op: "set_param", name: "n", value: 3 }] });
+    writeFileSync(path.join(ws, "strategies", "rsi_dip.qkt"), `${readFileSync(path.join(ws, "strategies", "rsi_dip.qkt"), "utf8")}\n-- edited\n`);
+    expect((await fetch(`${base}/api/proposals/${p2.json.proposalId}/apply`, { method: "POST", headers: hdr })).status).toBe(409);
+    await c.close();
+  });
+  it("proposes config and instrument changes, validated, keeping comments", async () => {
+    writeFileSync(path.join(ws, "qkt.config.yaml"), "# my config\nstarting_balance: 10000 # keep\nrisk:\n  max_daily_loss: \"1000\"\n");
+    const c = await mcpClient(base, "t0k");
+    const p = await call(c, "propose_config", { set: { "risk.max_daily_loss": "0", "execution.position_mode": "netting" } });
+    expect(p.json.diff).toMatch(/\+\s+max_daily_loss: "0"/);
+    expect((await call(c, "propose_config", { set: { "not_a_key": 1 } })).json.warnings.join(" ")).toMatch(/Unknown top-level key/);
+    const pi = await call(c, "propose_instrument", { symbol: "XAGUSD", fields: { contractSize: 5000, volumeStep: 0.01 } });
+    expect(pi.json.diff).toMatch(/\+\s+- qktSymbol: BACKTEST:XAGUSD/);
+    await c.close();
+  });
+});
