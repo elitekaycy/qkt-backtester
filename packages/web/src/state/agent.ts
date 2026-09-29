@@ -80,7 +80,11 @@ export const useAgent = create<{
     });
     src.addEventListener("proposal", () => void get().refresh());
     src.addEventListener("split", () => void get().refresh());
-    src.addEventListener("open", (m) => void useStore.getState().openFile((JSON.parse((m as MessageEvent).data) as { path: string }).path));
+    // "open" is also the EventSource's own connection event, which carries no data: only the studio's message has a path
+    src.addEventListener("open", (m) => {
+      const data = (m as MessageEvent).data as unknown;
+      if (typeof data === "string") void useStore.getState().openFile((JSON.parse(data) as { path: string }).path);
+    });
     src.addEventListener("run", (m) => {
       const e = JSON.parse((m as MessageEvent).data) as { runId: string };
       void useStore.getState().refreshRuns();

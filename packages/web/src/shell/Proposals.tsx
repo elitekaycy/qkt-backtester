@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api } from "../api/client.js";
 import { decideApplyProposalAction, useAgent } from "../state/agent.js";
 import { useStore } from "../state/store.js";
@@ -6,7 +6,8 @@ import { Popover } from "../ui/Popover.js";
 
 /** Changes a tool proposed (a strategy edit, a config or instrument change, a data job): review the diff, Apply or Reject. */
 export function ProposalsButton() {
-  const open = useAgent((s) => s.proposals.filter((p) => p.status === "open"));
+  const all = useAgent((s) => s.proposals);
+  const open = useMemo(() => all.filter((p) => p.status === "open"), [all]);
   const [show, setShow] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   if (!open.length) return null;
