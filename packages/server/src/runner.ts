@@ -3,7 +3,8 @@ import { prepareDataView, allowedWindow } from "./data-view.js";
 import { configStartingBalance } from "@qkt-studio/core";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
-import { scanSymbolIn, seriesDays } from "./data-scan.js";
+import { seriesDays } from "./data-scan.js";
+import { canonicalTf } from "@qkt-studio/core";
 import { knownParsed, rememberParsed } from "./parse-cache.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -712,11 +713,14 @@ export class Runner {
    */
   private async checkWindowData(a: Active): Promise<void> {
     const r = a.run, req = a.request;
-    // only the symbols this run reads: a whole-store scan can take minutes on a large archive, and the run would wait for it
-    const syms = [...new Set(a.info.streams.map((s) => s.symbol))];
-    const reports = await Promise.all(syms.map((s) => scanSymbolIn(a.dataRoot, s).catch(() => null)));
-    const bySym = new Map(reports.filter((x): x is NonNullable<typeof x> => x !== null).map((s) => [s.symbol, s]));
-    const bases = barBases(a.info.streams, (broker, symbol) => bySym.get(symbol)?.bars.filter((b) => b.broker === broker && b.files > 0 && !b.qktReads).map((b) => b.tf) ?? []);
+    // reads only what this run reads: the timeframe folders (a listing, for which folder qkt aggregates from) and then the
+    // one series per symbol below; a scan of the symbol, let alone the store, would read every file of every timeframe
+    const bases = new Map<string, string | null>();
+    if (r.tier === "draft") {
+      const built = new Map<string, string[]>();
+      for (const s of a.info.streams) { const k = `${s.broker}:${s.symbol}`; if (!built.has(k)) built.set(k, (await availableTimeframes(a.dataRoot, s.broker, s.symbol).catch(() => [] as string[])).filter((tf) => canonicalTf(tf) === tf)); }
+      for (const [k, v] of barBases(a.info.streams, (b, sy) => built.get(`${b}:${sy}`) ?? [])) bases.set(k, v);
+    }
     const found: Array<{ what: string; days: string[] }> = [];
     const seen = new Set<string>();
     for (const s of a.info.streams) {
