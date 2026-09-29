@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { analyze, diagnoseExits, queryTrips, type PathBars, type RoundTrip } from "@qkt-studio/core";
 import { parseTripQuery } from "../run-data.js";
-import { ok, fail, guard, type ToolCtx } from "./util.js";
+import { ok, fail, guard, parseWeekday, weekdayByName, type ToolCtx } from "./util.js";
 
 const runArg = { run: z.string().optional().describe("run id; default: the run on screen") };
 
@@ -45,17 +45,19 @@ export function registerAnalysisTools(s: McpServer, ctx: ToolCtx): void {
       const trips = await ctx.data.trips(id);
       if (!trips) return fail(`run ${id} has no trades`);
       const a = analyze(trips);
-      return ok({ id, hour: a.hour, weekday: a.weekday, side: a.side, exit: a.exit, note: "weekday 0 = Monday; hours are UTC entry hours" });
+      return ok({ id, hour: a.hour, weekday: weekdayByName(a.weekday), side: a.side, exit: a.exit, note: "hours are UTC entry hours" });
     }));
   s.registerTool("trades", { description: "A run's trades, filtered and sorted: side, outcome (win/loss), exit (stop/target/signal), weekday, date range; compact rows.", inputSchema: {
       ...runArg, side: z.enum(["long", "short"]).optional(), outcome: z.enum(["win", "loss", "breakeven", "open", "closed"]).optional(), exit: z.enum(["stop", "target", "signal", "open"]).optional(),
-      weekday: z.number().int().min(0).max(6).optional(), from: z.string().optional(), to: z.string().optional(),
+      weekday: z.union([z.string(), z.number().int().min(0).max(6)]).optional().describe("mon..sun / monday..sunday (case-insensitive), or 0-6 (0 = Monday)"),
+      from: z.string().optional(), to: z.string().optional(),
       sort: z.enum(["entryTs", "pnl", "r", "holdMs"]).optional(), dir: z.enum(["asc", "desc"]).optional(), limit: z.number().int().max(50).optional(), offset: z.number().int().optional() } },
     (a) => guard(async () => {
       const id = await resolveRun(ctx, a.run);
       const trips = await ctx.data.trips(id);
       if (!trips) return fail(`run ${id} has no trades`);
-      const q = parseTripQuery({ side: a.side, outcome: a.outcome, exit: a.exit, weekday: a.weekday?.toString(), sort: a.sort, dir: a.dir, limit: String(a.limit ?? 20), offset: a.offset?.toString(),
+      const weekday = a.weekday === undefined ? undefined : parseWeekday(a.weekday);
+      const q = parseTripQuery({ side: a.side, outcome: a.outcome, exit: a.exit, weekday: weekday?.toString(), sort: a.sort, dir: a.dir, limit: String(a.limit ?? 20), offset: a.offset?.toString(),
         from: a.from ? String(Date.parse(`${a.from}T00:00:00Z`)) : undefined, to: a.to ? String(Date.parse(`${a.to}T00:00:00Z`) + 86_400_000) : undefined });
       const page = queryTrips(trips, q);
       const iso = (x: number | null) => (x === null ? null : new Date(x).toISOString().slice(0, 16).replace("T", " "));

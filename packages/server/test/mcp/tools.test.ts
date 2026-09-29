@@ -103,6 +103,18 @@ describe.skipIf(!haveData)("analysis tools", () => {
     const one = await call(c, "trade_detail", { run: runId, id: t.json.rows[0].id, bars_before: 5, bars_after: 5 });
     expect(one.json.bars.length).toBeGreaterThan(5);
     expect((await call(c, "run_summary", { run: "nope" })).isError).toBe(true);
+
+    const de = await call(c, "diagnose_entries", { run: runId });
+    expect(Object.keys(de.json.weekday)).toEqual(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]);
+
+    const byName = await call(c, "trades", { run: runId, weekday: "Friday" });
+    const byAbbrev = await call(c, "trades", { run: runId, weekday: "fri" });
+    const byNumber = await call(c, "trades", { run: runId, weekday: 4 });
+    expect(byAbbrev.json.rows).toEqual(byName.json.rows);
+    expect(byNumber.json.rows).toEqual(byName.json.rows);
+    for (const row of byName.json.rows) expect(new Date(`${row.entry.replace(" ", "T")}:00Z`).getUTCDay()).toBe(5);
+    expect((await call(c, "trades", { run: runId, weekday: "notaday" })).isError).toBe(true);
+
     await c.close(); await s2.app.close();
   }, 120_000);
 });
