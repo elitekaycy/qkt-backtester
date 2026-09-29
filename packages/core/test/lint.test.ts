@@ -150,3 +150,18 @@ describe("relocate: errors qkt reports without a position point at their text", 
     expect(relocate2(p, "Imported file not found: strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
   });
 });
+
+describe("CROSSES between two symbols' prices", () => {
+  const src = (rule: string) => `STRATEGY s VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n    gold4 = BACKTEST:XAUUSD EVERY 4h\n    fx = BACKTEST:NZDUSD EVERY 4h\n\nRULES\n    ${rule}\n    THEN BUY fx SIZING 0.1\n`;
+  const warn = (rule: string) => lintAliases(src(rule)).filter((d) => d.code === "cross_scales");
+  it("warns when gold's EMA is crossed with NZDUSD's", () => {
+    const w = warn("WHEN ema(gold.close, 9) CROSSES ABOVE ema(fx.close, 10)");
+    expect(w).toHaveLength(1);
+    expect(w[0]!.message).toMatch(/XAUUSD prices \('gold'\) with NZDUSD prices \('fx'\)/);
+  });
+  it("is quiet for the same symbol on two timeframes, for one symbol, and for scale-free indicators", () => {
+    expect(warn("WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold4.close, 21)")).toEqual([]);
+    expect(warn("WHEN ema(gold.close, 9) CROSSES BELOW ema(gold.close, 21)")).toEqual([]);
+    expect(warn("WHEN rsi(gold.close, 14) CROSSES ABOVE rsi(fx.close, 14)")).toEqual([]);
+  });
+});

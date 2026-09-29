@@ -35,7 +35,7 @@ export interface StepRecord {
 }
 
 export type ErrorKind =
-  | "parse" | "unknown_indicator" | "unknown_alias" | "missing_config" | "bad_config_yaml" | "bad_config_key"
+  | "parse" | "unknown_indicator" | "unknown_alias" | "missing_config" | "bad_config_yaml" | "bad_config_key" | "bad_bracket"
   | "missing_data" | "incomplete_data" | "file_not_found" | "engine_crash" | "unsupported_result" | "cancelled" | "internal";
 
 export interface RunError { kind: ErrorKind; message: string; file?: string; line?: number; col?: number }

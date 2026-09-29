@@ -1,4 +1,5 @@
 import { PaneControls } from "../ui/PaneControls.js";
+import { askConfirm } from "../ui/Ask.js";
 import { useEffect, useRef, useState } from "react";
 import type { editor } from "monaco-editor/editor/editor.api.js";
 import { api } from "../api/client.js";
@@ -228,7 +229,7 @@ export function EditorPane() {
               <TabIcon path={f.path} /><span>{f.path.split("/").pop()}</span>
               {f.conflict ? <span className="badge bad">conflict</span> : f.content !== f.saved ? <span className="unsaved" title="Unsaved changes" /> : null}
             </button>
-            <button className="x" tabIndex={-1} aria-label={`Close ${f.path}`} onClick={(e) => { e.stopPropagation(); if (f.content === f.saved || window.confirm(`Discard unsaved changes to ${f.path}?`)) store.getState().closeFile(f.path); }}><X size={13} /></button>
+            <button className="x" tabIndex={-1} aria-label={`Close ${f.path}`} onClick={async (e) => { e.stopPropagation(); if (f.content === f.saved || await askConfirm({ title: `Discard changes to ${f.path}?`, message: "The unsaved edits in this tab are lost.", danger: true, confirmLabel: "Discard" })) store.getState().closeFile(f.path); }}><X size={13} /></button>
           </div>
         ))}
       </div>

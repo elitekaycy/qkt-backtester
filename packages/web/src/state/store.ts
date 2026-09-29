@@ -355,7 +355,7 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       if (launching === me) launching = null;
       if (me.stop) return;
-      set({ running: false, resultsStale: false, submitError: e instanceof ApiError && e.status === 400 ? e.message : null });
+      set((s) => ({ running: false, resultsStale: s.results !== null, submitError: e instanceof ApiError && e.status === 400 ? e.message : null }));
       get().toast("error", (e as Error).message);
     }
   },
@@ -378,7 +378,8 @@ export const useStore = create<State>((set, get) => ({
           await get().loadResults(runId);
           const sm = get().results?.summary;
           set({ announce: sm ? `Run finished: ${sm.trades} closed trade${sm.trades === 1 ? "" : "s"}, net P&L ${fmtMoney(sm.totalPnl)}.` : "Run finished." });
-        } else set({ resultsStale: false, announce: run?.status === "failed" ? `Run failed: ${run.error?.message ?? "see the pipeline"}` : "Run stopped." });
+        // the results on screen are an earlier run's: keep them marked so, or an edit that failed looks like it did nothing
+        } else set((s) => ({ resultsStale: s.results !== null && s.results.runId !== runId, announce: run?.status === "failed" ? `Run failed: ${run.error?.message ?? "see the pipeline"}` : "Run stopped." }));
         if (run?.error && run.error.file && run.error.line) {
           const path = run.error.file === CONFIG ? CONFIG : run.error.file;
           get().setDiagnostics(path, "run", [{ severity: "error", code: run.error.kind, message: run.error.message, line: run.error.line, col: run.error.col ?? 1, endCol: (run.error.col ?? 1) + 1 }]);

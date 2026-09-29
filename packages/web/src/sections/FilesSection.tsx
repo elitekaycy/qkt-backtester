@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { askConfirm, askPick, askText } from "../ui/Ask.js";
 import { api } from "../api/client.js";
 import type { PortfolioListing } from "../api/client.js";
 import { useStore } from "../state/store.js";
@@ -41,8 +42,10 @@ function FileIcon({ e, open, portfolio }: { e: TreeEntry; open?: boolean; portfo
   return <FileText size={16} className="ficon dir" />;
 }
 
-export function newStrategy(dir = "strategies") {
-  const raw = window.prompt("Name of the new strategy", "my_strategy");
+const NAME_OK = (v: string) => (/[\\:*?"<>|]/.test(v) ? "Use letters, digits, _ . - and / only." : null);
+
+export async function newStrategy(dir = "strategies", given?: string) {
+  const raw = given ?? await askText({ title: "New strategy", label: `Name (created in ${dir}/)`, initial: "my_strategy", hint: "Letters, digits and _ ; the .qkt is added for you.", validate: NAME_OK });
   if (!raw) return;
   const name = raw.replace(/\.qkt$/i, "").replace(/[^\w.-]+/g, "_");
   void useStore.getState().createEntry(`${dir}/${name}.qkt`, "file", QKT_TEMPLATE(name, useStore.getState().scan));
@@ -61,14 +64,14 @@ ${runs}
 `;
 }
 
-export function newPortfolio(candidates: string[], dir = "strategies") {
-  const raw = window.prompt("Name of the new portfolio", "my_portfolio");
+export async function newPortfolio(candidates: string[], dir = "strategies") {
+  if (!candidates.length) { useStore.getState().toast("error", "No strategy files to add. Create one first."); return; }
+  const raw = await askText({ title: "New portfolio", label: `Name (created in ${dir}/)`, initial: "my_portfolio", confirmLabel: "Next", validate: NAME_OK });
   if (!raw) return;
   const name = raw.replace(/\.qkt$/i, "").replace(/[^\w.-]+/g, "_");
-  if (!candidates.length) { useStore.getState().toast("error", "No strategy files to add. Create one first."); return; }
-  const picked = window.prompt(`Strategies to run (comma-separated, relative to ${dir}/):`, candidates.slice(0, Math.min(3, candidates.length)).join(", "));
+  const picked = await askPick({ title: `Strategies in ${name}`, label: `Each ticked strategy runs inside the portfolio (paths relative to ${dir}/).`, options: candidates, initial: candidates.slice(0, Math.min(3, candidates.length)) });
   if (!picked) return;
-  const members = picked.split(",").map((s) => s.trim()).filter(Boolean).map((rel) => {
+  const members = picked.map((rel) => {
     const alias = rel.replace(/^.*\//, "").replace(/\.qkt$/i, "").replace(/[^\w]+/g, "_") || "s";
     return { path: rel.endsWith(".qkt") ? rel : `${rel}.qkt`, alias };
   });
@@ -78,10 +81,10 @@ export function newPortfolio(candidates: string[], dir = "strategies") {
 
 /** New file of any kind. The standard project files come from the workspace templates; anything else is created empty. */
 export async function newFile() {
-  const raw = window.prompt("File name (for example instruments.yaml, .env, notes.md or strategies/x.qkt)", "");
+  const raw = await askText({ title: "New file", label: "File name", hint: "For example instruments.yaml, .env, notes.md or strategies/x.qkt", validate: NAME_OK });
   const name = raw?.trim().replace(/^\/+/, "");
   if (!name) return;
-  if (/\.qkt$/i.test(name) && !name.includes("/")) return newStrategy();
+  if (/\.qkt$/i.test(name) && !name.includes("/")) return newStrategy("strategies", name);
   if (STANDARD.includes(name)) {
     const r = await api.scaffold([name]).catch((e) => { useStore.getState().toast("error", (e as Error).message); return null; });
     if (!r) return;
@@ -156,8 +159,8 @@ export function FilesSection() {
     if (r.e.type === "dir") { void store().toggleDir(r.e.path); return; }
     void store().openFile(r.e.path);
   };
-  const rename = (e: TreeEntry) => { const n = window.prompt("Rename to", e.path); if (n && n !== e.path) void store().renameEntry(e.path, n); };
-  const remove = (e: TreeEntry) => { if (window.confirm(`Delete ${e.path}${e.type === "dir" ? " and everything in it" : ""}?`)) void store().removeEntry(e.path); };
+  const rename = async (e: TreeEntry) => { const n = await askText({ title: `Rename ${e.name}`, label: "New path", initial: e.path, confirmLabel: "Rename", validate: NAME_OK }); if (n && n !== e.path) void store().renameEntry(e.path, n); };
+  const remove = async (e: TreeEntry) => { if (await askConfirm({ title: `Delete ${e.path}?`, message: e.type === "dir" ? "The folder and everything in it are deleted. This cannot be undone." : "This cannot be undone.", danger: true, confirmLabel: "Delete" })) void store().removeEntry(e.path); };
 
   const rowEls = () => listRef.current?.querySelectorAll<HTMLElement>("[role='treeitem']");
   const focusRow = (j: number) => { const el = rowEls()?.[Math.max(0, Math.min(rows.length - 1, j))]; el?.focus(); };
