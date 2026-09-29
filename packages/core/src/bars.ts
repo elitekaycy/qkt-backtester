@@ -121,8 +121,11 @@ function pick(b: BarCols, idx: number[]): BarCols {
 /** Timeframes with a bar directory for the symbol (e.g. ['15m','30m']), sorted by duration. */
 export async function availableTimeframes(dataRoot: string, broker: string, symbol: string): Promise<string[]> {
   try {
-    const ents = await fs.readdir(path.join(dataRoot, "bars", broker, symbol), { withFileTypes: true });
-    return ents.filter((e) => e.isDirectory()).map((e) => e.name).sort((a, b) => tfToMs(a) - tfToMs(b));
+    const dir = path.join(dataRoot, "bars", broker, symbol);
+    const ents = await fs.readdir(dir, { withFileTypes: true });
+    // a folder may be a link to another store (qkt follows links, Files.isDirectory)
+    const dirs = await Promise.all(ents.map(async (e) => e.isDirectory() || (e.isSymbolicLink() && (await fs.stat(path.join(dir, e.name)).then((st) => st.isDirectory(), () => false)))));
+    return ents.filter((_, i) => dirs[i]).map((e) => e.name).sort((a, b) => tfToMs(a) - tfToMs(b));
   } catch {
     return [];
   }

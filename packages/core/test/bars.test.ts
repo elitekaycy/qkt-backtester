@@ -117,3 +117,18 @@ describe("dropUnclosedTail: the chart shows the candles qkt closed", () => {
     expect(dropUnclosedTail(agg, src).ts.length).toBe(1);
   });
 });
+
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+describe("availableTimeframes follows folder links, as qkt does", () => {
+  it("lists a timeframe folder that is a link into another store, and ignores a link to a file", async () => {
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "tfs-"));
+    try {
+      mkdirSync(path.join(tmp, "archive", "60m"), { recursive: true });
+      mkdirSync(path.join(tmp, "bars", "BACKTEST", "ES", "15m"), { recursive: true });
+      symlinkSync(path.join(tmp, "archive", "60m"), path.join(tmp, "bars", "BACKTEST", "ES", "1h"));
+      writeFileSync(path.join(tmp, "archive", "note.txt"), "x");
+      symlinkSync(path.join(tmp, "archive", "note.txt"), path.join(tmp, "bars", "BACKTEST", "ES", "note"));
+      expect(await availableTimeframes(tmp, "BACKTEST", "ES")).toEqual(["15m", "1h"]);
+    } finally { rmSync(tmp, { recursive: true, force: true }); }
+  });
+});
