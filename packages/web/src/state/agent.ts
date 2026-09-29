@@ -32,6 +32,16 @@ export function decideAdoptAction(saved: boolean, autoRun: boolean): AdoptAction
   return autoRun ? "autoRun" : "startRun";
 }
 
+export type ApplyProposalAction = "none" | "reload" | "conflict";
+/** Pure: after a file proposal is applied, what an open tab on that file should do. Not open at all -> nothing to
+ *  do. Open and clean -> take the new text as the saved state (reloadFromDisk). Open with unsaved edits -> the
+ *  edits must never be silently discarded, so the tab is marked in conflict instead, the same state the file-watch
+ *  path uses (EditorPane's conflict banner: Reload from disk / Overwrite). */
+export function decideApplyProposalAction(file: { content: string; saved: string } | undefined): ApplyProposalAction {
+  if (!file) return "none";
+  return file.content === file.saved ? "reload" : "conflict";
+}
+
 /** Poll monaco's global model registry for the model at `workspace`/`path` (the same URI EditorPane uses), up to
  *  `timeoutMs`. EditorPane creates a file's model asynchronously (its own effect, after `openFiles` changes), so a
  *  freshly-opened file may not have a model yet the instant `openFile()` resolves. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideAdoptAction, shouldShowRun, viewReport } from "./agent.js";
+import { decideAdoptAction, decideApplyProposalAction, shouldShowRun, viewReport } from "./agent.js";
 
 describe("viewReport", () => {
   it("maps what the user looks at into the server's view state", () => {
@@ -36,5 +36,17 @@ describe("decideAdoptAction", () => {
   });
   it("starts the run itself when autoRun is off", () => {
     expect(decideAdoptAction(true, false)).toBe("startRun");
+  });
+});
+
+describe("decideApplyProposalAction", () => {
+  it("does nothing when the file is not open", () => {
+    expect(decideApplyProposalAction(undefined)).toBe("none");
+  });
+  it("reloads a clean tab", () => {
+    expect(decideApplyProposalAction({ content: "same", saved: "same" })).toBe("reload");
+  });
+  it("flags a conflict instead of discarding unsaved edits", () => {
+    expect(decideApplyProposalAction({ content: "edited", saved: "same" })).toBe("conflict");
   });
 });

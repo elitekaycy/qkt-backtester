@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { api } from "../api/client.js";
-import { useAgent } from "../state/agent.js";
+import { decideApplyProposalAction, useAgent } from "../state/agent.js";
 import { useStore } from "../state/store.js";
 import { Popover } from "../ui/Popover.js";
 
@@ -15,9 +15,17 @@ export function ProposalsButton() {
       if (apply) {
         await api.applyProposal(id);
         if (path) {
-          // the file changed on disk: an open tab takes the new text as its saved state (no conflict banner)
           await useStore.getState().refreshTree("");
-          if (useStore.getState().openFiles.some((f) => f.path === path)) await useStore.getState().reloadFromDisk(path);
+          const action = decideApplyProposalAction(useStore.getState().openFiles.find((f) => f.path === path));
+          if (action === "reload") {
+            // the tab is clean: it takes the new text as its saved state (no conflict banner)
+            await useStore.getState().reloadFromDisk(path);
+          } else if (action === "conflict") {
+            // the tab has unsaved edits: never discard them silently — flag the same conflict state the
+            // file-watch path uses, so the existing banner (Reload from disk / Overwrite) handles it
+            useStore.setState((s) => ({ openFiles: s.openFiles.map((f) => (f.path === path ? { ...f, conflict: true } : f)) }));
+            useStore.getState().toast("info", `Applied to ${path} — your unsaved edits are kept; the editor shows the file changed on disk.`);
+          }
         }
       }
       else await api.rejectProposal(id);
