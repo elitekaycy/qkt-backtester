@@ -31,7 +31,7 @@ const Body = ({ id }: { id: JournalSection }) => id === "overview" ? <Overview /
 /** The trading journal: a resizable slide-over with its own menu. Everything inside reacts to the shared filters. */
 export function Journal({ containerWidth }: { containerWidth: number }) {
   const ui = useUi();
-  const results = useStore((s) => s.results), run = useStore((s) => s.run), stale = useStore((s) => s.resultsStale);
+  const results = useStore((s) => s.results), run = useStore((s) => s.run), stale = useStore((s) => s.resultsStale), running = useStore((s) => s.running);
   const startRun = useStore((s) => s.startRun);
   const opener = useRef<HTMLElement | null>(null);
   const navRef = useRef<HTMLDivElement>(null);
@@ -85,7 +85,7 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
         <div className="jmain">
           <div className="jhead">
             <div style={{ minWidth: 0, flex: 1 }}><h1>{sec.label}</h1><div className="muted" style={{ fontSize: "var(--fs-sm)" }}>{sec.hint}</div></div>
-            {stale && <span className="badge warn">updating…</span>}
+            {stale && <span className="badge warn">{running ? "updating…" : "previous run"}</span>}
             <Tip label={ui.journalMax ? "Restore width" : "Full width"} side="bottom"><button className="btn ghost icon" aria-label={ui.journalMax ? "Restore width" : "Full width"} onClick={() => ui.set({ journalMax: !useUi.getState().journalMax })}>{ui.journalMax ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></Tip>
             <Tip label="Close" kbd="Esc" side="bottom"><button className="btn ghost icon" aria-label="Close journal" onClick={() => ui.set({ journalOpen: false })}><X size={17} /></button></Tip>
           </div>

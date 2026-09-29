@@ -124,3 +124,12 @@ describe("incomplete data names the symbol that is short, with its own coverage"
     expect(normalizeError(text)).toMatchObject({ kind: "incomplete_data", message: expect.stringMatching(/^Incomplete data for EURUSD \(7 of 9 trading days/) });
   });
 });
+
+describe("a bracket level below zero explains BY's units", () => {
+  it("names the level and suggests a distance on the symbol's scale or PCT", () => {
+    const e = normalizeError('Exception in thread "main" java.lang.IllegalArgumentException: takeProfit must be > 0: -23.41423500\n\tat com.qkt.x(X.kt:1)');
+    expect(e.kind).toBe("bad_bracket");
+    expect(e.message).toMatch(/^A take-profit price came out at -23\.4142, below zero\./);
+    expect(e.message).toMatch(/BY 1\.0 PCT/);
+  });
+});

@@ -20,7 +20,7 @@ function Kpi({ l, v, s, tone, d, onClick }: { l: string; v: string; s?: string; 
 /** The chart pane: headline numbers, the charts and the trade list. Click any number to open the Journal on it. */
 export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void }) {
   const ui = useUi();
-  const results = useStore((s) => s.results), stale = useStore((s) => s.resultsStale), run = useStore((s) => s.run);
+  const results = useStore((s) => s.results), stale = useStore((s) => s.resultsStale), run = useStore((s) => s.run), running = useStore((s) => s.running);
   const s = results?.summary, meta = results?.meta;
   const failed = results?.integrity.checks.filter((c) => c.ok === false && !c.soft) ?? [];
   const soft = results?.integrity.checks.filter((c) => c.ok === false && c.soft) ?? [];
@@ -58,6 +58,12 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
           <Kpi l="Trades" v={String(s.trades)} d={delta(s.trades, prev?.trades, (x) => String(x), true) && { ...delta(s.trades, prev?.trades, (x) => String(x), true)!, better: null }} s={`${s.fills} fills${s.openTrades ? ` · ${s.openTrades} open` : ""}`} onClick={() => open("trades")} />
           <Kpi l="Max drawdown" v={fmtPct(s.maxDrawdown)} d={delta(Math.abs(s.maxDrawdown) * 100, prev ? Math.abs(prev.maxDrawdown) * 100 : null, (x) => `${x.toFixed(2)} pts`, false)} s={`expectancy ${fmtMoney(s.expectancy)}`} tone="loss" onClick={() => open("monthly")} />
         </div>
+      )}
+      {stale && !running && run && (run.status === "failed" || run.status === "cancelled") && (
+        <div className="banner bad rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span>
+          <b>{run.status === "failed" ? "The latest run failed" : "The latest run was stopped"}</b>{run.error?.message && run.status === "failed" ? `: ${run.error.message}` : "."}{" "}
+          What you see is the previous run{results?.strategy ? ` of ${results.strategy.split("/").pop()}` : ""}, from before your last change. The Pipeline panel has the details.
+        </span></div>
       )}
       {s?.blown && !stale && <div className="banner bad rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>The account went below zero in this run</b> (max drawdown {fmtPct(s.maxDrawdown, 0)}): it lost more than the starting balance, so Sharpe, Sortino and Calmar mean nothing here and are not shown. Trade a smaller size or raise the starting balance.</span></div>}
       {autoSkipped && <div className="banner warn rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>{autoSkipped}</b>. The results below are from the last version that ran; saving a fix runs it again.</span></div>}

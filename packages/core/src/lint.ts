@@ -59,6 +59,9 @@ export function lintAliases(source: string): Diagnostic[] {
   const lines = source.split(/\r?\n/);
   if (!lines.some((l) => /^STRATEGY\b/.test(scrub(l)))) return [];
   const aliases = declaredAliases(lines);
+  // alias -> bare symbol, from "alias = BROKER:SYMBOL EVERY tf"
+  const symbols = new Map<string, string>();
+  for (const raw of lines) { const m = /^\s+([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_.\-]+)\s+EVERY\b/.exec(scrub(raw)); if (m) symbols.set(m[1]!, m[2]!); }
   const out: Diagnostic[] = [];
   lines.forEach((raw, idx) => {
     const l = scrub(raw);
@@ -69,6 +72,23 @@ export function lintAliases(source: string): Diagnostic[] {
         severity: "error", code: "unknown_alias", line: idx + 1, col: m.index + 1, endCol: m.index + 1 + m[1]!.length,
         message: `Unknown stream alias '${m[1]}'. Declared in SYMBOLS: ${[...aliases].join(", ") || "(none)"}. qkt would run without error and never trade.`,
       });
+    }
+    // CROSSES between the prices of two different symbols (gold near 4,400 and a pair near 0.6) can never happen: the
+    // rule is silently dead. Only raw prices and price-scale moving averages count; RSI and the like share a 0-100 scale.
+    const cross = /^(.*?)\bCROSSES\s+(?:ABOVE|BELOW)\b(.*?)(?:\bAND\b|\bOR\b|$)/.exec(l);
+    if (cross) {
+      const priceOf = (side: string) => {
+        const t = side.replace(/^\s*(WHEN|AND|OR)\b/, "").trim();
+        const m = /^(?:(?:ema|sma|wma|hma|vwma|dema|tema|kama|smma|rma)\s*\(\s*)?([a-z_]\w*)\.(open|high|low|close)\b/.exec(t);
+        return m && aliases.has(m[1]!) ? m[1]! : null;
+      };
+      const a = priceOf(cross[1]!), b = priceOf(cross[2]!);
+      const sa = a ? symbols.get(a) : undefined, sb = b ? symbols.get(b) : undefined;
+      if (a && b && sa && sb && sa !== sb) {
+        const col = l.indexOf("CROSSES") + 1;
+        out.push({ severity: "warning", code: "cross_scales", line: idx + 1, col, endCol: col + "CROSSES".length,
+          message: `This compares ${sa} prices ('${a}') with ${sb} prices ('${b}'). Different symbols trade on different price scales, so one line may never cross the other and the rule would never fire. Compare each symbol with itself, or use a scale-free measure (RSI, % change).` });
+      }
     }
     const pos = /\bPOSITION\.([a-z_]\w*)/g;
     for (let m = pos.exec(l); m; m = pos.exec(l)) {

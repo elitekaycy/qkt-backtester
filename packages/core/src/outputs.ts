@@ -96,6 +96,18 @@ export function normalizeError(stderr: string, exitCode: number | null): RunErro
     const count = covLine ? ` (${covered} of ${total} trading days in the window have data)` : "";
     return { kind, message: `${kind === "missing_data" ? "No data" : "Incomplete data"}${what}${count}${hint ? `. Fix: ${hint}` : ""}` };
   }
+  // a bracket level below zero: BY is a price distance in the traded symbol's own units, so a distance sized for gold
+  // (24 = $24) put on a pair trading near 0.6 lands under zero and qkt refuses the order
+  const bracket = /(takeProfit|stopLoss) must be > 0: (-?[\d.]+)/.exec(text);
+  if (bracket) {
+    const which = bracket[1] === "takeProfit" ? "take-profit" : "stop-loss", at = Number(bracket[2]);
+    return {
+      kind: "bad_bracket",
+      message: `A ${which} price came out at ${Number.isFinite(at) ? at.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") : bracket[2]}, below zero. `
+        + "In BRACKET, BY is a distance in the traded symbol's own price units: BY 24 is $24 on gold but 24.0 on a pair near 0.6. "
+        + "Use a distance on that symbol's scale (BY 0.0020 is 20 pips on NZDUSD), or BY 1.0 PCT for a percentage of the entry price, which works on any symbol.",
+    };
+  }
   const nomkt = /no market data for (\S+)/.exec(text);
   if (nomkt) return { kind: "missing_data", message: `No market data for ${nomkt[1]} in the requested range` };
 
