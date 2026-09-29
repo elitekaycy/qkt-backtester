@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { AskHost } from "../ui/Ask.js";
 import { ApiError, getToken, setToken } from "../api/client.js";
 import { DockBar, DockBody } from "../dock/Dock.js";
 import { EditorPane } from "../editor/EditorPane.js";
@@ -185,4 +186,4 @@ function Shell() {
   );
 }
 
-export function App() { return <TokenGate><Shell /></TokenGate>; }
+export function App() { return <TokenGate><Shell /><AskHost /></TokenGate>; }
