@@ -8,6 +8,7 @@ import type { Runner } from "../runner.js";
 import type { EventBus } from "./events.js";
 import { checkQktSource } from "../check.js";
 import { resolveInJail } from "../jail.js";
+import { JsonFile } from "./json-store.js";
 
 export interface Variant {
   id: string; label: string; base: string; baseText: string; path: string; changes: Change[]; diff: string; notes: string[];
@@ -20,14 +21,14 @@ const WAIT_MS = 180_000;
 /** Copies of a strategy with changes applied, each run beside its base; the user adopts one or discards it. */
 export class Variants {
   private items: Variant[] = [];
-  constructor(private cfg: ServerConfig, private runner: Runner, private events: EventBus) {}
-  private index() { return path.join(this.cfg.workspace, DIR, "index.json"); }
-  async init(): Promise<void> { try { this.items = JSON.parse(await fs.readFile(this.index(), "utf8")) as Variant[]; } catch { this.items = []; } }
+  private store: JsonFile<Variant[]>;
+  constructor(private cfg: ServerConfig, private runner: Runner, private events: EventBus) {
+    this.store = new JsonFile(path.join(cfg.workspace, DIR, "index.json"));
+  }
+  async init(): Promise<void> { this.items = await this.store.read([]); }
   private async save(): Promise<void> {
-    await fs.mkdir(path.join(this.cfg.workspace, DIR), { recursive: true });
     this.items = this.items.slice(-200);
-    await fs.writeFile(`${this.index()}.tmp`, JSON.stringify(this.items));
-    await fs.rename(`${this.index()}.tmp`, this.index());
+    await this.store.write(() => this.items);
   }
   list(base?: string): Variant[] { return this.items.filter((v) => !base || v.base === base).slice().reverse(); }
   get(id: string): Variant | undefined { return this.items.find((v) => v.id === id); }

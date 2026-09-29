@@ -6,6 +6,7 @@ import type { ServerConfig } from "../config.js";
 import type { EventBus } from "./events.js";
 import type { Jobs } from "../jobs.js";
 import { resolveInJail } from "../jail.js";
+import { JsonFile } from "./json-store.js";
 
 export interface Proposal {
   id: string; kind: "file" | "job"; title: string;
@@ -19,13 +20,15 @@ export class ProposalStale extends Error {}
 export class Proposals {
   private items: Proposal[] = [];
   private file: string;
-  constructor(private cfg: ServerConfig, private events: EventBus, private jobs: Jobs) { this.file = path.join(cfg.workspace, ".qkt-studio", "proposals.json"); }
-  async init(): Promise<void> { try { this.items = JSON.parse(await fs.readFile(this.file, "utf8")) as Proposal[]; } catch { this.items = []; } }
+  private store: JsonFile<Proposal[]>;
+  constructor(private cfg: ServerConfig, private events: EventBus, private jobs: Jobs) {
+    this.file = path.join(cfg.workspace, ".qkt-studio", "proposals.json");
+    this.store = new JsonFile(this.file);
+  }
+  async init(): Promise<void> { this.items = await this.store.read([]); }
   private async save(): Promise<void> {
     this.items = this.items.slice(-50);
-    await fs.mkdir(path.dirname(this.file), { recursive: true });
-    await fs.writeFile(`${this.file}.tmp`, JSON.stringify(this.items));
-    await fs.rename(`${this.file}.tmp`, this.file);
+    await this.store.write(() => this.items);
   }
   list(): Proposal[] { return [...this.items].reverse(); }
   get(id: string): Proposal | undefined { return this.items.find((p) => p.id === id); }
