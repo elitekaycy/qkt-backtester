@@ -20,6 +20,7 @@ import { ViewState, registerView } from "./agent/view-state.js";
 import { Proposals, registerProposalRoutes } from "./agent/proposals.js";
 import { Variants, registerVariantRoutes } from "./agent/variants.js";
 import { registerMcp } from "./mcp/index.js";
+import { ToolBudget } from "./mcp/util.js";
 
 export async function createStudio(cfg: ServerConfig) {
   await applySettings(cfg);
@@ -35,6 +36,7 @@ export async function createStudio(cfg: ServerConfig) {
   const variants = new Variants(cfg, runner, events);
   await variants.init();
   const started = new Set<string>();
+  const budget = new ToolBudget({ isActive: (id) => runner.isActive(id), jobRunning: (id) => jobs.get(id)?.status === "running" }, 2 * cfg.maxParallel);
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
@@ -48,14 +50,14 @@ export async function createStudio(cfg: ServerConfig) {
     registerProposalRoutes(a, proposals);
     registerSplitRoutes(a, cfg, events, data);
     registerVariantRoutes(a, cfg, variants);
-    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants, started });
+    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants, started, budget });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
       hasConfig: existsSync(`${cfg.workspace}/qkt.config.yaml`), maxParallel: cfg.maxParallel,
     }));
   });
   app.addHook("onClose", async () => { await runner.close(); });
-  return { app, runner, jobs, data, events, view, proposals, variants };
+  return { app, runner, jobs, data, events, view, proposals, variants, budget };
 }
 
 /**

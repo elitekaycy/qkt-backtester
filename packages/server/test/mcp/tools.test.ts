@@ -1,21 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import os from "node:os"; import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createStudio } from "../../src/main.js";
-import { testConfig, realData, haveData } from "../helpers.js";
-
-export async function mcpClient(base: string, token?: string) {
-  const c = new Client({ name: "test", version: "0" });
-  await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/api/mcp`), { requestInit: { headers: token ? { Authorization: `Bearer ${token}` } : {} } }));
-  return c;
-}
-export const call = async (c: Client, name: string, args: Record<string, unknown> = {}) => {
-  const r = await c.callTool({ name, arguments: args });
-  const text = (r.content as Array<{ text: string }>)[0]!.text;
-  return { isError: !!r.isError, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
-};
+import { testConfig, realData, haveData, haveQkt } from "../helpers.js";
+import { mcpClient, call } from "./client.js";
 
 let studio: Awaited<ReturnType<typeof createStudio>>, base: string, ws: string;
 beforeAll(async () => {
@@ -119,7 +107,7 @@ describe.skipIf(!haveData)("analysis tools", () => {
   }, 120_000);
 });
 
-describe("authoring tools", () => {
+describe.skipIf(!haveQkt)("authoring tools", () => {
   it("check, create, and propose edits that only a user apply writes", async () => {
     const c = await mcpClient(base, "t0k");
     const bad = await call(c, "check_strategy", { source: "STRATEGY x VERSION 1\n\nRULES\n    WHEN\n" });

@@ -3,9 +3,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { partsOf, type Tier } from "@qkt-studio/core";
 import { validateBuildRange } from "../jobs.js";
 import { getSplit } from "../split.js";
-import { ok, fail, guard, type ToolCtx } from "./util.js";
+import { ok, fail, guard, toolPath, type ToolCtx } from "./util.js";
 
-const pathOf = (ctx: ToolCtx, p?: string) => { const x = p ?? ctx.view.get().openFile; if (!x?.endsWith(".qkt")) throw new Error("no strategy: give path, or open one in the editor"); return x; };
+const pathOf = async (ctx: ToolCtx, p?: string) => {
+  const x = p ?? ctx.view.get().openFile;
+  if (!x?.endsWith(".qkt")) throw new Error("no strategy: give path, or open one in the editor");
+  return (await toolPath(ctx.cfg.workspace, x, { ext: ".qkt" })).rel;
+};
 const windowOf = (ctx: ToolCtx, p: string, from?: string, to?: string) => {
   const v = ctx.view.get(), newest = ctx.runner.list(p, 5)[0];
   const f = from ?? v.runWindow?.from ?? newest?.from_d, t = to ?? v.runWindow?.to ?? newest?.to_d;
@@ -17,9 +21,13 @@ const windowOf = (ctx: ToolCtx, p: string, from?: string, to?: string) => {
 export function registerRunTools(s: McpServer, ctx: ToolCtx): void {
   s.registerTool("run_backtest", { description: "Run a strategy as the Run button does (it shows on the chart when it is the open file); waits up to 3 minutes.", inputSchema: { path: z.string().optional(), from: z.string().optional(), to: z.string().optional(), tier: z.enum(["draft", "full"]).optional(), params: z.record(z.string()).optional() } },
     (a) => guard(async () => {
-      const p = pathOf(ctx, a.path), w = windowOf(ctx, p, a.from, a.to);
-      const { runId, cached, joined } = await ctx.runner.submit({ strategy: p, ...w, tier: (a.tier ?? "draft") as Tier, params: a.params });
-      if (!joined) ctx.started.add(runId); // a joined run is someone else's identical run in flight; this tool did not start it
+      const p = await pathOf(ctx, a.path), w = windowOf(ctx, p, a.from, a.to);
+      const release = ctx.budget.reserve(1);
+      let submitted;
+      try { submitted = await ctx.runner.submit({ strategy: p, ...w, tier: (a.tier ?? "draft") as Tier, params: a.params, source: "tool" }); } finally { release(); }
+      const { runId, cached, joined } = submitted;
+      // a joined run is someone else's identical run in flight; this tool did not start it (a cached one is finished: cancel is a no-op)
+      if (!joined) { ctx.started.add(runId); ctx.budget.track(runId); }
       const run = await Promise.race([ctx.runner.waitFor(runId), new Promise<null>((r) => setTimeout(() => r(null), 180_000))]);
       ctx.events.emit({ t: "run", runId });
       if (!run) return ok({ runId, status: "running", note: "still running; ask get_run later" });
@@ -27,9 +35,19 @@ export function registerRunTools(s: McpServer, ctx: ToolCtx): void {
       return ok({ runId, cached, status: run.status, error: run.error?.message, net: sm?.totalPnl, trades: sm?.trades, winRate: sm?.winRate, profitFactor: sm?.profitFactor, maxDrawdown: sm?.maxDrawdown });
     }));
   s.registerTool("run_walkforward", { description: "Walk-forward test (the Lab's): optimise params on rolling train windows, test on the next; returns a job id.", inputSchema: { path: z.string().optional(), from: z.string(), to: z.string(), params: z.record(z.array(z.string())), train: z.string().describe("e.g. 90d"), test: z.string().describe("e.g. 30d"), step: z.string().describe("e.g. 30d") } },
-    (a) => guard(async () => { const j = await ctx.jobs.walkForward({ strategy: pathOf(ctx, a.path), from: a.from, to: a.to, tier: "draft", params: a.params, train: a.train, test: a.test, step: a.step }); ctx.started.add(j.id); return ok({ jobId: j.id }); }));
+    (a) => guard(async () => {
+      const p = await pathOf(ctx, a.path);
+      const j = await ctx.budget.startJob(() => ctx.jobs.walkForward({ strategy: p, from: a.from, to: a.to, tier: "draft", params: a.params, train: a.train, test: a.test, step: a.step }));
+      ctx.started.add(j.id);
+      return ok({ jobId: j.id });
+    }));
   s.registerTool("sweep", { description: "Grid over params (the Lab grid). The job's rows give you the FIRST part of the split only; the user sees both.", inputSchema: { path: z.string().optional(), params: z.record(z.array(z.string())), from: z.string().optional(), to: z.string().optional() } },
-    (a) => guard(async () => { const p = pathOf(ctx, a.path); const j = await ctx.jobs.grid({ strategy: p, ...windowOf(ctx, p, a.from, a.to), tier: "draft", params: a.params }); ctx.started.add(j.id); return ok({ jobId: j.id }); }));
+    (a) => guard(async () => {
+      const p = await pathOf(ctx, a.path);
+      const j = await ctx.budget.startJob(() => ctx.jobs.grid({ strategy: p, ...windowOf(ctx, p, a.from, a.to), tier: "draft", params: a.params, source: "tool" }));
+      ctx.started.add(j.id);
+      return ok({ jobId: j.id });
+    }));
   s.registerTool("job_status", { description: "Progress and results of a job (sweep, walk-forward, data build).", inputSchema: { id: z.string() } },
     ({ id }) => guard(async () => {
       const j = ctx.jobs.get(id);

@@ -52,7 +52,7 @@ export function registerRunRoutes(app: FastifyInstance, runner: Runner, data: Ru
   });
 
   app.post<{ Body: RunRequest }>("/api/runs", async (req, reply) => {
-    const r = await runner.submit(req.body);
+    const r = await runner.submit(req.body && typeof req.body === "object" ? { ...req.body, source: "user" } : req.body);
     return reply.code(r.cached ? 200 : 202).send(r);
   });
 

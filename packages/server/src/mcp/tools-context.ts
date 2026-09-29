@@ -3,8 +3,8 @@ import path from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { listStrategies } from "../data-scan.js";
-import { resolveInJail } from "../jail.js";
-import { ok, fail, guard, type ToolCtx } from "./util.js";
+import { redactConfig } from "@qkt-studio/core";
+import { ok, fail, guard, toolPath, type ToolCtx } from "./util.js";
 
 export function registerContextTools(s: McpServer, ctx: ToolCtx): void {
   s.registerTool("get_context", { description: "What the user is looking at: open file, cursor, selection, the run on screen with its headline numbers, visible chart range, selected trade, variant, split." },
@@ -21,7 +21,7 @@ export function registerContextTools(s: McpServer, ctx: ToolCtx): void {
     }));
   s.registerTool("list_files", { description: "Workspace files (strategies, qkt.config.yaml, instruments.yaml, notes), optionally under one folder.", inputSchema: { dir: z.string().optional() } },
     ({ dir }) => guard(async () => {
-      const root = await resolveInJail(ctx.cfg.workspace, dir ?? ".");
+      const root = (await toolPath(ctx.cfg.workspace, dir ?? ".", { dir: true })).abs;
       const out: string[] = [];
       const walk = async (d: string, depth: number) => {
         if (depth > 3 || out.length >= 300) return;
@@ -36,9 +36,10 @@ export function registerContextTools(s: McpServer, ctx: ToolCtx): void {
     }));
   s.registerTool("read_file", { description: "Read a workspace file (whole, or a line range).", inputSchema: { path: z.string(), from_line: z.number().int().optional(), to_line: z.number().int().optional() } },
     ({ path: rel, from_line, to_line }) => guard(async () => {
-      if (/(^|\/)\.env$/.test(rel)) return fail(".env holds secrets and is not readable by tools");
-      const abs = await resolveInJail(ctx.cfg.workspace, rel);
-      const lines = (await fs.readFile(abs, "utf8")).split("\n");
+      const t = await toolPath(ctx.cfg.workspace, rel);
+      const text = await fs.readFile(t.abs, "utf8");
+      // a config can hold literal credentials: the model sees YAML as a run's copy of the config is kept, redacted
+      const lines = (/\.ya?ml$/i.test(t.rel) || /\.ya?ml$/i.test(t.real) ? redactConfig(text) : text).split("\n");
       const a = Math.max(1, from_line ?? 1), b = Math.min(lines.length, to_line ?? lines.length);
       return ok({ path: rel, lines: `${a}-${b} of ${lines.length}`, text: lines.slice(a - 1, b).join("\n") }, "read a line range with from_line/to_line");
     }));

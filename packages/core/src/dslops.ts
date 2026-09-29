@@ -15,6 +15,7 @@ export type Change =
   | { op: "source"; text: string };
 
 export class ChangeError extends Error {}
+export const PORTFOLIO_REFUSAL = "change operations work on STRATEGY files; open the child strategy";
 
 interface Rule { n: number; start: number; end: number; when: number; then: number; bracket: [number, number] | null; entry: boolean }
 interface Seg { kind: "strategy" | "portfolio" | "unknown"; lines: string[]; rulesLine: number; rules: Rule[]; symbols: [number, number] | null; params: number[] }
@@ -23,10 +24,15 @@ const indentOf = (l: string) => /^\s*/.exec(l)![0];
 const isTop = (l: string) => /^\S/.test(l) && !/^--/.test(l);
 const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 
+/** What a qkt source is, from its first token after comments (qkt's lexer skips `--` and `#` line comments and block comments). */
+export function sourceKind(src: string): Seg["kind"] {
+  const first = src.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").map((l) => l.trim()).find((l) => l && !l.startsWith("--") && !l.startsWith("#")) ?? "";
+  return /^STRATEGY\b/.test(first) ? "strategy" : /^PORTFOLIO\b/.test(first) ? "portfolio" : "unknown";
+}
+
 function segment(src: string): Seg {
   const lines = src.split("\n");
-  const first = lines.find((l) => l.trim() && !l.trim().startsWith("--")) ?? "";
-  const kind = /^STRATEGY\b/.test(first) ? "strategy" : /^PORTFOLIO\b/.test(first) ? "portfolio" : "unknown";
+  const kind = sourceKind(src);
   const rulesLine = lines.findIndex((l) => /^RULES\b/.test(l));
   const symLine = lines.findIndex((l) => /^SYMBOLS\b/.test(l));
   let symbols: [number, number] | null = null;
@@ -119,12 +125,17 @@ function addCondition(g: Seg, rules: Rule[], expr: string, mode: "and" | "or"): 
 
 function apply1(src: string, c: Change, notes: string[]): string {
   const g = segment(src);
-  if (c.op === "source") return c.text;
-  if (g.kind === "portfolio") throw new ChangeError("change operations work on STRATEGY files; open the child strategy");
+  if (g.kind === "portfolio") throw new ChangeError(PORTFOLIO_REFUSAL);
+  if (g.kind === "unknown") throw new ChangeError("not a qkt strategy (no STRATEGY line): change operations work on STRATEGY files only");
+  if (c.op === "source") {
+    if (sourceKind(c.text) !== "strategy") throw new ChangeError("the new text must be a STRATEGY (starting with a STRATEGY line)");
+    return c.text;
+  }
   if (c.op === "replace_text") {
-    const n = src.split(c.find).length - 1;
+    if (!c.find) throw new ChangeError("replace_text needs the text to find");
+    const parts = src.split(c.find), n = parts.length - 1;
     if (n !== 1) throw new ChangeError(n === 0 ? `"${c.find}" is not in the file` : `"${c.find}" is in ${n} places; give more of the surrounding text`);
-    return src.replace(c.find, c.replace);
+    return parts.join(c.replace); // literal: String#replace would treat $& $$ $` $' in the replacement as patterns
   }
   const lines = [...g.lines];
   switch (c.op) {

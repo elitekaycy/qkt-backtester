@@ -92,6 +92,32 @@ describe("rules, symbols, text", () => {
   it("refuses portfolio files", () => {
     expect(() => applyChanges("PORTFOLIO p VERSION 1\n\nRULES\n    RUN a\n", [{ op: "set_param", name: "x", value: 1 }])).toThrow(/STRATEGY files/);
   });
+  it("refuses portfolio files for every op, including source and replace_text, with the exact message", () => {
+    const pf = "PORTFOLIO p VERSION 1\n\nIMPORT 'a.qkt' AS a\n\nRULES\n    RUN a\n";
+    const msg = "change operations work on STRATEGY files; open the child strategy";
+    expect(() => applyChanges(pf, [{ op: "source", text: SRC }])).toThrow(msg);
+    expect(() => applyChanges(pf, [{ op: "replace_text", find: "RUN a", replace: "RUN b" }])).toThrow(msg);
+    expect(() => applyChanges(`-- a book\n# notes\n/* block\n STRATEGY no */\n${pf}`, [{ op: "source", text: SRC }])).toThrow(msg);
+  });
+  it("refuses a file that is not a strategy at all (e.g. .env), for every op", () => {
+    const env = "MT5_PASSWORD=hunter2\nAPI_KEY=abc\n";
+    for (const c of [{ op: "source", text: SRC }, { op: "replace_text", find: "abc", replace: "x" }, { op: "set_param", name: "x", value: 1 }] as const) {
+      expect(() => applyChanges(env, [c])).toThrow(ChangeError);
+      try { applyChanges(env, [c]); } catch (e) { expect((e as Error).message).not.toMatch(/hunter2|API_KEY/); }
+    }
+  });
+  it("source must be a STRATEGY", () => {
+    expect(applyChanges(SRC, [{ op: "source", text: SRC.replace("xau_both", "renamed") }]).source).toMatch(/STRATEGY renamed/);
+    expect(() => applyChanges(SRC, [{ op: "source", text: "PORTFOLIO p VERSION 1\n\nRULES\n    RUN a\n" }])).toThrow(/new text must be a STRATEGY/);
+    expect(() => applyChanges(SRC, [{ op: "source", text: "hello" }])).toThrow(/new text must be a STRATEGY/);
+  });
+  it("sees STRATEGY after #, -- and block comments", () => {
+    const commented = `# header\n# more\n/* multi\n line */\n-- dash\n${SRC}`;
+    expect(applyChanges(commented, [{ op: "set_param", name: "fast", value: 12 }]).source).toContain("PARAM fast = 12");
+  });
+  it("replace_text inserts the replacement literally ($& and $$ are not patterns)", () => {
+    expect(applyChanges(SRC, [{ op: "replace_text", find: "PARAM fast = 9", replace: "PARAM fast = 9 -- $& $$ $' $\`" }]).source).toContain("PARAM fast = 9 -- $& $$ $' $\`\n");
+  });
 });
 
 describe("lineDiff and describeRules", () => {
