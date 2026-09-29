@@ -47,4 +47,21 @@ describe("diagnoseExits", () => {
     expect(d.trades).toBe(0);
     expect(JSON.stringify(d)).not.toMatch(/NaN/);
   });
+  it("validates caller-supplied grid and falls back to default if invalid", () => {
+    const trips = [trip({ id: 1 }), trip({ id: 2 }), trip({ id: 3, exit: "target", exitPx: 124, pnl: 24 })];
+    const d = diagnoseExits(trips, () => bars, { stops: [0, -1, NaN], targets: [5] });
+    expect(d.trades).toBe(3);
+    const json = JSON.stringify(d);
+    expect(json).not.toMatch(/NaN/);
+    // Should use default grid since caller grid is invalid
+    expect(d.bracket.medianStop).toBeGreaterThan(0);
+    // Check that expectancyR values are all finite numbers or null, never NaN
+    for (const row of d.whatIf) {
+      if (typeof row.expectancyR === "number") {
+        expect(Number.isFinite(row.expectancyR)).toBe(true);
+      } else {
+        expect(row.expectancyR).toBe(null);
+      }
+    }
+  });
 });

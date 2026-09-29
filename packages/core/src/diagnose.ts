@@ -68,7 +68,14 @@ export function diagnoseExits(trips: RoundTrip[], barsOf: (t: RoundTrip) => Path
     if (t.sl !== undefined && t.entryPx !== t.sl) mfeR.push(e.mfe / Math.abs(t.entryPx - t.sl));
   }
   const base = median(stops) ?? median(mae) ?? 0;
-  const g = grid ?? { stops: [0.5, 1, 1.5, 2].map((m) => round(base * m)).filter((x) => x > 0), targets: [0.5, 1, 1.5, 2, 3].map((m) => round(base * m)).filter((x) => x > 0) };
+  const validateGrid = (gr?: { stops: number[]; targets: number[] }) => {
+    if (!gr) return null;
+    const s = gr.stops.filter((x) => Number.isFinite(x) && x > 0);
+    const t = gr.targets.filter((x) => Number.isFinite(x) && x > 0);
+    return s.length && t.length ? { stops: s, targets: t } : null;
+  };
+  const validated = validateGrid(grid);
+  const g = validated ?? { stops: [0.5, 1, 1.5, 2].map((m) => round(base * m)).filter((x) => x > 0), targets: [0.5, 1, 1.5, 2, 3].map((m) => round(base * m)).filter((x) => x > 0) };
   const rows: ExitDiagnosis["whatIf"] = [];
   for (const stop of g.stops) for (const target of g.targets) {
     let tf = 0, sf = 0, op = 0;
