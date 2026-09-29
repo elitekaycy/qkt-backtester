@@ -41,6 +41,13 @@ const MAX_GRID = 200;
 const LOG_KEEP = 200;
 
 const need = (cond: unknown, msg: string) => { if (!cond) throw new RunRequestError(msg); };
+
+/** Symbol/tf/date validation shared by data-job submission (Jobs.validateRange) and tool-side proposal checks. */
+export function validateBuildRange(r: { symbol?: string; tf?: string; from?: string; to?: string }): void {
+  need(r.symbol && NAME.test(r.symbol), "symbol must be a plain identifier");
+  need(r.tf && TF.test(r.tf), "tf must look like 15m, 1h, 1d");
+  need(r.from && DATE.test(r.from) && r.to && DATE.test(r.to) && Date.parse(r.from) < Date.parse(r.to), "from/to must be YYYY-MM-DD with from before to");
+}
 const quote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : JSON.stringify(s));
 
 function cartesian(axes: Record<string, string[]>): Array<Record<string, string>> {
@@ -115,9 +122,7 @@ export class Jobs {
   // ---- data jobs ----------------------------------------------------------------------------------------------
 
   private validateRange(r: { symbol?: string; tf?: string; from?: string; to?: string }): void {
-    need(r.symbol && NAME.test(r.symbol), "symbol must be a plain identifier");
-    need(r.tf && TF.test(r.tf), "tf must look like 15m, 1h, 1d");
-    need(r.from && DATE.test(r.from) && r.to && DATE.test(r.to) && Date.parse(r.from) < Date.parse(r.to), "from/to must be YYYY-MM-DD with from before to");
+    validateBuildRange(r);
   }
 
   private async cleanup(job: Job): Promise<void> {

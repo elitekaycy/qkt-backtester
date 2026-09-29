@@ -201,3 +201,36 @@ describe.skipIf(!haveData)("try_change", () => {
     await c.close(); await s3.app.close();
   }, 240_000);
 });
+
+describe.skipIf(!haveData)("run and job tools", () => {
+  it("run_backtest waits and reports; sweep returns first-part numbers only; data jobs are proposals", async () => {
+    const s4 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
+    await s4.app.listen({ port: 0, host: "127.0.0.1" });
+    const c = await mcpClient(`http://127.0.0.1:${(s4.app.server.address() as { port: number }).port}`, "t0k");
+    writeFileSync(path.join(ws, "strategies", "sw.qkt"), "STRATEGY sw VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nPARAM fast = 9\n\nRULES\n    WHEN ema(gold.close, fast) CROSSES ABOVE ema(gold.close, 21)\n     AND POSITION.gold = 0\n    THEN BUY gold SIZING 0.1\n        BRACKET { STOP_LOSS BY 5, TAKE_PROFIT BY 10 }\n");
+    const r = await call(c, "run_backtest", { path: "strategies/sw.qkt", from: "2024-10-01", to: "2024-10-15" });
+    expect(r.json.status).toBe("done");
+    const sw = await call(c, "sweep", { path: "strategies/sw.qkt", params: { fast: ["5", "9"] }, from: "2024-10-01", to: "2024-10-15" });
+    let st = await call(c, "job_status", { id: sw.json.jobId });
+    for (let i = 0; i < 60 && st.json.status === "running"; i++) { await new Promise((z) => setTimeout(z, 2000)); st = await call(c, "job_status", { id: sw.json.jobId }); }
+    expect(st.json.status).toBe("done");
+    expect(st.json.rows[0].first).toBeDefined();
+    expect(st.json.rows[0].test).toBeUndefined(); // the model tunes on the first part only
+    const pb = await call(c, "propose_build_bars", { symbol: "XAUUSD", tf: "15m", from: "2024-10-01", to: "2024-10-02" });
+    expect(pb.json.proposalId).toBeTruthy();
+    await c.close(); await s4.app.close();
+  }, 300_000);
+
+  it("propose_build_bars refuses an invalid range before creating a proposal", async () => {
+    const s5 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
+    await s5.app.listen({ port: 0, host: "127.0.0.1" });
+    const b5 = `http://127.0.0.1:${(s5.app.server.address() as { port: number }).port}`;
+    const c = await mcpClient(b5, "t0k");
+    const before = (await (await fetch(`${b5}/api/proposals`, { headers: { Authorization: "Bearer t0k" } })).json()).proposals.length;
+    const bad = await call(c, "propose_build_bars", { symbol: "XAUUSD", tf: "15x", from: "2024-10-01", to: "2024-10-02" });
+    expect(bad.isError).toBe(true);
+    const after = (await (await fetch(`${b5}/api/proposals`, { headers: { Authorization: "Bearer t0k" } })).json()).proposals.length;
+    expect(after).toBe(before);
+    await c.close(); await s5.app.close();
+  }, 30_000);
+});
