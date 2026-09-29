@@ -71,7 +71,7 @@ describe("knowledge tools", () => {
   });
 });
 
-describe.skipIf(!haveData)("analysis tools", () => {
+describe.skipIf(!haveData || !haveQkt)("analysis tools", () => {
   it("summarise, diagnose and list the trades of a real run", async () => {
     const s2 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
     await s2.app.listen({ port: 0, host: "127.0.0.1" });
@@ -157,7 +157,7 @@ describe("the split", () => {
   });
 });
 
-describe.skipIf(!haveData)("try_change", () => {
+describe.skipIf(!haveData || !haveQkt)("try_change", () => {
   it("runs the change on a copy, compares it with the base, announces it, and never touches the base file", async () => {
     const s3 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
     await s3.app.listen({ port: 0, host: "127.0.0.1" });
@@ -190,7 +190,7 @@ describe.skipIf(!haveData)("try_change", () => {
   }, 240_000);
 });
 
-describe.skipIf(!haveData)("run and job tools", () => {
+describe.skipIf(!haveData || !haveQkt)("run and job tools", () => {
   it("run_backtest waits and reports; sweep returns first-part numbers only; data jobs are proposals", async () => {
     const s4 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
     await s4.app.listen({ port: 0, host: "127.0.0.1" });
