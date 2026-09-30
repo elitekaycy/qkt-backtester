@@ -10,7 +10,10 @@
 //                                the whole assistant message, then message_stop (a reader must not show the text twice)
 //     {"$ignored": true}  one of each real-but-uninteresting event: hook_started, status, thinking_tokens, rate_limit_event
 //     {"$stderr": "text"}   {"$exit": code}
+//     {"$child": true}  start a helper process in the CLI's process group (its pid is appended to $FAKE_CLAUDE_CHILD_LOG):
+//                       proves a Stop kills the whole group, not only the CLI
 // Sessions behave like the CLI's: --session-id must be new, --resume must exist (markers in $CLAUDE_CONFIG_DIR/fake-sessions).
+import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,6 +95,7 @@ for (const line of lines) {
   const o = JSON.parse(line.replaceAll("{{session}}", session));
   if (o.$sleep) await new Promise((r) => setTimeout(r, o.$sleep));
   else if (o.$hang) await new Promise(() => setInterval(() => undefined, 1 << 30));
+  else if (o.$child) { const c = spawn("sleep", ["120"], { stdio: "ignore" }); if (process.env.FAKE_CLAUDE_CHILD_LOG) appendFileSync(process.env.FAKE_CLAUDE_CHILD_LOG, `${c.pid}\n`); }
   else if (o.$stderr) process.stderr.write(`${o.$stderr}\n`);
   else if (o.$exit !== undefined) process.exit(o.$exit);
   else if (o.$stream_text) streamText(o.$stream_text)
