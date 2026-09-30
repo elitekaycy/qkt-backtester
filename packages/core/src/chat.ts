@@ -49,7 +49,8 @@ export function foldEvent(m: ChatMessage, ev: ChatEvent): ChatMessage {
     case "result":
       return { ...m, usage: ev.usage, error: ev.ok ? m.error : ev.text || m.error };
     case "end":
-      return { ...m, status: ev.status, error: ev.error ?? m.error, usage: ev.usage === undefined ? m.usage : ev.usage };
+      // done means the message succeeded: an earlier attempt's failed result (a retry that then worked) is not its error
+      return { ...m, status: ev.status, error: ev.status === "done" ? null : ev.error ?? m.error, usage: ev.usage === undefined ? m.usage : ev.usage };
     case "session":
       return m;
   }

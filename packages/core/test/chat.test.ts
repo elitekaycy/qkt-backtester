@@ -22,6 +22,10 @@ describe("foldEvent", () => {
     expect(m).toMatchObject({ status: "error", error: "usage limit reached", usage });
     expect(fold([{ k: "notice", text: "retrying" }, { k: "end", status: "stopped", error: "Stopped.", usage: null }])).toMatchObject({ status: "stopped", error: "Stopped.", usage: null, items: [{ type: "notice", text: "retrying" }] });
   });
+  it("a message that ends done carries no error, even when an earlier attempt's result failed (a retry that succeeded)", () => {
+    const m = fold([{ k: "result", ok: false, text: "No conversation found", subtype: "error_during_execution", usage }, { k: "notice", text: "fresh session" }, { k: "result", ok: true, text: "ok", subtype: "success", usage }, { k: "end", status: "done", usage }]);
+    expect(m).toMatchObject({ status: "done", error: null });
+  });
   it("never mutates the message it is given", () => {
     const m = empty();
     fold([{ k: "text", text: "a" }, { k: "tool", id: "t", name: "x", input: {} }], m);

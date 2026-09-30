@@ -32,6 +32,8 @@ type ResultEv = Extract<ChatEvent, { k: "result" }>;
 interface Outcome { ok: boolean; why: string; detail: string; usage: Usage | null }
 
 const fmtLimit = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.ceil(ms / 1000)} seconds`);
+/** Text deltas are saved at most this often (every other event is saved at once). */
+const SAVE_EVERY_MS = 250;
 const titleOf = (t: string) => t.replace(/\s+/g, " ").trim().slice(0, 60);
 // the CLI's wording for a missing or already-used session id: matched loosely (not verified against every version)
 const NO_SESSION = /No conversation found/i, SESSION_TAKEN = /already in use/i;
@@ -133,10 +135,21 @@ export class ChatManager {
 
   private async run(turn: Turn, first: ChatMessage, prompt: string, model: AgentModel): Promise<void> {
     let msg = first;
+    // Saved on every event except text deltas, which come by the thousand and each rewrite the whole row: those are saved
+    // at most every SAVE_EVERY_MS, with a trailing save so a tab that (re)loads mid-stream is never far behind. The stored
+    // message carries its evSeq, so a tab folds whatever streamed after that snapshot; the `end` event always saves.
+    let lastSave = 0, trailing: NodeJS.Timeout | null = null;
+    const save = () => {
+      if (trailing) { clearTimeout(trailing); trailing = null; }
+      lastSave = Date.now();
+      this.d.store.saveMessage(msg);
+    };
     const emit = (ev: ChatEvent) => {
       const seq = (msg.evSeq ?? 0) + 1;
       msg = { ...foldEvent(msg, ev), evSeq: seq };
-      this.d.store.saveMessage(msg); // every event: a tab that (re)loads the conversation mid-stream sees it all
+      const wait = SAVE_EVERY_MS - (Date.now() - lastSave);
+      if (ev.k !== "text" || wait <= 0) save();
+      else trailing ??= setTimeout(() => { try { save(); } catch (e) { console.error(`chat: message ${msg.id} could not be saved: ${(e as Error).message}`); } }, wait);
       this.d.events.emit({ t: "chat", conversationId: msg.conversationId, messageId: msg.id, seq, ev });
     };
     try {

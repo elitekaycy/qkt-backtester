@@ -1,8 +1,11 @@
 // packages/server/src/chat/stream.ts
 import type { ChatEvent, Usage } from "@qkt-studio/core";
+import { MAX_CHARS } from "../mcp/util.js";
 
 const TOOL_PREFIX = "mcp__studio__";
-const MAX_RESULT_CHARS = 4000;
+/** The studio's tools already cap their results at MAX_CHARS; the margin covers the CLI's wrapping. A result is stored
+ *  whole up to here, so the chat's cards (which parse it as JSON) survive the largest result a tool can give. */
+export const MAX_RESULT_CHARS = MAX_CHARS + 512;
 type Obj = Record<string, unknown>;
 const obj = (x: unknown): Obj | null => (x && typeof x === "object" && !Array.isArray(x) ? (x as Obj) : null);
 const arr = (x: unknown): unknown[] => (Array.isArray(x) ? x : []);

@@ -68,6 +68,22 @@ describe("ChatManager", () => {
     expect(reply(store, conversationId).evSeq).toBe(got.length);
     expect(store.messages(conversationId)[0]!.evSeq).toBe(0);
   });
+  it("saves text deltas at most every 250 ms, every other event at once, and the final save holds all the text", async () => {
+    const { mgr, store, got } = setup();
+    const saved: ChatMessage[] = [];
+    const orig = store.saveMessage.bind(store);
+    store.saveMessage = (m) => { saved.push(m); orig(m); };
+    const { conversationId } = await mgr.send({ text: "hi" });
+    await until(() => mgr.busy() === null);
+    const texts = got.filter((e) => e.k === "text").length;
+    expect(texts).toBeGreaterThan(2);
+    expect(saved.length).toBeLessThan(got.length); // the deltas, arriving together, were not each saved
+    // every non-text event was saved as it came: the saved evSeqs include each one's sequence number
+    const nonText = got.flatMap((e, i) => (e.k === "text" ? [] : [i + 1]));
+    expect(nonText.every((seq) => saved.some((m) => m.evSeq === seq))).toBe(true);
+    expect(saved.at(-1)).toMatchObject({ status: "done", text: "Hello from the fake.", evSeq: got.length });
+    expect(reply(store, conversationId)).toMatchObject({ text: "Hello from the fake.", evSeq: got.length });
+  });
   it("starts a session on the first message and resumes it on the next; Think harder is sonnet", async () => {
     const { mgr, argvs } = setup();
     const a = await mgr.send({ text: "hi" }); await until(() => !mgr.busy());
