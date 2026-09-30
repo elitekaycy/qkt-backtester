@@ -9,6 +9,7 @@ import { registerAuthoringTools } from "./tools-authoring.js";
 import { registerSplitTools } from "../split.js";
 import { registerTryTools } from "./tools-try.js";
 import { registerRunTools } from "./tools-runs.js";
+import { TeeSet, limitReply, toolCalls } from "../chat/tokens.js";
 import type { ToolCtx } from "./util.js";
 
 /** Every tool group registers here; later tasks add their `register...` calls to this list. */
@@ -33,8 +34,15 @@ export function registerMcp(app: FastifyInstance, ctx: ToolCtx): void {
     method: ["GET", "POST", "DELETE"], url: "/api/mcp",
     handler: async (req, reply) => {
       if (req.method !== "POST") return reply.code(405).header("Allow", "POST").send({ error: "stateless MCP: POST only" });
+      const grant = req.chatGrant;
+      if (grant) {
+        const n = toolCalls(req.body);
+        grant.calls += n;
+        // past the budget: a tool error the model can read, and the chat manager stops the process
+        if (n && grant.calls > grant.maxCalls) { grant.onLimit(); return reply.code(200).header("Content-Type", "application/json").send(limitReply(req.body, grant.maxCalls)); }
+      }
       reply.hijack();
-      const server = buildMcp(ctx);
+      const server = buildMcp(grant ? { ...ctx, started: new TeeSet(ctx.started, grant) } : ctx);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       reply.raw.on("close", () => { void transport.close(); void server.close(); });
       await server.connect(transport);

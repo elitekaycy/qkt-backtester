@@ -1,3 +1,4 @@
+import type { TurnGrant } from "./chat/tokens.js";
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
@@ -29,7 +30,14 @@ function tokenOk(given: string | undefined, expected: string): boolean {
 }
 
 /** Build the HTTP app. Route groups are registered by their own modules so tests can mount subsets. */
-export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstance) => void | Promise<void>): Promise<FastifyInstance> {
+export interface AppOptions {
+  /** Resolves a chat per-process token (Bearer header only) to its grant; honoured on /api/mcp only, besides the studio's own token. */
+  mcpGrant?: (token: string | undefined) => TurnGrant | undefined;
+}
+
+declare module "fastify" { interface FastifyRequest { chatGrant?: TurnGrant } }
+
+export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstance) => void | Promise<void>, opts: AppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 12 * 1024 * 1024 });
   await app.register(fastifyWebsocket, { options: { maxPayload: 4 * 1024 * 1024 } });
 
@@ -62,6 +70,12 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
     if (origin && risky && !originAllowed(origin, host, cfg.allowedOrigins ?? [])) return reply.code(403).send({ error: "cross-site request refused" });
   });
 
+  // The one place a chat token is resolved: Bearer header, exactly /api/mcp. Authorisation and the MCP handler's accounting both use req.chatGrant.
+  app.addHook("onRequest", async (req) => {
+    if (req.url !== "/api/mcp" && !req.url.startsWith("/api/mcp?")) return;
+    req.chatGrant = opts.mcpGrant?.(/^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1]);
+  });
+
   if (cfg.token) {
     const expected = cfg.token;
     app.addHook("onRequest", async (req, reply) => {
@@ -69,6 +83,7 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
       if (!url.startsWith("/api") && !url.startsWith("/ws")) return; // the static UI loads so it can ask for the token
       const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
       const q = /[?&]token=([^&]+)/.exec(url)?.[1];
+      if (req.chatGrant) return; // a per-process token is good for the MCP endpoint and nothing else
       if (!tokenOk(bearer ?? (q ? decodeURIComponent(q) : undefined), expected)) return reply.code(401).send({ error: "unauthorized" });
     });
   }

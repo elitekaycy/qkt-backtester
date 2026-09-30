@@ -44,6 +44,11 @@ jobs:
           docker run -d --name studio -p 127.0.0.1:8080:8080 -v "$PWD/ws:/workspace" qkt-backtester:ci
           scripts/docker-smoke.sh http://127.0.0.1:8080
           test "$(stat -c %u ws/qkt.config.yaml)" = "$(id -u)"   # files the studio creates belong to the host user
+      - name: the image carries Claude Code as published, configured on its own volume
+        run: |
+          docker run --rm --entrypoint claude qkt-backtester:ci --version | grep -q '^2.1.285 '
+          (docker run --rm -u 1000 --entrypoint claude qkt-backtester:ci auth status --json || true) | grep -q '"configDirectory": *"/home/studio/.claude"'
+          docker exec -u "$(id -u)" studio sh -c 'test -w /home/studio/.claude'
       - name: strategies that exercise brackets, rule exits and a portfolio
         run: |
           cat > ws/strategies/brk.qkt <<'EOF'
@@ -127,6 +132,13 @@ jobs:
         run: BASE=http://127.0.0.1:8080/ WIN_FROM=2024-01-02 WIN_TO=2024-03-30 TICK_FROM=2024-01-08 TICK_TO=2024-01-13 node scripts/walkthrough.e2e.mjs
       - name: tools drive the UI - try_change shows a variant, the split follows, Adopt is one undo step
         run: BASE=http://127.0.0.1:8080/ STRATEGY=strategies/ema_cross.qkt node scripts/agent-ui.e2e.mjs
+      - name: the Chat tab end to end with a stand-in CLI (no tokens) - steps, variant, split, Adopt, stale proposal, Stop, sign-in card
+        run: |
+          mkdir -p ws3
+          docker run -d --name studio-chat -p 127.0.0.1:8081:8080 -v "$PWD/ws3:/workspace" \
+            -v "$PWD/packages/server/test/fixtures/fake-claude:/fake:ro" -e CLAUDE_BIN=/fake/fake-claude.mjs qkt-backtester:ci
+          for i in $(seq 1 120); do curl -fs http://127.0.0.1:8081/api/health >/dev/null && break; sleep 2; done
+          BASE=http://127.0.0.1:8081/ CONTAINER=studio-chat STRATEGY=strategies/ema_cross.qkt node scripts/chat-ui.e2e.mjs
       - name: Esc in the vim editor survives browser extensions that blur on Esc
         run: BASE=http://127.0.0.1:8080/ STRATEGY=ema_cross.qkt node scripts/vim-esc.e2e.mjs
       - name: token mode stays healthy
@@ -137,4 +149,4 @@ jobs:
           test "$s" = healthy
       - name: container logs
         if: always()
-        run: docker logs studio; docker logs studio-token || true
+        run: docker logs studio; docker logs studio-chat || true; docker logs studio-token || true

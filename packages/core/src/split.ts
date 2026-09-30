@@ -52,9 +52,17 @@ export function partsOf(trips: RoundTrip[], from: string, to: string, split: Spl
   return { split, cut: cutIso, first: stats(trips.filter((t) => at(t) < cut), from, cutIso), test: stats(trips.filter((t) => at(t) >= cut), cutIso, to) };
 }
 
+/** "1 weeks" -> "1 week", "2 month" -> "2 months": the unit agrees with the number (parseSplit accepts either spelling). */
+function lastText(s: string): string {
+  const m = LAST.exec(s.trim());
+  if (!m) return s;
+  const n = Number(m[1]), unit = m[2]!.toLowerCase();
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
+
 export function describeSplit(split: Split): string {
   if ("none" in split) return "no split";
   if ("test_pct" in split) return `test = last ${split.test_pct} %`;
-  if ("test_last" in split) return `test = last ${split.test_last}`;
+  if ("test_last" in split) return `test = last ${lastText(split.test_last)}`;
   return `test from ${split.test_from}`;
 }

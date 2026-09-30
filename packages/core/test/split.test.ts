@@ -32,5 +32,9 @@ describe("split", () => {
     expect(empty.test).toEqual({ from: "2026-04-01", to: "2026-05-01", trades: 0, net: 0, winRate: null, profitFactor: null, avgR: null });
     expect(JSON.stringify(empty)).not.toMatch(/NaN/);
     expect(describeSplit({ test_last: "3 months" })).toBe("test = last 3 months");
+    expect(describeSplit({ test_last: "1 weeks" })).toBe("test = last 1 week");
+    expect(describeSplit({ test_last: "1 month" })).toBe("test = last 1 month");
+    expect(describeSplit({ test_last: "2 week" })).toBe("test = last 2 weeks");
+    expect(describeSplit({ test_last: "1  Days" })).toBe("test = last 1 day");
   });
 });

@@ -39,6 +39,18 @@ describe("set_bracket", () => {
     expect(r.source).toContain("BRACKET { STOP_LOSS BY 2, TAKE_PROFIT BY 6 }");
     expect(r.source).toContain("BRACKET { STOP_LOSS AT gold.close + 10 }");
   });
+  it("the bracket a file already has gives back the identical text, and says so; a new level names the old one", () => {
+    const own = SRC.replace(/BRACKET \{[\s\S]*?\}/, "BRACKET { STOP_LOSS BY 1 PCT, TAKE_PROFIT BY 2 PCT }");
+    const same = applyChanges(own, [{ op: "set_bracket", rule: 1, stop: "1%", target: "2%" }]);
+    expect(same.source).toBe(own);
+    expect(same.notes.join(" ")).toMatch(/no change: the result is identical to the base text/);
+    const wider = applyChanges(own, [{ op: "set_bracket", rule: 1, stop: "1.5%" }]);
+    expect(wider.source).toContain("BRACKET { STOP_LOSS BY 1.5 PCT, TAKE_PROFIT BY 2 PCT }");
+    expect(wider.notes.join(" ")).toMatch(/rule 1 \(STOP_LOSS BY 1 PCT -> BY 1\.5 PCT\)/);
+    expect(wider.notes.join(" ")).not.toMatch(/no change/);
+    // a rule without a bracket gets one: the note says it was added, not changed
+    expect(applyChanges(SRC, [{ op: "set_bracket", rule: 2, stop: "1%" }]).notes.join(" ")).toMatch(/rule 2 \(added a BRACKET\)/);
+  });
   it("refuses a spec it cannot read, and a rule that does not exist", () => {
     expect(() => applyChanges(SRC, [{ op: "set_bracket", stop: "a lot" }])).toThrow(ChangeError);
     expect(() => applyChanges(SRC, [{ op: "set_bracket", rule: 9, stop: 2 }])).toThrow(/no rule 9; rules: 1: WHEN ema/);

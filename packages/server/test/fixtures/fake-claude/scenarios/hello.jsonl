@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"{{session}}","model":"claude-haiku-4-5","tools":[],"mcp_servers":[{"name":"studio","status":"connected"}],"permissionMode":"dontAsk","apiKeySource":"none","cwd":"/tmp","claude_code_version":"2.1.285","uuid":"u-init"}
+{"$ignored":true}
+{"$stream_text":"Hello from the fake."}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":900,"duration_api_ms":800,"num_turns":1,"result":"Hello from the fake.","stop_reason":"end_turn","session_id":"{{session}}","total_cost_usd":0.0012,"usage":{"input_tokens":400,"cache_creation_input_tokens":0,"cache_read_input_tokens":2000,"output_tokens":12},"modelUsage":{},"permission_denials":[],"uuid":"u-result"}

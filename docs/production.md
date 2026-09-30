@@ -10,25 +10,25 @@ Versions are published by CI (`.github/workflows/release.yml`) when a tag is pus
 
 ```sh
 # bump the version in package.json and packages/*/package.json (all four must match), merge to main, then:
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The workflow refuses a tag that differs from the package versions. It then:
 
 - builds the image exactly as the `check` workflow builds and tests it;
 - starts it on an empty workspace and runs the smoke test (first run, cache, health);
-- pushes it to `ghcr.io/elitekaycy/qkt-backtester` as `:v0.2.0`, `:v0.2`, `:latest` and `:sha-<commit>`;
+- pushes it to `ghcr.io/elitekaycy/qkt-backtester` as `:v0.3.0`, `:v0.3`, `:latest` and `:sha-<commit>`;
 - creates a GitHub release that names the image digest.
 
 The qkt engine inside is pinned by digest in `docker/Dockerfile` (`QKT_IMAGE`). Each image carries its version, commit
 and engine in its labels:
 
 ```sh
-docker inspect -f '{{json .Config.Labels}}' ghcr.io/elitekaycy/qkt-backtester:v0.2.0
+docker inspect -f '{{json .Config.Labels}}' ghcr.io/elitekaycy/qkt-backtester:v0.3.0
 ```
 
-Pin servers to a version tag (`:v0.2.0`), never `:latest`: an upgrade is then a deliberate change you can roll back.
+Pin servers to a version tag (`:v0.3.0`), never `:latest`: an upgrade is then a deliberate change you can roll back.
 
 The image is `linux/amd64` only, because the qkt engine image is.
 
@@ -37,17 +37,20 @@ The image is `linux/amd64` only, because the qkt engine image is.
 ```sh
 # once: a workspace folder owned by the account that should own the files
 mkdir -p /srv/qkt-studio/workspace
+# an empty folder for the chat's sign-in; the container hands it to the workspace owner on start
+mkdir -p /srv/qkt-studio/claude
 
-docker pull ghcr.io/elitekaycy/qkt-backtester:v0.2.0
+docker pull ghcr.io/elitekaycy/qkt-backtester:v0.3.0
 docker run -d --name qkt-backtester --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -v /srv/qkt-studio/workspace:/workspace \
+  -v /srv/qkt-studio/claude:/home/studio/.claude \
   -v /path/to/data-store:/data:ro \
   -e QKT_DEMO=0 \
   -e STUDIO_TOKEN="$(openssl rand -hex 24)" \
   -e STUDIO_TERMINAL=restricted \
   -e MAX_PARALLEL=4 \
-  ghcr.io/elitekaycy/qkt-backtester:v0.2.0
+  ghcr.io/elitekaycy/qkt-backtester:v0.3.0
 ```
 
 - **Port**: publish on `127.0.0.1` only. The studio runs strategies and has a terminal, so never expose it to the
@@ -60,6 +63,7 @@ docker run -d --name qkt-backtester --restart unless-stopped \
 - **Workspace** (`/workspace`): your strategies, `qkt.config.yaml`, `instruments.yaml`, `.env` and every run's output
   (`runs/`). An empty folder is seeded with a starter config and two sample strategies on a symbol your data has.
   Back this folder up; it is the only state the studio keeps.
+- **Claude Code sign-in** (`/home/studio/.claude`): the chat's sign-in, kept by Claude Code itself. Mount it from its own folder: without a mount it lives in an anonymous volume that `docker rm` + `docker run` (every upgrade) replaces with an empty one, and you would sign in again after each upgrade. It is never inside the workspace.
 - **Files belong to the folder's owner**: the container runs as the owner of `/workspace` (set `PUID`/`PGID` if Docker
   creates the folder for you).
 
@@ -78,9 +82,10 @@ docker run -d --name qkt-backtester --restart unless-stopped \
 docker ps --filter name=qkt-backtester          # STATUS shows (healthy) once the API answers
 docker logs --tail 100 qkt-backtester
 # upgrade (runs are kept: they live in the workspace)
-docker pull ghcr.io/elitekaycy/qkt-backtester:v0.2.1
+docker pull ghcr.io/elitekaycy/qkt-backtester:v0.3.0
 docker stop qkt-backtester && docker rm qkt-backtester
-docker run ... ghcr.io/elitekaycy/qkt-backtester:v0.2.1      # same flags as before
+docker run ... ghcr.io/elitekaycy/qkt-backtester:v0.3.0      # same flags as before
+# same flags includes the /home/studio/.claude mount, or the chat is signed out after the upgrade
 # roll back: the same, with the previous tag
 ```
 
@@ -102,6 +107,9 @@ engine output they came from is never rewritten.
 | `STUDIO_KEEP_ROOT` | unset | Set to keep running as root instead of the workspace owner. |
 | `HOST` / `PORT` | `0.0.0.0` / `8080` | Listen address inside the container. Control exposure with `-p`. |
 | `STUDIO_CDS_DIR` | `/tmp/home/cds` | Where backtest JVMs keep a class-data archive for faster start-up. Unset to disable. |
+| `CLAUDE_BIN` | `/usr/local/bin/claude` (image) | The Claude Code CLI the chat runs. |
+| `CLAUDE_CONFIG_DIR` | `/home/studio/.claude` (image) | Claude Code's own folder: its sign-in and conversation transcripts. Mount it as a volume. |
+| `CHAT_RECORD_DIR` | unset | Also save each chat message's raw CLI output there (test fixtures; see `scripts/chat-live.mjs`). |
 | `QKT_DATA_HOME`, `WORKSPACE`, `QKT_BIN`, `WEB_ROOT` | set by the image | Paths inside the container; leave them. |
 
 Backtest settings (balance, risk halts, execution model, portfolio book risk) are in the workspace's
@@ -112,7 +120,7 @@ reference around your own values.
 
 Every push runs the `check` workflow: unit tests, then the image itself on an empty workspace with synthetic data:
 accuracy against an independent reimplementation, byte-for-byte determinism, what the UI displays, a whole-session
-walkthrough (create, run, edit with auto-run, ticks, a parameter grid), and keyboard and extension compatibility. The
+walkthrough (create, run, edit with auto-run, ticks, a parameter grid), keyboard and extension compatibility, and the Chat tab end to end with a stand-in CLI that replays recorded replies (no tokens). The
 release workflow only publishes a commit whose image starts and passes the smoke test.
 
 ## 5. The studio's tools (MCP)
@@ -135,3 +143,53 @@ Each open studio tab keeps one event stream to the server (for what the tools do
 going. Over plain HTTP (for example `http://bot2:8080`) browsers allow 6 connections per host, so with about five tabs
 of the studio open, requests in every tab start to wait. Close tabs you do not use, or serve the studio over HTTPS
 (HTTP/2) behind a proxy, where this limit does not apply.
+
+## 6. The research chat
+
+The **Chat** tab (next to Pipeline, Problems, Terminal) takes plain English ("make the stop-loss 2 % and let's see",
+"skip Fridays", "make the test part the last 2 months") and does it with the studio's tools (section 5): changes are
+tried on a copy and shown on the chart with Adopt / Discard, edits to your files are proposals you Apply or Reject.
+
+It runs the **unmodified Claude Code CLI** shipped in the image, on **your own Claude plan** (Pro or Max): Haiku by
+default, Sonnet when you press **Think harder**. Sign in once, with Anthropic's own flow, inside the container:
+
+```sh
+docker exec -it -u 1000 qkt-backtester claude auth login     # -u: the owner of your workspace folder (the Chat tab shows it)
+```
+
+The sign-in stays in Claude Code's folder (`/home/studio/.claude`, its own volume); the studio never reads, stores or
+forwards it, and only asks `claude auth status` whether you are signed in. Each message starts one CLI process that can
+use the studio's tools and nothing else (no shell, no files), with its own short-lived token for `/api/mcp`. Limits per
+message: 25 tool calls and 5 minutes; one message at a time. **Stop** ends the process and cancels the runs it started.
+Nothing runs in the background: the CLI only starts when you send a message. Usage is shown under each reply ("counts
+toward your Claude plan"; the API-equivalent cost is in its tooltip). When the plan's limit is reached the CLI's own
+message is shown; with `-e ANTHROPIC_API_KEY=...` Claude Code bills the API instead.
+
+### What the CLI loads, and what it does not
+
+- **Settings**: the CLI is started with `--setting-sources user` (a flag added to the design's list in section 5 of the
+  spec; `claude --help` of 2.1.285 lists it and `claude auth status` accepts it). Only the settings in Claude Code's own
+  folder (`$CLAUDE_CONFIG_DIR/settings.json`, i.e. `/home/studio/.claude/settings.json`) apply; `.claude/settings.json`
+  and `.claude/settings.local.json` found from the workspace are not loaded. `user` is kept because it is where the
+  studio's own sign-in folder lives. The sign-in itself is not a setting and is unaffected by the flag.
+- **Instruction files**: the CLI runs in `/workspace/.qkt-studio/chat/cwd`. In Anthropic's Agent SDK, `CLAUDE.md` files
+  load only with the project source, which the flag leaves out; whether the CLI's upward lookup follows the flag the
+  same way has not been confirmed with a live message (that costs a model call), so treat a `CLAUDE.md` or `AGENTS.md`
+  in the workspace as text the chat may read. It cannot change
+  what the chat is allowed to do: the only tools are the studio's, under their path policy and limits.
+- **Hooks and plugins** configured in `/home/studio/.claude` (the user source) still run. That folder is the studio's own
+  volume; keep it to the sign-in and do not install hooks or plugins into it.
+
+### Where the sign-in lives
+
+Everything `claude auth login` writes goes to `CLAUDE_CONFIG_DIR` (`/home/studio/.claude`): `.credentials.json` and the
+CLI's own `.claude.json`. Nothing it needs is written under `HOME` (`/tmp/home` in the image, not a volume), so the
+mount above is the only thing to keep across `docker rm` / `docker run`.
+
+### Credentials in the environment are not passed on
+
+The CLI's environment is the studio's minus anything that looks like a secret (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`,
+`*API_KEY*`) and minus `STUDIO_TOKEN`. That also removes Claude Code's own env credentials, `CLAUDE_CODE_OAUTH_TOKEN`
+(from `claude setup-token`) and `ANTHROPIC_AUTH_TOKEN`: by design, the studio never forwards a credential. A container
+that only sets one of those shows as signed out in the Chat tab; sign in with `claude auth login` as above instead. The
+one exception is `ANTHROPIC_API_KEY`, kept on purpose so you can choose API billing.

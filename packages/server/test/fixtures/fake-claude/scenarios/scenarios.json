@@ -1,0 +1,14 @@
+[
+  { "match": "hang|keep working", "file": "hang.jsonl" },
+  { "match": "loop", "file": "loop.jsonl" },
+  { "match": "echo", "file": "echo.jsonl" },
+  { "match": "fail early", "file": "fail-early.jsonl" },
+  { "match": "usage limit", "file": "plan-limit.jsonl" },
+  { "match": "stop.*1 ?(%|percent)", "file": "try-change.jsonl" },
+  { "match": "stop.*2 ?(%|percent)", "file": "stop-2pct.jsonl" },
+  { "match": "split", "file": "set-split.jsonl" },
+  { "match": "propose", "file": "propose.jsonl" },
+  { "match": "compare (the )?stops", "file": "try-variants.jsonl" },
+  { "match": "sweep", "file": "sweep.jsonl" },
+  { "match": "run (the )?backtest", "file": "run-backtest.jsonl" }
+]

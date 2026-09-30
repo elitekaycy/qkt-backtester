@@ -1,10 +1,14 @@
 import type { FastifyInstance } from "fastify";
+import type { ChatEvent } from "@qkt-studio/core";
 export type StudioEvent =
   | { t: "variant"; variantId: string; runId: string }
+  /** the variant list changed (a variant was discarded) */
+  | { t: "variants" }
   | { t: "proposal"; id: string }
   | { t: "split" }
   | { t: "open_file"; path: string }
-  | { t: "run"; runId: string };
+  | { t: "run"; runId: string }
+  | { t: "chat"; conversationId: string; messageId: string; seq: number; ev: ChatEvent };
 /** Effects of tool calls the UI must show (a variant to display, a proposal to review): one SSE stream per browser tab. */
 export class EventBus {
   private subs = new Set<(e: StudioEvent) => void>();

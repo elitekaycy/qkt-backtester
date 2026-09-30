@@ -19,6 +19,7 @@ import { Rail } from "./Rail.js";
 import { StatusBar } from "./StatusBar.js";
 import { cycleRegion } from "../util/regions.js";
 import { TopBar } from "./TopBar.js";
+import { shouldRevealPipeline, useChat } from "../chat/state.js";
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -72,9 +73,12 @@ function Shell() {
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
   }, []);
 
-  // the output panel opens by itself when a run starts or fails, so the steps are never hidden
-  useEffect(() => { if (running) useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [running]);
-  useEffect(() => { if (run?.status === "failed") useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [run?.status]);
+  // the output panel opens by itself when a run starts or fails, so the steps are never hidden; but not over an open Chat
+  // tab while it is answering: the chat's own tool calls start runs, and its steps already show them
+  useEffect(() => {
+    const reveal = () => { const u = useUi.getState(); if (shouldRevealPipeline({ dockOpen: u.dockOpen, dockTab: u.dockTab, chatBusy: useChat.getState().busy })) u.set({ dockOpen: true, dockTab: "pipeline" }); };
+    if (running || run?.status === "failed") reveal();
+  }, [running, run?.status]);
 
   // the agent slice (variants, proposals, split) and the SSE stream that keeps them live; start() closes any
   // previous stream and returns a stop function, so a StrictMode remount never leaves a duplicate stream open

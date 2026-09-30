@@ -28,6 +28,8 @@ export const canRebase = (v: Pick<Variant, "changes">) => Array.isArray(v.change
 /** Copies of a strategy with changes applied, each run beside its base; the user adopts one or discards it. */
 export class Variants {
   private items: Variant[] = [];
+  /** Run ids purged by Stop (see discardForRun). */
+  private purged = new Set<string>();
   private store: JsonFile<Variant[]>;
   constructor(private cfg: ServerConfig, private runner: Runner, private events: EventBus) {
     this.store = new JsonFile(path.join(cfg.workspace, DIR, "index.json"));
@@ -102,6 +104,8 @@ export class Variants {
     if (refused) throw refused.reason;
     const [a, b] = settled.map((r) => (r as PromiseFulfilledResult<Submitted>).value) as [Submitted, Submitted];
     v.runId = a.runId; v.baseRunId = b.runId;
+    // Stop purged this variant's run before its id was recorded here: the variant goes with it
+    if (this.purged.has(a.runId)) { await this.discard(v.id); return v; }
     await this.save();
     const timeout = new Promise<null>((r) => setTimeout(() => r(null), WAIT_MS));
     await Promise.race([Promise.all([this.runner.waitFor(a.runId), this.runner.waitFor(b.runId)]), timeout]);
@@ -131,6 +135,16 @@ export class Variants {
     await this.removeDir(id);
     this.items = this.items.filter((x) => x.id !== id);
     await this.save();
+    this.events.emit({ t: "variants" }); // every tab's variant list (and a card or chart showing it) follows
+  }
+
+  /**
+   * A variant's run was purged (Stop cancels what a chat message started): the variant is discarded, so no card, bar or
+   * chart points at a run that no longer exists. A variant still being submitted is discarded once its run id is known.
+   */
+  async discardForRun(runId: string): Promise<void> {
+    this.purged.add(runId);
+    for (const v of this.items.filter((x) => x.runId === runId)) await this.discard(v.id);
   }
 }
 export class RebaseError extends Error { constructor(message: string, readonly status: number) { super(message); } }

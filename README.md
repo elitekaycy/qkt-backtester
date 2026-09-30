@@ -26,6 +26,7 @@
 - **Data you can trust.** The data source is scanned per symbol, timeframe and year and every day is classified: ok, closed (weekends, holidays, empty files), thin or missing. It knows crypto trades on weekends and FX does not, so a holiday is not reported as a hole. Each symbol can use its own source folder and date range.
 - **Everything is configurable, in files.** Contract size, lot step, commission and swap in `instruments.yaml`; account, execution and risk in `qkt.config.yaml`; secrets in `.env`, read by `${VAR}` in the config.
 - **Panels that adapt.** Every pane collapses, maximizes and resets; light and dark themes; a command palette (`Ctrl+K`) for everything.
+- **Research chat**: say what to change in plain English; it is tried on a copy and shown on the chart (Claude Code on your own Claude plan; see [docs/production.md](docs/production.md#6-the-research-chat)).
 - **Tools for Claude Code.** The studio serves MCP tools at `/api/mcp`: try a change on a copy and see it on the chart, propose edits, set the train/test split. See [docs/production.md](docs/production.md#5-the-studios-tools-mcp).
 
 <p align="center">

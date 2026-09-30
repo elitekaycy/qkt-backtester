@@ -91,7 +91,12 @@
 .monaco-host { flex: 1; min-height: 0; }
 
 /* ---------- output dock ---------- */
-.dock-bar { display: flex; align-items: center; gap: 2px; height: 36px; flex: none; padding: 0 var(--s2); border-bottom: 1px solid var(--line); background: var(--side); }
+.dock-bar { display: flex; align-items: center; gap: 2px; height: 36px; flex: none; padding: 0 var(--s2); border-bottom: 1px solid var(--line); background: var(--side); min-width: 0; container-type: inline-size; }
+/* the tabs give way (labels fold to icons, then the row scrolls) so the pane controls at the right are never cut off */
+.dock-tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.dock-tabs::-webkit-scrollbar { display: none; }
+.dock-tab { flex: none; }
+@container (max-width: 520px) { .dock-tab .dock-tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } .dock-tab { position: relative; padding: 0 var(--s2); } }
 .dock-tab { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 var(--s3); border: 0; background: transparent; color: var(--ink-3); border-radius: var(--r-md); font-weight: 500; }
 .dock-tab:hover { background: var(--hover); color: var(--ink); }
 .dock-tab[aria-selected="true"] { background: var(--card-2); color: var(--ink); }

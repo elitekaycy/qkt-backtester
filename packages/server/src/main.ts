@@ -14,11 +14,19 @@ import { RunData } from "./run-data.js";
 import { Runner } from "./runner.js";
 import { applySettings } from "./settings.js";
 import { registerTerminal } from "./terminal.js";
-import { registerSplitRoutes } from "./split.js";
+import path from "node:path";
+import { describeSplit } from "@qkt-studio/core";
+import { registerSplitRoutes, getSplit } from "./split.js";
+import { ChatStore } from "./chat/store.js";
+import { ClaudeStatusCache } from "./chat/auth.js";
+import { ChatManager, LIMITS } from "./chat/manager.js";
+import { registerChatRoutes } from "./chat/routes.js";
+import { mcpHost } from "./chat/agent.js";
 import { EventBus, registerEvents } from "./agent/events.js";
 import { ViewState, registerView } from "./agent/view-state.js";
 import { Proposals, registerProposalRoutes } from "./agent/proposals.js";
 import { Variants, registerVariantRoutes } from "./agent/variants.js";
+import { ChatTokens } from "./chat/tokens.js";
 import { registerMcp } from "./mcp/index.js";
 import { ToolBudget } from "./mcp/util.js";
 
@@ -37,6 +45,15 @@ export async function createStudio(cfg: ServerConfig) {
   await variants.init();
   const started = new Set<string>();
   const budget = new ToolBudget({ isActive: (id) => runner.isActive(id), jobRunning: (id) => jobs.get(id)?.status === "running" }, Math.max(7, 2 * cfg.maxParallel));
+  const tokens = new ChatTokens();
+  // an unusable database disables the chat (with a reason on /api/chat/status); the studio still starts
+  const chatStore = ChatStore.open(path.join(cfg.workspace, ".qkt-studio", "chat", "chat.sqlite"));
+  chatStore?.markInterrupted(); // a message cut off by a restart
+  const claude = new ClaudeStatusCache(cfg.claudeBin ?? "claude", cfg.workspace);
+  const chat = chatStore
+    ? new ChatManager({ cfg, store: chatStore, tokens, events, view, status: claude, runner, jobs, variants,
+        splitText: async () => describeSplit(await getSplit(cfg)), recordDir: process.env.CHAT_RECORD_DIR || undefined })
+    : null;
   const app = await buildApp(cfg, (a) => {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
@@ -50,14 +67,20 @@ export async function createStudio(cfg: ServerConfig) {
     registerProposalRoutes(a, proposals);
     registerSplitRoutes(a, cfg, events, data);
     registerVariantRoutes(a, cfg, variants);
+    registerChatRoutes(a, chat, chatStore, claude, LIMITS);
     registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants, started, budget });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
       hasConfig: existsSync(`${cfg.workspace}/qkt.config.yaml`), maxParallel: cfg.maxParallel,
     }));
+  }, { mcpGrant: (t) => tokens.lookup(t) });
+  // the CLI reaches /api/mcp over loopback; the port is known only once the server listens (0 in tests)
+  app.addHook("onListen", async () => {
+    const addr = app.server.address();
+    if (addr && typeof addr === "object") chat?.setMcpUrl(`http://${mcpHost(cfg.host)}:${addr.port}/api/mcp`);
   });
-  app.addHook("onClose", async () => { await runner.close(); });
-  return { app, runner, jobs, data, events, view, proposals, variants, budget };
+  app.addHook("onClose", async () => { await chat?.close(); chatStore?.close(); await runner.close(); });
+  return { app, runner, jobs, data, events, view, proposals, variants, budget, tokens, chat, chatStore };
 }
 
 /**

@@ -8,7 +8,7 @@ say() { echo "qkt-backtester: $*" >&2; }
 # Started as root (the default): run as the owner of the mounted /workspace, so files you edit on the host stay yours
 # without needing --user. If the folder is owned by root (docker created it), stay root and say so.
 if [ "$(id -u)" = 0 ] && [ -d /workspace ] && [ -z "${STUDIO_KEEP_ROOT:-}" ]; then
-  mkdir -p /workspace /data
+  mkdir -p /workspace /data /home/studio/.claude
   # a folder Docker created for a missing bind mount is root-owned and empty: hand it to PUID:PGID (default 1000)
   for d in /workspace /data; do
     if [ "$(stat -c %u "$d")" = 0 ] && [ -z "$(ls -A "$d" 2>/dev/null)" ] && [ -w "$d" ]; then
@@ -18,6 +18,10 @@ if [ "$(id -u)" = 0 ] && [ -d /workspace ] && [ -z "${STUDIO_KEEP_ROOT:-}" ]; th
   ws_uid=$(stat -c %u /workspace 2>/dev/null || echo 0)
   ws_gid=$(stat -c %g /workspace 2>/dev/null || echo 0)
   if [ "$ws_uid" != 0 ]; then
+    # Claude Code's sign-in folder (a volume): the studio runs the CLI as the workspace owner, so that owner must own it
+    c=/home/studio/.claude
+    if [ "$(stat -c %u "$c")" != "$ws_uid" ] && [ -z "$(ls -A "$c" 2>/dev/null)" ]; then chown "$ws_uid:$ws_gid" "$c" /home/studio; fi
+    getent passwd "$ws_uid" >/dev/null 2>&1 || echo "studio:x:$ws_uid:$ws_gid:studio:/home/studio:/bin/sh" >> /etc/passwd
     exec setpriv --reuid="$ws_uid" --regid="$ws_gid" --clear-groups /usr/local/bin/studio-entrypoint "$@"
   fi
   say "note: /workspace is owned by root, so files created there will be root-owned. Create the folder yourself (mkdir workspace) before the first run."
