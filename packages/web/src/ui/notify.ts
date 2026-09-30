@@ -1,10 +1,8 @@
 // The one place notifications go through. Everything that tells the user something transient (a save, a failure, news
-// about a run) calls `notify`; `<NotifyHost/>` is mounted once in the shell. Built on sonner, styled with the studio's
-// own tokens (notify.css), so swapping the library later means changing this file only.
-import { useEffect } from "react";
-import { toast, Toaster, type ExternalToast } from "sonner";
-import { CircleCheck, CircleX, Info, TriangleAlert, X } from "./icons.js";
-import "./notify.css";
+// about a run) calls `notify`. No React and no styles here, so the store can use it: news derived from component state
+// goes through useNotice (useNotice.ts), and the host that draws the toasts is NotifyHost.tsx, mounted once in the shell.
+// Built on sonner; swapping the library means changing these three files only.
+import { toast, type ExternalToast } from "sonner";
 
 export type NotifyKind = "ok" | "info" | "warn" | "error";
 export interface NotifyAction { label: string; onClick(): void }
@@ -59,50 +57,3 @@ export function onceGate(max = 200): (key: string) => boolean {
   };
 }
 
-/**
- * Shows `notice` as the toast `id` while it is non-null and takes it down when it goes null. It acts only when the notice's
- * key changes, never on a plain re-render; with `once`, a key already shown stays quiet even if it comes back.
- */
-export function useNotice(id: string, notice: Notice | null, once?: (key: string) => boolean): void {
-  const key = notice?.key ?? null;
-  useEffect(() => {
-    if (!notice) { notify.dismiss(id); return; }
-    if (once && !once(notice.key)) return;
-    notify[notice.kind](notice.text, { id, description: notice.description, action: notice.action });
-    // deps: the key is the occurrence; the notice's other fields follow it
-  }, [id, key]);
-}
-
-const ICONS = {
-  success: <CircleCheck size={16} aria-hidden="true" />,
-  info: <Info size={16} aria-hidden="true" />,
-  warning: <TriangleAlert size={16} aria-hidden="true" />,
-  error: <CircleX size={16} aria-hidden="true" />,
-  close: <X size={12} aria-hidden="true" />,
-};
-
-const CLASSES = {
-  toast: "qn", title: "qn-title", description: "qn-desc", content: "qn-content", icon: "qn-icon",
-  actionButton: "qn-action", closeButton: "qn-close",
-  success: "qn-ok", info: "qn-info", warning: "qn-warn", error: "qn-error",
-};
-
-/** Mount once. Bottom-right above the status bar; every toast closable; they stack and fan out on hover. */
-export function NotifyHost({ theme }: { theme: "dark" | "light" }) {
-  return (
-    <Toaster
-      className="qn-host"
-      position="bottom-right"
-      theme={theme}
-      closeButton
-      visibleToasts={MAX_VISIBLE}
-      gap={8}
-      style={{ "--width": "380px", zIndex: "var(--z-toast)" } as React.CSSProperties}
-      offset={{ bottom: "calc(var(--status-h) + 12px)", right: 16 }}
-      mobileOffset={{ bottom: "calc(var(--status-h) + 8px)" }}
-      icons={ICONS}
-      containerAriaLabel="Notifications"
-      toastOptions={{ unstyled: true, classNames: CLASSES, closeButtonAriaLabel: "Close notification" }}
-    />
-  );
-}

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AskHost } from "../ui/Ask.js";
-import { NotifyHost } from "../ui/notify.js";
+import { NotifyHost } from "../ui/NotifyHost.js";
 import { ApiError, getToken, setToken } from "../api/client.js";
 import { DockBar, DockBody } from "../dock/Dock.js";
 import { EditorPane } from "../editor/EditorPane.js";

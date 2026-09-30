@@ -1,4 +1,4 @@
-/* Toasts (ui/notify.tsx). sonner runs unstyled: it positions and stacks, these rules draw them with the studio tokens.
+/* Toasts (ui/NotifyHost.tsx). sonner runs unstyled: it positions and stacks, these rules draw them with the studio tokens.
    Selectors carry the host class and sonner's data attributes so they outrank the base CSS sonner injects at runtime. */
 .qn-host[data-sonner-toaster] { font-family: var(--font); }
 .qn-host[data-sonner-toaster] [data-sonner-toast].qn {

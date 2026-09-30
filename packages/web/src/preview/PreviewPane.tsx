@@ -7,7 +7,8 @@ import { PaneControls } from "../ui/PaneControls.js";
 import { ChartsBody } from "./Charts.js";
 import { SplitChip } from "./SplitChip.js";
 import { VariantBar } from "./VariantBar.js";
-import { onceGate, useNotice } from "../ui/notify.js";
+import { onceGate } from "../ui/notify.js";
+import { useNotice } from "../ui/useNotice.js";
 import { askConfirm } from "../ui/Ask.js";
 import { AUTO_SKIPPED_TOAST, autoSkippedNotice, REJECTIONS_TOAST, rejectionDetail, rejectionNotice } from "./runNotices.js";
 
