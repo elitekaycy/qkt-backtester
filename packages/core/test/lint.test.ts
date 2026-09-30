@@ -1,11 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { lintAliases, relocate, redactConfig, checkConfig, KNOWN_CONFIG_KEYS } from "../src/lint.js";
+import { readFileSync } from "node:fs";
+import { lintAliases as lint, locateImport, redactConfig, checkConfig, KNOWN_CONFIG_KEYS, scrub } from "../src/lint.js";
+import { parseVocabulary } from "../src/vocabulary.js";
+
+// captured from the qkt the studio runs: `qkt dsl vocabulary --json`
+const vocab = parseVocabulary(JSON.parse(readFileSync(new URL("./fixtures/qkt-vocabulary.json", import.meta.url), "utf8")));
+const lintAliases = (src: string) => lint(src, vocab);
 
 const strat = (rules: string, symbols = "    gold = BACKTEST:XAUUSD EVERY 15m") =>
   `STRATEGY t VERSION 1\n\nSYMBOLS\n${symbols}\n\nRULES\n${rules}\n`;
 
 describe("lintAliases", () => {
-  it("flags the silent zero-trade case: undeclared alias in a condition", () => {
+  it("flags an undeclared alias in a condition, naming the declared ones", () => {
     const d = lintAliases(strat("    WHEN ema(gld.close, 9) CROSSES ABOVE ema(gold.close, 21)\n    THEN BUY gold SIZING 0.1"));
     expect(d.length).toBe(1);
     expect(d[0]).toMatchObject({ severity: "error", code: "unknown_alias", line: 7, col: 14, endCol: 17 });
@@ -18,7 +24,9 @@ describe("lintAliases", () => {
   it("does not flag non-stream dotted names, POSITION on declared aliases, comments or strings", () => {
     const rules = [
       "    -- gld.close is only a comment",
-      '    WHEN gold.close > 1 AND POSITION.gold = 0',
+      "    # gld.close is only a comment",
+      "    /* gld.close too */",
+      '    WHEN gold.close > 1 AND POSITION.gold = 0 /* gld.close */',
       '    THEN BUY gold SIZING 0.1 ; LOG "gld.close in a string"',
     ].join("\n");
     expect(lintAliases(strat(rules))).toEqual([]);
@@ -33,6 +41,9 @@ describe("lintAliases", () => {
     const d = lintAliases(strat("    WHEN q.close > r.high\n    THEN BUY gold SIZING 1"));
     expect(d.map((x) => x.col)).toEqual([10, 20]);
   });
+  it("knows every stream and meta field from the vocabulary, not a list of its own", () => {
+    for (const f of [...vocab.streamFields, ...vocab.metaFields]) expect(lintAliases(strat(`    WHEN nope.${f} > 1\n    THEN BUY gold SIZING 1`))).toHaveLength(1);
+  });
   it("ignores files that are not strategies", () => {
     expect(lintAliases("PORTFOLIO p\n  x.close > 1")).toEqual([]);
     expect(lintAliases("")).toEqual([]);
@@ -43,18 +54,23 @@ describe("lintAliases", () => {
   });
 });
 
-describe("relocate", () => {
-  const src = strat("    WHEN emaa(gold.close, 9) CROSSES ABOVE ema(gold.close, 21)\n    THEN BUY gold SIZING 0.1");
-  it("finds an unknown indicator that qkt reports at 1:1", () => {
-    expect(relocate(src, "Unknown indicator: emaa")).toEqual({ line: 7, col: 10, endCol: 14 });
+describe("locateImport", () => {
+  const p = "PORTFOLIO p VERSION 1\n\nIMPORT 'a.qkt' AS a\nIMPORT 'sub/nope.qkt' AS b\n\nRULES\n    RUN a\n";
+  it("points a missing import (which qkt reports at 1:1 as a bare path) at its IMPORT line", () => {
+    expect(locateImport(p, "/tmp/acc/strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
+    expect(locateImport(p, "strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
   });
-  it("finds an unknown alias but skips the SYMBOLS declaration", () => {
-    const s = strat("    WHEN gold.close > 1\n    THEN BUY gld SIZING 1");
-    expect(relocate(s, "Unknown stream alias: gld")).toEqual({ line: 8, col: 14, endCol: 17 });
+  it("returns null when no IMPORT names the file", () => {
+    expect(locateImport(p, "/x/other.qkt")).toBeNull();
   });
-  it("returns null for messages it does not understand or identifiers that are absent", () => {
-    expect(relocate(src, "something else")).toBeNull();
-    expect(relocate(src, "Unknown indicator: nothere")).toBeNull();
+});
+
+describe("scrub", () => {
+  it("blanks every comment form qkt has and keeps columns", () => {
+    expect(scrub("a -- b")).toBe("a     ");
+    expect(scrub("a # b")).toBe("a    ");
+    expect(scrub("a /* b */ c")).toBe("a         c");
+    expect(scrub('x "s -- t" y')).toBe("x          y");
   });
 });
 
@@ -135,22 +151,6 @@ describe("anchorParseError", () => {
   });
 });
 
-import { relocate as relocate2 } from "../src/lint.js";
-describe("relocate: errors qkt reports without a position point at their text", () => {
-  const src = "STRATEGY e VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN gold.closee > ema(gold.close) \n    THEN BUY gold SIZING 0.5 PCT RISK\n        BRACKET { TAKE_PROFIT BY 5 }\n";
-  it("finds the field, the indicator call, the risk sizing and the bracket", () => {
-    expect(relocate2(src, "Unknown stream field for gold: closee")).toEqual({ line: 7, col: 10, endCol: 21 });
-    expect(relocate2(src, "Indicator ema expects 2 args, got 1")).toMatchObject({ line: 7, col: 24 });
-    expect(relocate2(src, "SIZING RISK <fraction> requires a resolvable stop distance via BRACKET STOP LOSS")).toMatchObject({ line: 8, col: 19 });
-    expect(relocate2(src, "BRACKET requires both STOP LOSS and TAKE PROFIT; missing STOP LOSS after DEFAULTS merge")).toMatchObject({ line: 9 });
-  });
-  it("finds the IMPORT of a missing file", () => {
-    const p = "PORTFOLIO p VERSION 1\n\nIMPORT 'a.qkt' AS a\nIMPORT 'sub/nope.qkt' AS b\n\nRULES\n    RUN a\n";
-    expect(relocate2(p, "/tmp/acc/strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
-    expect(relocate2(p, "Imported file not found: strategies/sub/nope.qkt")).toMatchObject({ line: 4, col: 1 });
-  });
-});
-
 describe("CROSSES between two symbols' prices", () => {
   const src = (rule: string) => `STRATEGY s VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n    gold4 = BACKTEST:XAUUSD EVERY 4h\n    fx = BACKTEST:NZDUSD EVERY 4h\n\nRULES\n    ${rule}\n    THEN BUY fx SIZING 0.1\n`;
   const warn = (rule: string) => lintAliases(src(rule)).filter((d) => d.code === "cross_scales");
@@ -163,5 +163,8 @@ describe("CROSSES between two symbols' prices", () => {
     expect(warn("WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold4.close, 21)")).toEqual([]);
     expect(warn("WHEN ema(gold.close, 9) CROSSES BELOW ema(gold.close, 21)")).toEqual([]);
     expect(warn("WHEN rsi(gold.close, 14) CROSSES ABOVE rsi(fx.close, 14)")).toEqual([]);
+  });
+  it("takes the price-scale averages from the vocabulary (hma is one, rsi is not)", () => {
+    expect(warn("WHEN hma(gold.close, 9) CROSSES ABOVE hma(fx.close, 10)")).toHaveLength(1);
   });
 });

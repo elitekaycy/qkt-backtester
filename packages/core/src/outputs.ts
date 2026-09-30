@@ -69,7 +69,7 @@ export function normalizeError(stderr: string, exitCode: number | null): RunErro
   const pm = parseRe.exec(text);
   if (pm) {
     const message = pm[4]!;
-    const kind = /^Unknown indicator:/i.test(message) ? "unknown_indicator" : "parse";
+    const kind = /^Unknown indicator:/i.test(message) ? "unknown_indicator" : /^Unknown stream alias:/i.test(message) ? "unknown_alias" : "parse";
     return { kind, message, file: pm[1], line: +pm[2]!, col: +pm[3]! };
   }
   const risk = /unknown risk key\(s\): (.*)/.exec(text);
