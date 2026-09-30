@@ -12,7 +12,10 @@ const num = (x: unknown): number | null => (typeof x === "number" && Number.isFi
 export const toolName = (n: string): string => (n.startsWith(TOOL_PREFIX) ? n.slice(TOOL_PREFIX.length) : n);
 const textOf = (content: unknown): string => (typeof content === "string" ? content : arr(content).map((p) => str(obj(p)?.text) ?? "").join(""));
 // the CLI's reset times are epoch seconds; accept milliseconds too
-const clock = (t: number): string => `${new Date(t < 1e12 ? t * 1000 : t).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+const clock = (t: number): string | undefined => {
+  const d = new Date(t < 1e12 ? t * 1000 : t);
+  return Number.isFinite(d.getTime()) ? `${d.toISOString().slice(0, 16).replace("T", " ")} UTC` : undefined;
+};
 
 function usageOf(o: Obj): Usage {
   const u = obj(o.usage) ?? {};
@@ -102,13 +105,13 @@ export class StreamParser {
   }
 
   private result(o: Obj): ChatEvent {
-    const text = str(o.result) ?? arr(o.errors).map((e) => String(e)).join("; ");
+    const text = str(o.result) ?? arr(o.errors).map((e) => str(e) ?? JSON.stringify(e)).join("; ");
     return { k: "result", ok: o.subtype === "success" && o.is_error !== true, text, subtype: str(o.subtype) ?? "unknown", usage: usageOf(o) };
   }
 
   private rateLimit(o: Obj): ChatEvent[] {
     const i = obj(o.rate_limit_info), resets = num(i?.resetsAt);
-    if (i?.status === "rejected") return [{ k: "notice", text: `Your Claude plan's usage limit is reached${resets ? `; it resets at ${clock(resets)}` : ""}.` }];
+    if (i?.status === "rejected") return [{ k: "notice", text: `Your Claude plan's usage limit is reached${resets && clock(resets) ? `; it resets at ${clock(resets)}` : ""}.` }];
     if (i?.status === "allowed_warning") return [{ k: "notice", text: "Close to your Claude plan's usage limit." }];
     return [];
   }

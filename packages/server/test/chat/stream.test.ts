@@ -47,8 +47,7 @@ describe("StreamParser", () => {
     expect(ev).toMatchObject({ k: "tool_result", id: "t", isError: true });
     expect((ev as { text: string }).text.length).toBe(4001);
   });
-  it("recorded real streams (scripts/chat-live.mjs) parse without throwing and end in a result", () => {
-    if (!existsSync(REC)) return;
+  it.skipIf(!existsSync(REC))("recorded real streams (scripts/chat-live.mjs) parse without throwing and end in a result", () => {
     for (const f of readdirSync(REC).filter((x) => x.endsWith(".jsonl"))) {
       const evs = parse(readFileSync(path.join(REC, f), "utf8"));
       expect(evs.at(-1)?.k, f).toBe("result");
