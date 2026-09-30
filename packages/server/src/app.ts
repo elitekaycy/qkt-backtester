@@ -29,7 +29,12 @@ function tokenOk(given: string | undefined, expected: string): boolean {
 }
 
 /** Build the HTTP app. Route groups are registered by their own modules so tests can mount subsets. */
-export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstance) => void | Promise<void>): Promise<FastifyInstance> {
+export interface AppOptions {
+  /** Accepts a token on /api/mcp only, besides the studio's own: the chat's per-process tokens. */
+  mcpToken?: (token: string) => boolean;
+}
+
+export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstance) => void | Promise<void>, opts: AppOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 12 * 1024 * 1024 });
   await app.register(fastifyWebsocket, { options: { maxPayload: 4 * 1024 * 1024 } });
 
@@ -69,7 +74,10 @@ export async function buildApp(cfg: ServerConfig, register?: (app: FastifyInstan
       if (!url.startsWith("/api") && !url.startsWith("/ws")) return; // the static UI loads so it can ask for the token
       const bearer = /^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1];
       const q = /[?&]token=([^&]+)/.exec(url)?.[1];
-      if (!tokenOk(bearer ?? (q ? decodeURIComponent(q) : undefined), expected)) return reply.code(401).send({ error: "unauthorized" });
+      const given = bearer ?? (q ? decodeURIComponent(q) : undefined);
+      // a per-process token is good for the MCP endpoint and nothing else (req.url is the raw path: no ../ tricks reach here as /api/mcp)
+      if (given && (url === "/api/mcp" || url.startsWith("/api/mcp?")) && opts.mcpToken?.(given)) return;
+      if (!tokenOk(given, expected)) return reply.code(401).send({ error: "unauthorized" });
     });
   }
 
