@@ -14,31 +14,42 @@ const message = (r: Row): ChatMessage => ({
   status: r.status as ChatMessage["status"], error: (r.error as string | null) ?? null, items: parse(r.items, []), usage: r.usage ? parse(r.usage, null) : null, created: String(r.created), evSeq: Number(r.ev_seq ?? 0),
 });
 
+const SQLITE_CORRUPT = 11, SQLITE_NOTADB = 26;
+/** node:sqlite's error for a file that is damaged or not a database at all (the primary code; extended codes carry it in the low byte). */
+export function isCorrupt(e: unknown): boolean {
+  const code = (e as { errcode?: unknown } | null)?.errcode;
+  if (typeof code === "number" && [SQLITE_CORRUPT, SQLITE_NOTADB].includes(code & 0xff)) return true;
+  return /file is not a database|database disk image is malformed/i.test((e as Error | null)?.message ?? "");
+}
+
 /**
  * The chat's conversations and messages (with their steps and usage), next to the run index. Claude Code keeps its own
  * transcripts in its config directory; this is what the Chat tab shows and which session each conversation resumes.
  */
 export class ChatStore {
   /**
-   * Open the store without ever taking the studio down: a file that is not a usable database is moved aside to
-   * `<file>.corrupt-<ms>` (with its -wal/-shm) and a fresh one is made; if that fails too, null (the chat is disabled).
+   * Open the store without ever taking the studio down. A file that is not a usable database (SQLite's CORRUPT or NOTADB)
+   * is moved aside to `<file>.corrupt-<ms>` (with its -wal/-shm) and a fresh one is made. Any other failure (the file is
+   * locked by another studio on the same workspace, a permission error) leaves the file alone and returns null: the chat
+   * is disabled, and nobody's live database is renamed under them. Null too if the fresh one cannot be made.
    */
-  static open(file: string): ChatStore | null {
-    try { return new ChatStore(file); }
+  static open(file: string, o: { busyMs?: number } = {}): ChatStore | null {
+    try { return new ChatStore(file, o.busyMs); }
     catch (e) {
+      if (!isCorrupt(e)) { console.error(`chat: disabled, ${path.basename(file)} cannot be opened: ${(e as Error).message}`); return null; }
       const aside = `${file}.corrupt-${Date.now()}`;
       for (const x of ["", "-wal", "-shm"]) if (existsSync(file + x)) { try { renameSync(file + x, aside + x); } catch { /* keep going */ } }
-      console.error(`chat: ${path.basename(file)} could not be opened (${(e as Error).message}); kept as ${path.basename(aside)}, starting empty`);
-      try { return new ChatStore(file); }
+      console.error(`chat: ${path.basename(file)} is not a usable database (${(e as Error).message}); kept as ${path.basename(aside)}, starting empty`);
+      try { return new ChatStore(file, o.busyMs); }
       catch (e2) { console.error(`chat: disabled, the chat store cannot be opened: ${(e2 as Error).message}`); return null; }
     }
   }
   private db: DatabaseSync;
-  constructor(file: string) {
+  constructor(file: string, busyMs = 5000) {
     mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(`
-      PRAGMA busy_timeout = 5000;
+      PRAGMA busy_timeout = ${Math.max(0, Math.floor(busyMs))};
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_started INTEGER NOT NULL DEFAULT 0,

@@ -1,6 +1,7 @@
 // packages/server/test/chat/store.test.ts
 import { describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import os from "node:os"; import path from "node:path";
 import type { ChatMessage } from "@qkt-studio/core";
 import { ChatStore } from "../../src/chat/store.js";
@@ -52,5 +53,21 @@ describe("ChatStore", () => {
     expect(s!.createConversation("after").title).toBe("after");
     expect(readdirSync(dir).some((f) => f.startsWith("chat.sqlite.corrupt-"))).toBe(true);
     s!.close();
+  });
+
+  it("a database another process holds locked is not corrupt: the chat is disabled and nothing is moved aside", () => {
+    const dir = path.join(realpathSync(mkdtempSync(path.join(os.tmpdir(), "chat-"))), "chat");
+    mkdirSync(dir);
+    const file = path.join(dir, "chat.sqlite");
+    const other = new DatabaseSync(file);
+    other.exec("PRAGMA journal_mode = DELETE; CREATE TABLE held (x); BEGIN EXCLUSIVE; INSERT INTO held VALUES (1);");
+    try {
+      expect(ChatStore.open(file, { busyMs: 50 })).toBeNull();
+      expect(readdirSync(dir).filter((f) => f.includes("corrupt"))).toEqual([]);
+    } finally { other.exec("ROLLBACK"); other.close(); }
+    // the other process let go: the same file opens, with its data
+    const s = ChatStore.open(file)!;
+    expect(s).not.toBeNull();
+    s.close();
   });
 });
