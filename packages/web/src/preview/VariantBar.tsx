@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type PartStats } from "../api/client.js";
 import { useAgent, variantSide } from "../state/agent.js";
+import { useDiffView } from "../state/diffView.js";
 import { fmtMoney } from "../util/format.js";
 
 type Parts = { first: PartStats; test: PartStats | null };
@@ -21,6 +22,7 @@ const netOf = (p: Side["parts"]) => (p === "none" ? "none" : p ? p.first.net + (
 
 export function VariantBar() {
   const showing = useAgent((s) => s.showing), variants = useAgent((s) => s.variants), split = useAgent((s) => s.split);
+  const diffOn = useDiffView((s) => s.diffOf !== null && s.diffOf === showing?.id);
   const [sides, setSides] = useState<{ v: Side; b: Side }>({ v: EMPTY, b: EMPTY });
   useEffect(() => {
     setSides({ v: EMPTY, b: EMPTY });
@@ -52,6 +54,8 @@ export function VariantBar() {
         </select>
       )}
       <span className="grow" />
+      <button className="btn sm auto-toggle" aria-pressed={diffOn} title={diffOn ? "Back to the editor" : "Show what the variant changes, in the editor"}
+        onClick={() => void useDiffView.getState().toggle(showing)}>Diff</button>
       <button className="btn sm primary" onClick={() => void useAgent.getState().adopt(showing.id)}>Adopt</button>
       <button className="btn sm" onClick={() => void useAgent.getState().discard(showing.id)}>Discard</button>
       <button className="btn sm ghost" onClick={() => void useAgent.getState().back()}>Back to original</button>

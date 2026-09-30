@@ -6,7 +6,10 @@ import { api } from "../api/client.js";
 import { LspClient, toMarkers } from "./lsp.js";
 import { enableVim, languageFor, setupMonaco, themeFor, type Monaco } from "./monaco.js";
 import { fileProblems, useStore } from "../state/store.js";
-import { scheduleViewReport } from "../state/agent.js";
+import { scheduleViewReport, useAgent } from "../state/agent.js";
+import { useDiffView } from "../state/diffView.js";
+import { diffVisible } from "./variantDiff.js";
+import { VariantDiff } from "./VariantDiff.js";
 import { useUi } from "../state/ui.js";
 import { cycleRegion } from "../util/regions.js";
 
@@ -40,6 +43,9 @@ export function EditorPane() {
   const vim = useUi((s) => s.vim), fontSize = useUi((s) => s.fontSize);
   const store = useStore;
   const active = openFiles.find((f) => f.path === activePath) ?? null;
+  // a variant's diff takes the editor area while its base is the active tab; the editor stays mounted underneath (Adopt edits its model)
+  const showing = useAgent((s) => s.showing), diffOf = useDiffView((s) => s.diffOf);
+  const diff = showing && diffVisible({ diffOf, showingId: showing.id, showingBase: showing.base, activePath }) ? showing : null;
 
   useEffect(() => {
     if (!info || !host.current) return;
@@ -261,7 +267,8 @@ export function EditorPane() {
           }}>Show every option</button>
         </div>
       )}
-      <div ref={host} id="editor" className="monaco-host" style={{ display: active ? "block" : "none" }} />
+      {diff && <VariantDiff key={diff.id} variant={diff} />}
+      <div ref={host} id="editor" className="monaco-host" style={{ display: active && !diff ? "block" : "none" }} />
       <div className="editor-status">
         <span className="vim-status" ref={vimStatus} aria-label="Vim mode" />
         <span>{active ? `Ln ${cursor.line}, Col ${cursor.col}` : ""}</span>

@@ -1,0 +1,11 @@
+/* The variant diff in the editor area (editor/VariantDiff.tsx). Git colours: added lines green, removed red, in both themes. */
+.variant-diff { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.variant-diff-head { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; flex: none; padding: 6px var(--s2); border-bottom: 1px solid var(--line); background: var(--side); font-size: var(--fs-sm); }
+.variant-diff-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.variant-diff-count { font-size: var(--fs-xs); white-space: nowrap; }
+.variant-diff-count .add { color: var(--ok); }
+.variant-diff-count .del { color: var(--danger); }
+.variant-diff-note { flex: none; padding: 4px var(--s3); border-bottom: 1px solid var(--line); background: var(--side); color: var(--warn); font-size: var(--fs-xs); line-height: 1.4; }
+.variant-diff-host { position: relative; }
+/* the diff's gutters take the pane's surface like the editor (.monaco-host rules in app.css); the change colours stay Monaco's */
+.variant-diff-host .monaco-diff-editor .diffOverview { background-color: var(--main) !important; }
