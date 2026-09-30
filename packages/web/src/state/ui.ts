@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type Section = "files" | "data" | "runs";
-export type DockTab = "pipeline" | "problems" | "terminal";
+export type DockTab = "pipeline" | "problems" | "terminal" | "chat";
 export type Pane = "sidebar" | "editor" | "chart" | "dock";
 export type JournalSection = "overview" | "strategies" | "calendar" | "daily" | "monthly" | "trades" | "time" | "lab" | "compare";
 

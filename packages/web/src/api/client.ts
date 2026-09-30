@@ -163,6 +163,12 @@ export const api = {
   setSplit: (split: Record<string, unknown>) => req<{ split: Record<string, unknown>; text: string }>("/api/split", { method: "PUT", body: JSON.stringify(split) }),
   runParts: (id: string) => req<{ cut: string | null; first: PartStats; test: PartStats | null }>(`/api/runs/${encodeURIComponent(id)}/parts`),
   reportView: (v: unknown) => req<unknown>("/api/view", { method: "POST", body: JSON.stringify(v) }),
+  chatStatus: (refresh = false) => req<import("../chat/state.js").ChatStatusInfo>(`/api/chat/status${refresh ? "?refresh=1" : ""}`),
+  chatConversations: () => req<{ conversations: import("../chat/state.js").ConversationInfo[] }>("/api/chat/conversations"),
+  chatConversation: (id: string) => req<{ conversation: { id: string; title: string; updated: string }; messages: import("@qkt-studio/core/chat").ChatMessage[] }>(`/api/chat/conversations/${encodeURIComponent(id)}`),
+  chatSend: (b: { conversationId: string | null; text: string; think: boolean; omit: import("@qkt-studio/core/chat").ViewKey[]; mentions: import("@qkt-studio/core/chat").Mention[] }) =>
+    req<{ conversationId: string; messageId: string }>("/api/chat/send", { method: "POST", body: JSON.stringify(b) }),
+  chatStop: () => req<{ stopped: boolean }>("/api/chat/stop", { method: "POST" }),
 };
 
 export interface PartStats { from: string; to: string; trades: number; net: number; winRate: number | null; profitFactor: number | null; avgR: number | null }

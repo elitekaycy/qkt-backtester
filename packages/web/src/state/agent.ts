@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { textHash } from "@qkt-studio/core/texthash";
 import { api, withToken } from "../api/client.js";
 import { askConfirm } from "../ui/Ask.js";
+import { useChat, type ChatWire } from "../chat/state.js";
 import { useStore } from "./store.js";
 
 export interface VariantInfo { id: string; label: string; base: string; runId: string | null; baseRunId: string | null; diff: string; notes: string[]; created: string }
@@ -117,6 +118,7 @@ export const useAgent = create<{
         if (v && variantMayTakeOver({ running: st.running, runId: st.runId, showing: get().showing })) void get().show(v);
       });
     });
+    src.addEventListener("chat", (m) => useChat.getState().onEvent(JSON.parse((m as MessageEvent).data as string) as ChatWire));
     src.addEventListener("proposal", () => void get().refresh());
     src.addEventListener("split", () => void get().refresh());
     // not "open": that is the EventSource's own connection event; the data guard stays as a second line of defence
