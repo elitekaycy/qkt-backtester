@@ -8,10 +8,12 @@ import { StreamParser } from "./stream.js";
 export type AgentModel = "haiku" | "sonnet";
 export interface AgentRun { model: AgentModel; sessionId: string; resume: boolean; systemPrompt: string; mcpConfigPath: string }
 
-/** The design's flags (section 5): only the studio's MCP tools, no built-in ones, no permission prompts, streamed JSON. */
+/** The design's flags (section 5): only the studio's MCP tools, no built-in ones, no permission prompts, streamed JSON.
+ *  Plus `--setting-sources user`: settings files from the workspace (project, local) are not loaded, only the studio's
+ *  own Claude Code config directory (docs/production.md, "What the CLI loads"). */
 export function agentArgs(r: AgentRun): string[] {
   if (r.model !== "haiku" && r.model !== "sonnet") throw new Error(`model must be "haiku" or "sonnet", got ${JSON.stringify(r.model)}`);
-  return ["-p", "--model", r.model, "--tools", "", "--strict-mcp-config", "--mcp-config", r.mcpConfigPath,
+  return ["-p", "--model", r.model, "--tools", "", "--strict-mcp-config", "--mcp-config", r.mcpConfigPath, "--setting-sources", "user",
     "--allowedTools", "mcp__studio__*", "--permission-mode", "dontAsk", "--system-prompt", r.systemPrompt,
     "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ...(r.resume ? ["--resume", r.sessionId] : ["--session-id", r.sessionId])];

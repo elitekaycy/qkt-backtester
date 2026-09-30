@@ -14,7 +14,7 @@ const run = { model: "haiku" as const, sessionId: "0b7c1f7e-5a0e-4d7c-9d7e-2f0a3
 
 describe("the CLI process", () => {
   it("passes exactly the design's flags; a later message resumes the session", () => {
-    expect(agentArgs(run)).toEqual(["-p", "--model", "haiku", "--tools", "", "--strict-mcp-config", "--mcp-config", "/x/mcp.json",
+    expect(agentArgs(run)).toEqual(["-p", "--model", "haiku", "--tools", "", "--strict-mcp-config", "--mcp-config", "/x/mcp.json", "--setting-sources", "user",
       "--allowedTools", "mcp__studio__*", "--permission-mode", "dontAsk", "--system-prompt", "SYS",
       "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--session-id", run.sessionId]);
     expect(agentArgs({ ...run, resume: true, model: "sonnet" }).slice(-2)).toEqual(["--resume", run.sessionId]);

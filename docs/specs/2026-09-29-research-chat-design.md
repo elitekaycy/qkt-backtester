@@ -174,6 +174,9 @@ claude -p --model <haiku|sonnet> --tools "" --strict-mcp-config --mcp-config <st
        (--session-id <new uuid> | --resume <uuid>)
 ```
 
+Added in the release fixes: `--setting-sources user` (workspace `project`/`local` settings are not loaded; see
+`docs/production.md`, "What the CLI loads").
+
 - **System prompt** (ours, short): role, "use only studio tools", "map the request onto the fewest tool calls (prefer
   try_change)", "do what the user asks; relay the studio's warnings in one line, never refuse a legal change", "be brief", plus the open file's path and run id. Replacing the CLI's default prompt cuts the
   fixed cost per call.
