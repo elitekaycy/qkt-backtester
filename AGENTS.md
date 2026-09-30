@@ -27,7 +27,20 @@ pnpm docker:build
 ## Facts about qkt that shaped the code (all probed; do not "simplify" them away)
 
 - `--to` is **exclusive**. The bar store ignores config `data_root`; set `QKT_DATA_HOME`. A missing explicit `--config`
-  silently uses defaults, so the studio checks it exists. An unknown stream alias runs with **zero trades and no error**.
+  silently uses defaults, so the studio checks it exists.
+- **The studio keeps no DSL knowledge of its own.** On startup the server runs `qkt dsl vocabulary --json` (schema
+  `qkt-vocabulary-v1`: keywords by category, indicators, functions, constants, stream/meta fields, pseudo-symbol members)
+  and `qkt editor grammar --format textmate`, refuses to start on a qkt that lacks them (0.54+), and serves them at
+  `GET /api/qkt/vocabulary` and `GET /api/qkt/grammar` (ETag, `no-cache`). The web app loads both before Monaco exists:
+  lint and completions read the vocabulary, Shiki highlights with the grammar. Tests use the capture in
+  `packages/core/test/fixtures/qkt-vocabulary.json`; regenerate it with `qkt dsl vocabulary --json > that file` after a
+  qkt release. Server tests take the binary from `QKT_BIN` (default `qkt` on PATH).
+- `qkt parse` and `qkt lsp` report every compile error at its real position (unknown indicator, unknown or undeclared
+  stream alias, unknown field, wrong arity, `BRACKET requires ...`), and an undeclared stream alias anywhere in a rule
+  **is a compile error** (`unknown_alias`). Two things are still the studio's: a missing `IMPORT` is reported at 1:1 with
+  only the file's path (`locateImport` points at the IMPORT line), and "expected X, got 'TOKEN'" lands on the next
+  line's first token (`anchorParseError` moves it to the end of the unfinished line). qkt stops at its first error; the
+  studio's alias lint reports every undeclared alias. Comments are `--`, `#` and `/* */`; durations are `\d+[smhd]`.
 - `trades.csv` is one row per **fill**; `tradeCount` counts fills. Pair round trips from the signed strategy position.
 - Bar day files: an **empty file** means closed day, **no file** means not built. Format `QKB1` v1, little-endian, scale 8.
 - `qkt sweep` has no `--report-dir` and interleaves logs with `--json`; grids are one `qkt backtest` per point instead.
