@@ -131,9 +131,10 @@ export async function availableTimeframes(dataRoot: string, broker: string, symb
   }
 }
 
-const UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+// qkt's TimeWindow units: s/m/h/d, nothing larger
+const UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 export function tfToMs(tf: string): number {
-  const m = /^(\d+)([smhdw])$/.exec(tf);
+  const m = /^(\d+)([smhd])$/.exec(tf);
   if (!m) return Number.MAX_SAFE_INTEGER;
   return Number(m[1]) * UNIT_MS[m[2]!]!;
 }

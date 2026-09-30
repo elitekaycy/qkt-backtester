@@ -9,7 +9,7 @@ import type { ServerConfig } from "./config.js";
 const DAY_MS = 86_400_000;
 /** A plain identifier: never empty, never only dots (so `.` and `..` cannot become path segments). */
 const NAME = /^(?!\.+$)[A-Za-z0-9_.\-]{1,40}$/;
-const TF = /^\d{1,4}[smhdw]$/;
+const TF = /^\d{1,4}[smhd]$/;
 export const MAX_BAR_DAYS = 3700;
 
 export type DayStatus = "ok" | "thin" | "closed" | "missing";
