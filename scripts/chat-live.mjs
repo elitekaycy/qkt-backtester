@@ -15,7 +15,8 @@ if (!(await api("/api/chat/status")).loggedIn) { console.error("Claude Code is n
 const STRAT = process.env.STRATEGY ?? "strategies/ema_cross.qkt";
 const used = (m, name) => m.items.some((i) => i.type === "tool" && i.name === name && i.result && !i.result.isError);
 const CASES = [
-  { name: "stop 2 percent", text: `In ${STRAT} make the stop-loss 2 percent and let's see.`, pass: (m) => used(m, "try_change") },
+  // qkt needs both legs of a BRACKET: on a strategy without one, "stop 2 %" alone gets a one-line question back (by design)
+  { name: "stop 2 percent", text: `In ${STRAT} make the stop-loss 2 percent and the take-profit 4 percent, and let's see.`, pass: (m) => used(m, "try_change") },
   { name: "omit a date", text: `In ${STRAT} omit trading on 2024-01-10 and show the result.`, pass: (m) => used(m, "try_change") },
   { name: "new idea", text: "Create a new strategy rsi_live: buy XAUUSD 15m when RSI(14) crosses above 30 and price is above the 4h EMA 200; stop 1%, target 2%.", pass: (m) => used(m, "create_strategy") },
 ];
