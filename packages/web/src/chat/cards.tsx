@@ -39,11 +39,11 @@ function VariantButtons({ v, compact = false }: { v: VariantInfo | undefined; co
   if (!v) return <span className="muted">discarded</span>;
   return (
     <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
-      <button className={`btn sm${compact ? "" : " primary"}`} onClick={() => void useAgent.getState().adopt(v.id).catch(toastError)}>Adopt</button>
-      <button className={`btn sm${compact ? " ghost" : ""}`} onClick={() => void useAgent.getState().discard(v.id).catch(toastError)}>Discard</button>
+      <button className={`btn sm${compact ? "" : " primary"}`} aria-label={`Adopt ${v.label}`} onClick={() => void useAgent.getState().adopt(v.id).catch(toastError)}>Adopt</button>
+      <button className={`btn sm${compact ? " ghost" : ""}`} aria-label={`Discard ${v.label}`} onClick={() => void useAgent.getState().discard(v.id).catch(toastError)}>Discard</button>
       {showing?.id === v.id
         ? compact && <span className="muted">on the chart</span>
-        : <button className="btn sm ghost" title="Show on the chart" onClick={() => void useAgent.getState().show(v)}>{compact ? "Show" : "Show on the chart"}</button>}
+        : <button className="btn sm ghost" title="Show on the chart" aria-label={`Show ${v.label} on the chart`} onClick={() => void useAgent.getState().show(v)}>{compact ? "Show" : "Show on the chart"}</button>}
     </span>
   );
 }
@@ -127,7 +127,7 @@ function SweepCard({ jobId }: { jobId: string }) {
       const out: SweepRow[] = [];
       for (const r of ((j.result as { rows?: Array<{ params: Record<string, string>; runId?: string }> } | undefined)?.rows ?? []).slice(0, 30)) {
         const p = r.runId ? await api.runParts(r.runId).catch(() => null) : null;
-        out.push({ params: r.params, runId: r.runId, first: p?.first.net ?? null, test: p?.test?.net ?? null });
+        out.push({ params: r.params, runId: r.runId, first: p && p.first.trades ? p.first.net : null, test: p?.test?.trades ? p.test.net : null });
       }
       if (live) setRows(out);
     };
@@ -144,8 +144,8 @@ function SweepCard({ jobId }: { jobId: string }) {
           <thead><tr><th>Params</th><th>First part</th><th>Test part{split ? ` (${split})` : ""}</th><th /></tr></thead>
           <tbody>{rows.map((r, i) => (
             <tr key={i} className={flags[i] ? "flag" : ""}>
-              <td>{Object.entries(r.params).map(([k, v]) => `${k}=${v}`).join(" ")}</td><td><Money n={r.first} /></td><td><Money n={r.test} /></td>
-              <td className="chat-row-end">{flags[i] && <span className="badge warn">likely over-fitted</span>}{r.runId && <button className="btn sm ghost" onClick={() => void useStore.getState().selectRun(r.runId!)}>Open</button>}</td>
+              <td>{Object.entries(r.params ?? {}).map(([k, v]) => `${k}=${v}`).join(" ")}</td><td><Money n={r.first} /></td><td><Money n={r.test} /></td>
+              <td className="chat-row-end">{flags[i] && <span className="badge warn">likely over-fitted</span>}{r.runId && <button className="btn sm ghost" aria-label={`Open the run for ${Object.entries(r.params ?? {}).map(([k, v]) => `${k}=${v}`).join(" ")}`} onClick={() => void useStore.getState().selectRun(r.runId!)}>Open</button>}</td>
             </tr>
           ))}</tbody>
         </table>
