@@ -5,10 +5,11 @@ import path from "node:path";
 import { resolveInJail, JailError } from "../src/jail.js";
 import { buildApp } from "../src/app.js";
 import type { ServerConfig } from "../src/config.js";
+import { qktBin } from "./helpers.js";
 
 let ws: string, outside: string;
 const cfg = (extra: Partial<ServerConfig> = {}): ServerConfig => ({
-  workspace: ws, dataRoot: "/nonexistent", qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 1, terminal: "restricted", ...extra,
+  workspace: ws, dataRoot: "/nonexistent", qktBin, port: 0, host: "127.0.0.1", maxParallel: 1, terminal: "restricted", ...extra,
 });
 
 beforeEach(() => {

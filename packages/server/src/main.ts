@@ -29,8 +29,11 @@ import { Variants, registerVariantRoutes } from "./agent/variants.js";
 import { ChatTokens } from "./chat/tokens.js";
 import { registerMcp } from "./mcp/index.js";
 import { ToolBudget } from "./mcp/util.js";
+import { qktLanguage, registerQktLangRoutes } from "./qkt-lang.js";
 
 export async function createStudio(cfg: ServerConfig) {
+  // the qkt this studio runs describes its own language; a binary that cannot is refused here, before anything listens
+  const lang = await qktLanguage(cfg.qktBin);
   await applySettings(cfg);
   const runner = new Runner(cfg);
   await runner.init();
@@ -58,6 +61,7 @@ export async function createStudio(cfg: ServerConfig) {
     registerRunRoutes(a, runner, data);
     registerBarsRoutes(a, cfg);
     registerCheckRoutes(a, cfg);
+    registerQktLangRoutes(a, lang);
     registerJobRoutes(a, jobs);
     registerDataRoutes(a, cfg, runner, jobs);
     registerLspBridge(a, cfg);
