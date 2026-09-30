@@ -1,9 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { execFileSync, execSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ScanReport } from "../api/types.js";
+import { setVocabulary } from "./vocabulary.js";
+import { parseVocabulary } from "@qkt-studio/core/vocabulary";
+
+// the vocabulary of the qkt the studio runs, captured with `qkt dsl vocabulary --json`
+setVocabulary(parseVocabulary(JSON.parse(readFileSync(new URL("../../../core/test/fixtures/qkt-vocabulary.json", import.meta.url), "utf8"))));
 import { localCompletions } from "./completions.js";
 import { declSnippets, expandSnippet, fileSnippets, orderSnippets, ruleSnippets, streamSnippet } from "./snippets.js";
 
@@ -48,7 +53,8 @@ describe("snippets", () => {
   });
 });
 
-const haveQkt = (() => { try { execSync("qkt --version", { stdio: "ignore" }); return true; } catch { return false; } })();
+const qktBin = process.env.QKT_BIN || "qkt";
+const haveQkt = (() => { try { execFileSync(qktBin, ["--version"], { stdio: "ignore" }); return true; } catch { return false; } })();
 describe.skipIf(!haveQkt)("snippets parse with qkt", () => {
   const dir = mkdtempSync(path.join(tmpdir(), "qkt-snippets-"));
   // the files the portfolio template imports
@@ -57,7 +63,7 @@ describe.skipIf(!haveQkt)("snippets parse with qkt", () => {
     const f = path.join(dir, `${name.replace(/\W+/g, "_")}.qkt`);
     writeFileSync(f, src);
     let out = "";
-    try { out = execFileSync("qkt", ["parse", f], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
+    try { out = execFileSync(qktBin, ["parse", f], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }); }
     catch (e) { out = String((e as { stdout?: string; stderr?: string }).stdout ?? "") + String((e as { stderr?: string }).stderr ?? ""); throw new Error(`${name} does not parse:\n${out}\n---\n${src}`); }
     expect(out).toMatch(/ok/);
   }, 60_000);

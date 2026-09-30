@@ -1,7 +1,7 @@
-import { STREAM_FIELDS } from "@qkt-studio/core/lint";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import type { ScanReport } from "../api/types.js";
 import { declSnippets, fileSnippets, orderSnippets, ruleSnippets, streamSnippet, type Snippet } from "./snippets.js";
+import { actionKeywords, membersOf, streamFields } from "./vocabulary.js";
 
 /**
  * Completions the studio adds to qkt's own. qkt's language server answers with the same ~250 keywords and functions
@@ -17,10 +17,13 @@ const FIELD_DOC: Record<string, string> = {
   tick_size: "Smallest price increment", contract_size: "Units per lot (from instruments.yaml)", volume_step: "Lot step", volume_min: "Smallest lot",
   swap_long_points: "Swap for a long position, in points", swap_short_points: "Swap for a short position, in points",
 };
-const COMMON_FIELDS = ["close", "open", "high", "low", "volume", "spread", "bid", "ask", "price"];
+// The studio's one-line descriptions for names the vocabulary lists; a name the vocabulary lacks is never offered,
+// and a name it has without a line here is offered without one.
+const ACTION_DOC: Record<string, string> = { BUY: "Open a long position", SELL: "Open a short position", CLOSE: "Close the position of a stream", CLOSE_ALL: "Close everything", FLATTEN: "Close every position and cancel every order", LOG: "Write a message to the run log", CANCEL: "Cancel pending orders", CANCEL_ALL: "Cancel every pending order", RESIZE: "Change the size of the open position" };
+const POSITION_DOC: Record<string, string> = { count: "Number of open legs", mfe: "Best unrealised profit of the open position", mae: "Worst unrealised loss of the open position", holding_duration: "How long the position has been open", qty: "Signed open quantity", avg_price: "Average entry price", unrealized_pnl: "Open profit or loss" };
+// The order the price fields are offered in (close first); everything else follows in qkt's order.
+const FIELD_ORDER = ["close", "open", "high", "low", "volume", "spread", "bid", "ask", "price"];
 const TFS = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
-const ACTIONS: Array<[string, string]> = [["BUY", "Open a long position"], ["SELL", "Open a short position"], ["CLOSE", "Close the position of a stream"], ["CLOSE_ALL", "Close everything"], ["LOG", "Write a message to the run log"], ["CANCEL", "Cancel pending orders"]];
-const POSITION_MEMBERS: Array<[string, string]> = [["count", "Number of open legs"], ["mfe", "Best unrealised profit of the open position"], ["mae", "Worst unrealised loss of the open position"], ["holding_duration", "How long the position has been open"]];
 
 /** The text of the current line up to the cursor, and the section (SYMBOLS / RULES) it sits in. */
 function context(text: string, line: number, col: number): { before: string; section: "symbols" | "rules" | "other"; block: string } {
@@ -81,13 +84,14 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
   // alias.<field>
   const dot = /(?<![\w.])([A-Za-z_]\w*)\.(\w*)$/.exec(before);
   if (dot && dot[1] !== "POSITION" && aliases.includes(dot[1]!)) {
-    const fields = [...new Set([...COMMON_FIELDS, ...STREAM_FIELDS])];
+    const known = streamFields();
+    const fields = [...FIELD_ORDER.filter((f) => known.includes(f)), ...known.filter((f) => !FIELD_ORDER.includes(f))];
     fields.forEach((f, i) => add({ label: f, insert: f, detail: `${dot[1]}.${f}`, doc: FIELD_DOC[f], kind: "field", sort: `0${String(i).padStart(2, "0")}` }));
     return out;
   }
   // POSITION.<alias>[.member]
   const pos = /\bPOSITION\.(\w*)$/.exec(before), posMember = /\bPOSITION\.(\w+)\.(\w*)$/.exec(before);
-  if (posMember && aliases.includes(posMember[1]!)) { POSITION_MEMBERS.forEach(([m, d], i) => add({ label: m, insert: m, detail: `POSITION.${posMember[1]}.${m}`, doc: d, kind: "field", sort: `0${i}` })); return out; }
+  if (posMember && aliases.includes(posMember[1]!)) { membersOf("POSITION").forEach((m, i) => add({ label: m, insert: m, detail: `POSITION.${posMember[1]}.${m}`, doc: POSITION_DOC[m], kind: "field", sort: `0${String(i).padStart(2, "0")}` })); return out; }
   if (pos) { aliases.forEach((a, i) => add({ label: a, insert: a, detail: `Position of ${a}`, kind: "alias", sort: `0${i}` })); return out; }
 
   // SYMBOLS:  alias = BROKER:SYMBOL EVERY tf
@@ -126,8 +130,9 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
   const afterCondKeyword = /(^|\s)(WHEN|AND|OR|NOT)$/.test(stem) || /\b(CROSSES\s+(ABOVE|BELOW)|>=|<=|>|<|=|\+|-|\*|\/|\()$/.test(stem);
   const thenNow = /(^|\s)THEN$/.test(stem) || /;$/.test(stem);
   if (thenNow) {
-    ACTIONS.forEach(([a, d], i) => add({ label: a, insert: a, detail: d, kind: "keyword", sort: `0${i}` }));
-    addSnippets(orderSnippets(aliases), ACTIONS.length);
+    const actions = actionKeywords();
+    actions.forEach((a, i) => add({ label: a, insert: a, detail: ACTION_DOC[a] ?? "", kind: "keyword", sort: `0${String(i).padStart(2, "0")}` }));
+    addSnippets(orderSnippets(aliases), actions.length);
     return out;
   }
   if (section === "rules" && lineStart && info.kind === "strategy") {

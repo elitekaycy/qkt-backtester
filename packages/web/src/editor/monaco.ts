@@ -1,5 +1,5 @@
 // Slim Monaco: the editor core plus its contributions (hover, suggest, find, folding), no bundled languages
-// and no TypeScript/CSS/HTML workers. Highlighting comes from qkt's own TextMate grammar through Shiki.
+// and no TypeScript/CSS/HTML workers. Highlighting comes from the TextMate grammar the running qkt prints, through Shiki.
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import "monaco-editor/features/register.all.js";
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
@@ -9,7 +9,9 @@ import yamlLang from "shiki/langs/yaml.mjs";
 import githubDark from "shiki/themes/github-dark.mjs";
 import githubLight from "shiki/themes/github-light.mjs";
 import { shikiToMonaco } from "@shikijs/monaco";
-import qktGrammar from "./qkt.tmLanguage.json";
+import { parseVocabulary } from "@qkt-studio/core/vocabulary";
+import { api } from "../api/client.js";
+import { setVocabulary } from "./vocabulary.js";
 
 (self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = { getWorker: () => new editorWorker() };
 
@@ -18,21 +20,29 @@ let ready: Promise<Monaco> | null = null;
 
 export const themeFor = (t: "dark" | "light") => (t === "dark" ? "github-dark" : "github-light");
 
+/**
+ * Monaco with the qkt language as the running qkt describes it: its vocabulary (for completions and lint) and its
+ * TextMate grammar (for highlighting) are fetched first, so no editor exists before they are known. A fetch that fails
+ * leaves `ready` unset, and the next caller tries again.
+ */
 export function setupMonaco(): Promise<Monaco> {
   ready ??= (async () => {
+    const [vocab, qktGrammar] = await Promise.all([api.qktVocabulary(), api.qktGrammar()]);
+    setVocabulary(parseVocabulary(vocab));
     monaco.languages.register({ id: "qkt", extensions: [".qkt"] });
     monaco.languages.register({ id: "yaml", extensions: [".yaml", ".yml"] });
     monaco.languages.setLanguageConfiguration("qkt", {
-      comments: { lineComment: "--" },
+      comments: { lineComment: "--", blockComment: ["/*", "*/"] },
       brackets: [["(", ")"], ["{", "}"], ["[", "]"]],
       autoClosingPairs: [{ open: "(", close: ")" }, { open: "{", close: "}" }, { open: "[", close: "]" }, { open: '"', close: '"', notIn: ["string"] }],
       surroundingPairs: [{ open: "(", close: ")" }, { open: '"', close: '"' }],
       wordPattern: /[A-Za-z_][\w]*/,
     });
-    const hl = await createHighlighterCore({ engine: createJavaScriptRegexEngine(), themes: [githubDark, githubLight], langs: [{ ...(qktGrammar as object), name: "qkt" } as never, yamlLang] });
+    const hl = await createHighlighterCore({ engine: createJavaScriptRegexEngine(), themes: [githubDark, githubLight], langs: [{ ...qktGrammar, name: "qkt" } as never, yamlLang] });
     shikiToMonaco(hl, monaco);
     return monaco;
   })();
+  ready.catch(() => { ready = null; });
   return ready;
 }
 

@@ -6,7 +6,6 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { createHighlighter } from "shiki";
 import { shikiToMonaco } from "@shikijs/monaco";
-import qktGrammar from "./qkt.tmLanguage.json";
 import { createChart, CandlestickSeries, createSeriesMarkers, ColorType } from "lightweight-charts";
 import * as echarts from "echarts";
 import { Terminal } from "@xterm/xterm";
@@ -24,6 +23,8 @@ function EditorPanel() {
     (async () => {
       const text = await (await fetch("/sample.qkt")).text();
       monaco.languages.register({ id: "qkt" });
+      // the grammar of the running qkt, as the studio serves it (`qkt editor grammar --format textmate`)
+      const qktGrammar = await (await fetch("/api/qkt/grammar")).json();
       const hl = await createHighlighter({ themes: ["github-dark"], langs: [{ ...(qktGrammar as any), name: "qkt" }] });
       shikiToMonaco(hl, monaco);
       const ed = monaco.editor.create(el.current!, { value: text, language: "qkt", theme: "github-dark", automaticLayout: true, minimap: { enabled: false } });

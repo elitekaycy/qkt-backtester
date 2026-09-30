@@ -1,4 +1,4 @@
-import { anchorParseError, relocate } from "@qkt-studio/core/lint";
+import { anchorParseError, locateImport } from "@qkt-studio/core/lint";
 import { create } from "zustand";
 import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
@@ -541,10 +541,12 @@ export const useStore = create<State>((set, get) => ({
       const ws = get().info?.workspace;
       if (text !== undefined) list = list.map((d) => {
         let x = { ...d };
-        // qkt names a missing import by its absolute path alone
-        if (/^\/.*\.qkt$/.test(x.message)) x.message = `Imported file not found: ${ws && x.message.startsWith(ws + "/") ? x.message.slice(ws.length + 1) : x.message}`;
-        // reported without a position (line 1, col 1): point at the text the message is about
-        if (x.line <= 1 && x.col <= 1) { const at = relocate(text, x.message); if (at) x = { ...x, line: at.line, col: at.col, endCol: at.endCol }; }
+        // qkt names a missing import by its absolute path alone, at 1:1: point at the IMPORT that names it
+        if (/^\/.*\.qkt$/.test(x.message)) {
+          const at = locateImport(text, x.message);
+          x.message = `Imported file not found: ${ws && x.message.startsWith(ws + "/") ? x.message.slice(ws.length + 1) : x.message}`;
+          if (at) x = { ...x, ...at };
+        }
         return x.severity === "error" ? { ...x, ...anchorParseError(text, x) } : x;
       });
     }

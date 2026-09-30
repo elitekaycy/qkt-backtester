@@ -1,4 +1,5 @@
 import type { BarCols, StrategyRow, BookInfo } from "@qkt-studio/core";
+import type { QktVocabulary } from "@qkt-studio/core/vocabulary";
 import type { RunJson, Summary, RoundTrip, IntegrityReport, McResult, MonthRow, Diagnostic, TripQuery, RunRequest, Analytics, ScanReport, Readiness , SymbolReport } from "./types.js";
 
 export class ApiError extends Error {
@@ -76,6 +77,9 @@ export interface Job { id: string; kind: string; cleaned?: string[]; status: "ru
 
 export const api = {
   info: () => req<Info>("/api/info"),
+  /** What the qkt this studio runs says about its language; read once, before the editor is set up. */
+  qktVocabulary: () => req<QktVocabulary>("/api/qkt/vocabulary"),
+  qktGrammar: () => req<Record<string, unknown>>("/api/qkt/grammar"),
   tree: (path = "") => req<{ path: string; entries: TreeEntry[] }>(`/api/tree${qs({ path })}`),
   readFile: (path: string) => req<{ path: string; content: string; etag: string }>(`/api/file${qs({ path })}`),
   writeFile: (path: string, content: string, etag: string) => req<{ path: string; etag: string }>("/api/file", { method: "PUT", headers: { "If-Match": etag }, body: JSON.stringify({ path, content }) }),
