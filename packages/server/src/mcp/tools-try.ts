@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { partsOf, type Change, type Tier } from "@qkt-studio/core";
+import { partsOf, type Change, type RunJson, type Tier } from "@qkt-studio/core";
 import { getSplit } from "../split.js";
 import type { Variant } from "../agent/variants.js";
 import { changesSchema } from "./schemas.js";
@@ -41,16 +41,50 @@ async function runVariants(ctx: ToolCtx, vs: Variant[], release: () => void): Pr
   } finally { release(); }
 }
 
+type RunSettings = { from: string; to: string; tier: string; options: Record<string, string | number>; params: Record<string, string> };
+/** What a run was run with, apart from the strategy text: the things a comparison must hold equal. */
+export const settingsOf = (r: Pick<RunJson, "from" | "to" | "tier" | "options" | "params">): RunSettings =>
+  ({ from: r.from, to: r.to, tier: r.tier, options: r.options ?? {}, params: r.params ?? {} });
+const canon = (o: Record<string, unknown>) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+/** The settings two runs differ in (window, tier, each option, each --param), as `from`, `options.positionMode`, `params.fast`... */
+export function settingsDiff(a: RunSettings, b: RunSettings): string[] {
+  const out = (["from", "to", "tier"] as const).filter((k) => a[k] !== b[k]) as string[];
+  for (const g of ["options", "params"] as const) {
+    if (canon(a[g]) === canon(b[g])) continue;
+    for (const k of [...new Set([...Object.keys(a[g]), ...Object.keys(b[g])])].sort()) if (String(a[g][k]) !== String(b[g][k])) out.push(`${g}.${k}`);
+  }
+  return out;
+}
+
+/**
+ * Both results, the settings they ran with (always identical: variant and base are submitted from one request), and how the
+ * base run relates to the run on the user's screen, so a number is never compared against a run made under other settings.
+ */
 export async function compareVariant(ctx: ToolCtx, v: Variant) {
   const split = await getSplit(ctx.cfg);
+  const runs = new Map<string, RunJson>();
   const one = async (id: string | null) => {
     if (!id) return null;
     const run = await ctx.data.run(id);
     if (!run) return null;
+    runs.set(id, run);
     const [sm, trips] = run.status === "done" ? [await ctx.data.summary(id), await ctx.data.trips(id)] : [null, null];
     return { runId: id, status: run.status, error: run.error?.message, net: sm?.totalPnl ?? null, trades: sm?.trades ?? null, winRate: sm?.winRate ?? null, profitFactor: sm?.profitFactor ?? null, maxDrawdown: sm?.maxDrawdown ?? null, parts: trips ? partsOf(trips, run.from, run.to, split) : null };
   };
-  return { variant: await one(v.runId), base: await one(v.baseRunId) };
+  const variant = await one(v.runId), base = await one(v.baseRunId);
+  const vr = v.runId ? runs.get(v.runId) : undefined, br = v.baseRunId ? runs.get(v.baseRunId) : undefined;
+  const settings = br ? settingsOf(br) : null;
+  const mismatch = vr && br ? settingsDiff(settingsOf(vr), settingsOf(br)) : [];
+  // the run on screen, when it is of the same file: is the base that very run, and if not, what differs
+  let onScreen: { runId: string; isBase: boolean; differs: string[] } | null = null;
+  const screenId = ctx.view.get().runId;
+  const sr = screenId && br ? (screenId === br.id ? br : await ctx.data.run(screenId)) : null;
+  if (sr && br && sr.strategy === br.strategy) {
+    const differs = settingsDiff(settingsOf(sr), settingsOf(br));
+    if (sr.id !== br.id && !differs.length && sr.hash !== br.hash) differs.push("strategy text, config or data (the file changed since that run)");
+    onScreen = { runId: sr.id, isBase: sr.id === br.id || sr.hash === br.hash, differs };
+  }
+  return { variant, base, settings, ...(mismatch.length ? { settingsMismatch: mismatch } : {}), onScreen };
 }
 
 export function registerTryTools(s: McpServer, ctx: ToolCtx): void {
@@ -76,8 +110,9 @@ export function registerTryTools(s: McpServer, ctx: ToolCtx): void {
         await runVariants(ctx, made, release);
       } finally { release(); }
       const rows = [];
-      for (const v of made) rows.push({ variantId: v.id, label: v.label, ...(await compareVariant(ctx, v)).variant });
-      return ok({ base: (await compareVariant(ctx, made[0]!)).base, variants: rows });
+      for (const v of made) { const c = await compareVariant(ctx, v); rows.push({ variantId: v.id, label: v.label, ...c.variant, ...(c.settingsMismatch ? { settingsMismatch: c.settingsMismatch } : {}) }); }
+      const { base: b0, settings, onScreen } = await compareVariant(ctx, made[0]!);
+      return ok({ base: b0, settings, onScreen, variants: rows });
     }));
   s.registerTool("list_variants", { description: "Variants tried so far (newest first), optionally for one strategy.", inputSchema: { base: z.string().optional() } },
     ({ base }) => guard(async () => ok(ctx.variants.list(base).slice(0, 20).map((v) => ({ id: v.id, label: v.label, base: v.base, runId: v.runId, created: v.created })))));

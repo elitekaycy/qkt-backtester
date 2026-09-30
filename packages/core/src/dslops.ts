@@ -148,10 +148,17 @@ function apply1(src: string, c: Change, notes: string[]): string {
           const [a, z] = r.bracket, text = lines.slice(a, z).join(" ");
           const inner = /\{([\s\S]*)\}/.exec(text)?.[1] ?? "";
           const parts = splitTop(inner).map((p) => p.replace(/\s+/g, " "));
-          const set = (regex: RegExp, keyUnderscore: string, spec: string | null) => { if (!spec) return; const i = parts.findIndex((p) => regex.test(p)); if (i >= 0) parts[i] = `${keyUnderscore} ${spec}`; else parts.push(`${keyUnderscore} ${spec}`); };
+          const legs: string[] = [];
+          const set = (regex: RegExp, keyUnderscore: string, spec: string | null) => {
+            if (!spec) return;
+            const i = parts.findIndex((p) => regex.test(p));
+            // name the level it had, so "same bracket" and "added a leg" are visible in the notes
+            legs.push(i >= 0 ? `${keyUnderscore} ${parts[i]!.replace(regex, "").trim()} -> ${spec}` : `${keyUnderscore} added: ${spec}`);
+            if (i >= 0) parts[i] = `${keyUnderscore} ${spec}`; else parts.push(`${keyUnderscore} ${spec}`);
+          };
           set(/^STOP[ _]LOSS\b/i, "STOP_LOSS", stop); set(/^TAKE[ _]PROFIT\b/i, "TAKE_PROFIT", target);
           lines.splice(a, z - a, `${indentOf(lines[a]!)}BRACKET { ${parts.join(", ")} }`);
-          done.unshift(`rule ${r.n}`);
+          done.unshift(`rule ${r.n} (${legs.join("; ")})`);
         } else {
           const parts = [stop && `STOP_LOSS ${stop}`, target && `TAKE_PROFIT ${target}`].filter(Boolean);
           lines.splice(r.end, 0, `${indentOf(lines[r.then]!)}    BRACKET { ${parts.join(", ")} }`);
@@ -257,6 +264,7 @@ export function applyChanges(source: string, changes: Change[]): { source: strin
   const notes: string[] = [];
   let cur = source;
   for (const c of changes) cur = apply1(cur, c, notes);
+  if (changes.length && cur === source) notes.push("no change: the result is identical to the base text");
   return { source: cur, notes };
 }
 

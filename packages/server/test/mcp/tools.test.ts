@@ -4,6 +4,7 @@ import os from "node:os"; import path from "node:path";
 import { createStudio } from "../../src/main.js";
 import { testConfig, realData, haveData, haveQkt } from "../helpers.js";
 import { mcpClient, call } from "./client.js";
+import { settingsDiff, settingsOf } from "../../src/mcp/tools-try.js";
 
 let studio: Awaited<ReturnType<typeof createStudio>>, base: string, ws: string;
 beforeAll(async () => {
@@ -157,7 +158,51 @@ describe("the split", () => {
   });
 });
 
+describe("variant comparison settings", () => {
+  it("names every setting two runs differ in, and none when they match", () => {
+    const a = settingsOf({ from: "2024-01-02", to: "2024-02-01", tier: "draft", options: { startingBalance: 10000 }, params: {} });
+    expect(settingsDiff(a, settingsOf({ ...a, options: { startingBalance: 10000 } }))).toEqual([]);
+    expect(settingsDiff(a, settingsOf({ ...a, to: "2024-03-30", options: { startingBalance: 10000, positionMode: "netting" }, params: { fast: "12" } })))
+      .toEqual(["to", "options.positionMode", "params.fast"]);
+    expect(settingsDiff(a, settingsOf({ ...a, options: undefined }))).toEqual(["options.startingBalance"]);
+  });
+});
+
 describe.skipIf(!haveData || !haveQkt)("try_change", () => {
+  it("the bracket the file already has reproduces the base run exactly, and says how the base relates to the run on screen", async () => {
+    const s7 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
+    await s7.app.listen({ port: 0, host: "127.0.0.1" });
+    const b7 = `http://127.0.0.1:${(s7.app.server.address() as { port: number }).port}`;
+    writeFileSync(path.join(ws, "strategies", "samebr.qkt"), "STRATEGY samebr VERSION 1\n\nSYMBOLS\n    gold = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN ema(gold.close, 9) CROSSES ABOVE ema(gold.close, 21)\n     AND POSITION.gold = 0\n    THEN BUY gold SIZING 0.1\n        BRACKET { STOP_LOSS BY 1 PCT, TAKE_PROFIT BY 2 PCT }\n\n    WHEN ema(gold.close, 9) CROSSES BELOW ema(gold.close, 21)\n     AND POSITION.gold > 0\n    THEN CLOSE gold\n");
+    const win = { from: "2024-10-01", to: "2024-10-15", tier: "draft" as const };
+    // the user's own run on screen, made with an option the tool's runs do not use
+    const shown = await s7.runner.submit({ strategy: "strategies/samebr.qkt", ...win, options: { positionMode: "netting" } });
+    await s7.runner.waitFor(shown.runId);
+    s7.view.set({ openFile: "strategies/samebr.qkt", runId: shown.runId, runWindow: win });
+    const c = await mcpClient(b7, "t0k");
+    const r = await call(c, "try_change", { changes: [{ op: "set_bracket", stop: "1%", target: "2%" }], ...win });
+    expect(r.isError).toBe(false);
+    expect(r.json.diff).toBe("");
+    expect(r.json.notes.join(" ")).toMatch(/no change/);
+    expect(r.json.variant.status).toBe("done");
+    expect(r.json.variant.net).toBe(r.json.base.net);
+    expect(r.json.variant.trades).toBe(r.json.base.trades);
+    expect(r.json.variant.parts).toEqual(r.json.base.parts);
+    expect(r.json.settingsMismatch).toBeUndefined();
+    expect(r.json.settings).toMatchObject({ ...win, params: {} });
+    expect(r.json.onScreen).toEqual({ runId: shown.runId, isBase: false, differs: ["options.positionMode"] });
+    // on screen = the very run the tool compared against
+    const plain = await s7.runner.submit({ strategy: "strategies/samebr.qkt", ...win });
+    await s7.runner.waitFor(plain.runId);
+    s7.view.set({ runId: plain.runId });
+    const t = await call(c, "try_variants", { variants: [{ label: "1.5%", changes: [{ op: "set_bracket", stop: "1.5%" }] }, { label: "0.2%", changes: [{ op: "set_bracket", stop: "0.2%" }] }], ...win });
+    expect(t.isError).toBe(false);
+    expect(t.json.base.runId).toBe(plain.runId);
+    expect(t.json.onScreen).toEqual({ runId: plain.runId, isBase: true, differs: [] });
+    await c.close(); await s7.app.close();
+  }, 240_000);
+
+
   it("runs the change on a copy, compares it with the base, announces it, and never touches the base file", async () => {
     const s3 = await createStudio(testConfig(ws, { token: "t0k", dataRoot: realData }));
     await s3.app.listen({ port: 0, host: "127.0.0.1" });
