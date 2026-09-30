@@ -30,6 +30,13 @@ RUN pnpm --filter @qkt-studio/server deploy --prod --legacy /out/server \
  && find /out/server -name "*.map" -delete \
  && rm -f /out/server/node_modules/.modules.yaml
 
+# Claude Code for the chat, installed exactly as published (its postinstall places the native binary) and pinned; the
+# studio never modifies it. To move to another version: --build-arg CLAUDE_CODE_VERSION=<x.y.z>.
+FROM node AS claude
+ARG CLAUDE_CODE_VERSION=2.1.285
+RUN npm install -g --prefix /out/claude "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && /out/claude/bin/claude --version
+
 FROM ${QKT_IMAGE} AS runtime
 ARG QKT_IMAGE
 ARG STUDIO_VERSION=dev
@@ -47,16 +54,19 @@ COPY --from=build /out/server /app/server
 COPY packages/server/assets /app/server/assets
 COPY --from=build /src/packages/web/dist /app/web
 COPY tools /app/tools
+COPY --from=claude /out/claude /opt/claude
 COPY docker/entrypoint.sh /usr/local/bin/studio-entrypoint
-RUN chmod +x /usr/local/bin/studio-entrypoint && mkdir -p /workspace /data /tmp/home && chmod 1777 /tmp/home /data
+RUN chmod +x /usr/local/bin/studio-entrypoint && mkdir -p /workspace /data /tmp/home && chmod 1777 /tmp/home /data \
+ && ln -s /opt/claude/bin/claude /usr/local/bin/claude && mkdir -p /home/studio/.claude && chown -R 1000:1000 /home/studio
 
 ENV NODE_ENV=production LANG=C.UTF-8 \
     HOST=0.0.0.0 PORT=8080 \
     WORKSPACE=/workspace QKT_DATA_HOME=/data WEB_ROOT=/app/web \
     QKT_BIN=/opt/qkt/bin/qkt HOME=/tmp/home STUDIO_CDS_DIR=/tmp/home/cds \
+    CLAUDE_BIN=/usr/local/bin/claude CLAUDE_CONFIG_DIR=/home/studio/.claude DISABLE_AUTOUPDATER=1 \
     NODE_OPTIONS=--disable-warning=ExperimentalWarning
 EXPOSE 8080
-VOLUME ["/workspace", "/data"]
+VOLUME ["/workspace", "/data", "/home/studio/.claude"]
 # start period: an empty workspace on a large data store is seeded from a full scan first (minutes on ~500k files)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/api/health',{headers:process.env.STUDIO_TOKEN?{authorization:'Bearer '+process.env.STUDIO_TOKEN}:{}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 ENTRYPOINT ["tini", "--", "studio-entrypoint"]

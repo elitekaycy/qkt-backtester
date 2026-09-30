@@ -44,6 +44,11 @@ jobs:
           docker run -d --name studio -p 127.0.0.1:8080:8080 -v "$PWD/ws:/workspace" qkt-backtester:ci
           scripts/docker-smoke.sh http://127.0.0.1:8080
           test "$(stat -c %u ws/qkt.config.yaml)" = "$(id -u)"   # files the studio creates belong to the host user
+      - name: the image carries Claude Code as published, configured on its own volume
+        run: |
+          docker run --rm --entrypoint claude qkt-backtester:ci --version | grep -q '^2.1.285 '
+          (docker run --rm -u 1000 --entrypoint claude qkt-backtester:ci auth status --json || true) | grep -q '"configDirectory": *"/home/studio/.claude"'
+          docker exec -u "$(id -u)" studio sh -c 'test -w /home/studio/.claude'
       - name: strategies that exercise brackets, rule exits and a portfolio
         run: |
           cat > ws/strategies/brk.qkt <<'EOF'

@@ -37,11 +37,14 @@ The image is `linux/amd64` only, because the qkt engine image is.
 ```sh
 # once: a workspace folder owned by the account that should own the files
 mkdir -p /srv/qkt-studio/workspace
+# an empty folder for the chat's sign-in; the container hands it to the workspace owner on start
+mkdir -p /srv/qkt-studio/claude
 
 docker pull ghcr.io/elitekaycy/qkt-backtester:v0.2.0
 docker run -d --name qkt-backtester --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -v /srv/qkt-studio/workspace:/workspace \
+  -v /srv/qkt-studio/claude:/home/studio/.claude \
   -v /path/to/data-store:/data:ro \
   -e QKT_DEMO=0 \
   -e STUDIO_TOKEN="$(openssl rand -hex 24)" \
@@ -60,6 +63,7 @@ docker run -d --name qkt-backtester --restart unless-stopped \
 - **Workspace** (`/workspace`): your strategies, `qkt.config.yaml`, `instruments.yaml`, `.env` and every run's output
   (`runs/`). An empty folder is seeded with a starter config and two sample strategies on a symbol your data has.
   Back this folder up; it is the only state the studio keeps.
+- **Claude Code sign-in** (`/home/studio/.claude`): the chat's sign-in, kept by Claude Code itself. Mount it from its own folder: without a mount it lives in an anonymous volume that `docker rm` + `docker run` (every upgrade) replaces with an empty one, and you would sign in again after each upgrade. It is never inside the workspace.
 - **Files belong to the folder's owner**: the container runs as the owner of `/workspace` (set `PUID`/`PGID` if Docker
   creates the folder for you).
 
@@ -81,6 +85,7 @@ docker logs --tail 100 qkt-backtester
 docker pull ghcr.io/elitekaycy/qkt-backtester:v0.2.1
 docker stop qkt-backtester && docker rm qkt-backtester
 docker run ... ghcr.io/elitekaycy/qkt-backtester:v0.2.1      # same flags as before
+# same flags includes the /home/studio/.claude mount, or the chat is signed out after the upgrade
 # roll back: the same, with the previous tag
 ```
 
@@ -102,6 +107,9 @@ engine output they came from is never rewritten.
 | `STUDIO_KEEP_ROOT` | unset | Set to keep running as root instead of the workspace owner. |
 | `HOST` / `PORT` | `0.0.0.0` / `8080` | Listen address inside the container. Control exposure with `-p`. |
 | `STUDIO_CDS_DIR` | `/tmp/home/cds` | Where backtest JVMs keep a class-data archive for faster start-up. Unset to disable. |
+| `CLAUDE_BIN` | `/usr/local/bin/claude` (image) | The Claude Code CLI the chat runs. |
+| `CLAUDE_CONFIG_DIR` | `/home/studio/.claude` (image) | Claude Code's own folder: its sign-in and conversation transcripts. Mount it as a volume. |
+| `CHAT_RECORD_DIR` | unset | Also save each chat message's raw CLI output there (test fixtures; see `scripts/chat-live.mjs`). |
 | `QKT_DATA_HOME`, `WORKSPACE`, `QKT_BIN`, `WEB_ROOT` | set by the image | Paths inside the container; leave them. |
 
 Backtest settings (balance, risk halts, execution model, portfolio book risk) are in the workspace's
@@ -112,7 +120,7 @@ reference around your own values.
 
 Every push runs the `check` workflow: unit tests, then the image itself on an empty workspace with synthetic data:
 accuracy against an independent reimplementation, byte-for-byte determinism, what the UI displays, a whole-session
-walkthrough (create, run, edit with auto-run, ticks, a parameter grid), and keyboard and extension compatibility. The
+walkthrough (create, run, edit with auto-run, ticks, a parameter grid), keyboard and extension compatibility, and the Chat tab end to end with a stand-in CLI that replays recorded replies (no tokens). The
 release workflow only publishes a commit whose image starts and passes the smoke test.
 
 ## 5. The studio's tools (MCP)
@@ -135,3 +143,24 @@ Each open studio tab keeps one event stream to the server (for what the tools do
 going. Over plain HTTP (for example `http://bot2:8080`) browsers allow 6 connections per host, so with about five tabs
 of the studio open, requests in every tab start to wait. Close tabs you do not use, or serve the studio over HTTPS
 (HTTP/2) behind a proxy, where this limit does not apply.
+
+## 6. The research chat
+
+The **Chat** tab (next to Pipeline, Problems, Terminal) takes plain English ("make the stop-loss 2 % and let's see",
+"skip Fridays", "make the test part the last 2 months") and does it with the studio's tools (section 5): changes are
+tried on a copy and shown on the chart with Adopt / Discard, edits to your files are proposals you Apply or Reject.
+
+It runs the **unmodified Claude Code CLI** shipped in the image, on **your own Claude plan** (Pro or Max): Haiku by
+default, Sonnet when you press **Think harder**. Sign in once, with Anthropic's own flow, inside the container:
+
+```sh
+docker exec -it -u 1000 qkt-backtester claude auth login     # -u: the owner of your workspace folder (the Chat tab shows it)
+```
+
+The sign-in stays in Claude Code's folder (`/home/studio/.claude`, its own volume); the studio never reads, stores or
+forwards it, and only asks `claude auth status` whether you are signed in. Each message starts one CLI process that can
+use the studio's tools and nothing else (no shell, no files), with its own short-lived token for `/api/mcp`. Limits per
+message: 25 tool calls and 5 minutes; one message at a time. **Stop** ends the process and cancels the runs it started.
+Nothing runs in the background: the CLI only starts when you send a message. Usage is shown under each reply ("counts
+toward your Claude plan"; the API-equivalent cost is in its tooltip). When the plan's limit is reached the CLI's own
+message is shown; with `-e ANTHROPIC_API_KEY=...` Claude Code bills the API instead.
