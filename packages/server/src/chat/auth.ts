@@ -31,9 +31,12 @@ export class ClaudeStatusCache {
   constructor(private bin: string, private cwd: string, private ttlMs = 30_000) {}
   get(force = false): Promise<ClaudeStatus> {
     if (!force && this.last && Date.now() - this.last.at < this.ttlMs) return Promise.resolve(this.last.value);
-    this.inflight ??= readClaudeStatus(this.bin, agentEnv(), this.cwd)
+    // a forced read while another is in flight waits for it, then reads afresh: the running one may predate the change
+    if (this.inflight && !force) return this.inflight;
+    const read = (this.inflight ?? Promise.resolve()).catch(() => undefined).then(() => readClaudeStatus(this.bin, agentEnv(), this.cwd))
       .then((value) => { this.last = { at: Date.now(), value }; return value; })
-      .finally(() => { this.inflight = null; });
-    return this.inflight;
+      .finally(() => { if (this.inflight === read) this.inflight = null; });
+    this.inflight = read;
+    return read;
   }
 }

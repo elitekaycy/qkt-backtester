@@ -10,24 +10,31 @@ export interface AgentRun { model: AgentModel; sessionId: string; resume: boolea
 
 /** The design's flags (section 5): only the studio's MCP tools, no built-in ones, no permission prompts, streamed JSON. */
 export function agentArgs(r: AgentRun): string[] {
+  if (r.model !== "haiku" && r.model !== "sonnet") throw new Error(`model must be "haiku" or "sonnet", got ${JSON.stringify(r.model)}`);
   return ["-p", "--model", r.model, "--tools", "", "--strict-mcp-config", "--mcp-config", r.mcpConfigPath,
     "--allowedTools", "mcp__studio__*", "--permission-mode", "dontAsk", "--system-prompt", r.systemPrompt,
     "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     ...(r.resume ? ["--resume", r.sessionId] : ["--session-id", r.sessionId])];
 }
 
-/** The studio's environment minus its access token: the CLI gets its own per-process token in the MCP config instead. */
+/** The studio's environment minus its access token and anything else that looks like a secret (the CLI gets its own
+ *  per-process token in the MCP config instead). ANTHROPIC_API_KEY stays: the user may set it for the API-key backend. */
 export function agentEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = { ...base };
-  delete env.STUDIO_TOKEN;
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(base)) {
+    if (k === "STUDIO_TOKEN" || (k !== "ANTHROPIC_API_KEY" && /TOKEN|SECRET|PASSWORD|API_KEY/i.test(k))) continue;
+    env[k] = v;
+  }
   return env;
 }
 
 /** The --mcp-config file (endpoint + this process's token), readable by this user only; the caller deletes it. */
 export async function writeMcpConfig(dir: string, name: string, url: string, token: string): Promise<string> {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  await fs.chmod(dir, 0o700); // mkdir's mode is ignored when the directory already exists
   const file = path.join(dir, `${name}.json`);
-  await fs.writeFile(file, JSON.stringify({ mcpServers: { studio: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }), { mode: 0o600 });
+  // "wx": never write a token into a file that already exists (its mode and owner would be unknown)
+  await fs.writeFile(file, JSON.stringify({ mcpServers: { studio: { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }), { mode: 0o600, flag: "wx" });
   return file;
 }
 

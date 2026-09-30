@@ -6,6 +6,9 @@
 //   a scenario line is a stream-json object ({{session}} replaced) or a directive:
 //     {"$call": {"name", "arguments"}, "$repeat"?: n}  emit the tool_use, call the studio, emit the tool_result
 //     {"$echo_prompt": true}  an assistant text with the whole prompt received     {"$sleep": ms}   {"$hang": true}
+//     {"$stream_text": "words"}  the text the way the CLI streams it with --include-partial-messages: message_start, text deltas,
+//                                the whole assistant message, then message_stop (a reader must not show the text twice)
+//     {"$ignored": true}  one of each real-but-uninteresting event: hook_started, status, thinking_tokens, rate_limit_event
 //     {"$stderr": "text"}   {"$exit": code}
 // Sessions behave like the CLI's: --session-id must be new, --resume must exist (markers in $CLAUDE_CONFIG_DIR/fake-sessions).
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -67,12 +70,32 @@ async function call(name, args) {
   out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: [{ type: "text", text }], is_error: isError }] }, parent_tool_use_id: null, session_id: session, uuid: `u-res-${toolN}` });
 }
 
+const ev = (event) => out({ type: "stream_event", event, session_id: session, parent_tool_use_id: null, uuid: `u-ev-${++toolN}` });
+function streamText(text) {
+  const id = `msg_stream_${++toolN}`;
+  ev({ type: "message_start", message: { id, type: "message", role: "assistant", content: [], model: "claude-haiku-4-5" } });
+  ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+  for (const w of text.match(/\S+\s*/g) ?? []) ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: w } });
+  out({ type: "assistant", message: { id, role: "assistant", model: "claude-haiku-4-5", content: [{ type: "text", text }] }, parent_tool_use_id: null, session_id: session, uuid: `u-${id}` });
+  ev({ type: "content_block_stop", index: 0 });
+  ev({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 12 } });
+  ev({ type: "message_stop" });
+}
+function ignored() {
+  out({ type: "system", subtype: "hook_started", hook_id: "h1", hook_name: "SessionStart:startup", hook_event: "SessionStart", session_id: session, uuid: "u-hook" });
+  out({ type: "system", subtype: "status", status: "requesting", session_id: session, uuid: "u-status" });
+  out({ type: "system", subtype: "thinking_tokens", estimated_tokens: 50, estimated_tokens_delta: 50, session_id: session, uuid: "u-think" });
+  out({ type: "rate_limit_event", rate_limit_info: { status: "allowed", rateLimitType: "five_hour" }, session_id: session, uuid: "u-rate" });
+}
+
 for (const line of lines) {
   const o = JSON.parse(line.replaceAll("{{session}}", session));
   if (o.$sleep) await new Promise((r) => setTimeout(r, o.$sleep));
   else if (o.$hang) await new Promise(() => setInterval(() => undefined, 1 << 30));
   else if (o.$stderr) process.stderr.write(`${o.$stderr}\n`);
   else if (o.$exit !== undefined) process.exit(o.$exit);
+  else if (o.$stream_text) streamText(o.$stream_text)
+  else if (o.$ignored) ignored()
   else if (o.$echo_prompt) out({ type: "assistant", message: { id: "msg_echo", role: "assistant", content: [{ type: "text", text: `You said:\n${prompt}` }] }, parent_tool_use_id: null, session_id: session, uuid: "u-echo" });
   else if (o.$call) for (let i = 0; i < (o.$repeat ?? 1); i++) await call(o.$call.name, o.$call.arguments ?? {});
   else out(o);
