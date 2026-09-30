@@ -36,7 +36,8 @@ function useParts(runIds: Array<string | undefined>): Array<Parts | null> {
 /** Adopt / Discard / Show for one variant; `compact` (a row of the comparison table) keeps the buttons short and quiet. */
 function VariantButtons({ v, compact = false }: { v: VariantInfo | undefined; compact?: boolean }) {
   const showing = useAgent((s) => s.showing);
-  if (!v) return <span className="muted">discarded</span>;
+  // gone from the list: discarded, dropped past the kept-variants cap, or its run was stopped
+  if (!v) return <span className="muted">no longer kept</span>;
   return (
     <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
       <button className={`btn sm${compact ? "" : " primary"}`} aria-label={`Adopt ${v.label}`} onClick={() => void useAgent.getState().adopt(v.id).catch(toastError)}>Adopt</button>

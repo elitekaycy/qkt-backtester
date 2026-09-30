@@ -156,6 +156,24 @@ describe("ChatManager", () => {
     await mgr.stop();
     expect(seen).toEqual(["run:r1:true", "run:sweep-1:true", "job:sweep-1"]);
   });
+  it("Stop discards the variant whose run it purged, and only for a run it actually cancelled", async () => {
+    const ws = realpathSync(mkdtempSync(path.join(os.tmpdir(), "ws-")));
+    const store = ChatStore.open(path.join(ws, ".qkt-studio", "chat", "chat.sqlite"))!;
+    const discarded: string[] = [];
+    const mgr = new ChatManager({ cfg: testConfig(ws, { claudeBin: fakeClaude }), store, tokens: new ChatTokens(), events: new EventBus(), view: new ViewState(),
+      status: new ClaudeStatusCache(fakeClaude, ws), splitText: async () => null,
+      runner: { cancel: async (id) => id !== "run-finished" }, jobs: { cancel: async () => false },
+      variants: { discardForRun: async (id) => { discarded.push(id); } } });
+    mgr.setMcpUrl("http://127.0.0.1:9/api/mcp");
+    await mgr.send({ text: "keep working" });
+    await until(() => mgr.activeTurn()?.pid !== null && mgr.activeTurn()?.pid !== undefined);
+    const t = mgr.activeTurn()!;
+    t.grant!.started.add("run-v").add("run-finished");
+    await mgr.stop();
+    expect(discarded).toEqual(["run-v"]);
+    t.grant!.afterStop!("run-late");
+    await until(() => discarded.includes("run-late"));
+  });
   it("the time limit stops the process, keeps what was started, and says so", async () => {
     const { mgr, store, cancelled, tokens, configs, children } = setup({ limits: { maxCalls: 25, maxMs: 500 } });
     const a = await mgr.send({ text: "keep working" });

@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { ChatEvent } from "@qkt-studio/core";
 export type StudioEvent =
   | { t: "variant"; variantId: string; runId: string }
+  /** the variant list changed (a variant was discarded) */
+  | { t: "variants" }
   | { t: "proposal"; id: string }
   | { t: "split" }
   | { t: "open_file"; path: string }

@@ -102,7 +102,10 @@ export const useAgent = create<{
   variants: VariantInfo[]; showing: VariantInfo | null; split: { split: Split; text: string } | null; proposals: ProposalInfo[];
   /** Opens the SSE stream (closing any previous one first) and returns a stop function for cleanup. */
   start(): () => void;
-  refresh(): Promise<void>; show(v: VariantInfo): Promise<void>; back(): Promise<void>; discard(id: string): Promise<void>; adopt(id: string): Promise<void>;
+  refresh(): Promise<void>;
+  /** The variant on the chart was discarded elsewhere (another tab, or Stop purged its run): back to its base run if that still exists. */
+  forgetGone(): Promise<void>;
+  show(v: VariantInfo): Promise<void>; back(): Promise<void>; discard(id: string): Promise<void>; adopt(id: string): Promise<void>;
 }>((set, get) => ({
   variants: [], showing: null, split: null, proposals: [],
   start() {
@@ -119,6 +122,7 @@ export const useAgent = create<{
       });
     });
     src.addEventListener("chat", (m) => { const d = (m as MessageEvent).data; if (typeof d === "string") useChat.getState().onEvent(JSON.parse(d) as ChatWire); });
+    src.addEventListener("variants", () => void get().refresh().then(() => get().forgetGone()).catch(() => undefined));
     src.addEventListener("proposal", () => void get().refresh());
     src.addEventListener("split", () => void get().refresh());
     // not "open": that is the EventSource's own connection event; the data guard stays as a second line of defence
@@ -139,6 +143,12 @@ export const useAgent = create<{
   async refresh() {
     const [v, p, s] = await Promise.all([api.variants(), api.proposals(), api.split()]);
     set({ variants: v.variants, proposals: p.proposals, split: s });
+  },
+  async forgetGone() {
+    const v = get().showing;
+    if (!v || get().variants.some((x) => x.id === v.id)) return;
+    set({ showing: null });
+    if (v.baseRunId && (await api.run(v.baseRunId).catch(() => null))) await useStore.getState().selectRun(v.baseRunId);
   },
   /** Show a variant's run: a finished one is selected, one still going is followed live so its results load when it ends. */
   async show(v) {

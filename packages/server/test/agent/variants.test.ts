@@ -51,6 +51,36 @@ describe("variant folders", () => {
   });
 });
 
+describe("Variants.discardForRun (Stop purged the run)", () => {
+  const runner = (ids: string[]) => ({ submit: async () => ({ runId: ids.shift()!, cached: false, joined: false }), waitFor: async () => ({}) }) as unknown as Runner;
+  it("discards the variant whose run it is, keeps the others, and tells every tab", async () => {
+    const bus = new EventBus(), seen: string[] = [];
+    bus.subscribe((e) => seen.push(e.t));
+    const v = new Variants(testConfig(ws), runner(["run-a", "base", "run-b", "base"]), bus);
+    await v.init();
+    const a = await v.run(await v.commit(prepared("a"))), b = await v.run(await v.commit(prepared("b")));
+    await v.discardForRun("run-a");
+    expect(v.get(a.id)).toBeUndefined();
+    expect(existsSync(path.join(vdir(), a.id))).toBe(false);
+    expect(v.get(b.id)).toMatchObject({ runId: "run-b" });
+    expect(seen).toContain("variants");
+  });
+  it("discards a variant whose run was purged before its run id was recorded", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow = { submit: async (r: { strategy: string }) => { if (r.strategy !== "strategies/ema.qkt") await gate; return { runId: r.strategy === "strategies/ema.qkt" ? "base" : "run-late", cached: false, joined: false }; }, waitFor: async () => ({}) } as unknown as Runner;
+    const v = new Variants(testConfig(ws), slow, new EventBus());
+    await v.init();
+    const made = await v.commit(prepared("late"));
+    const running = v.run(made);
+    await v.discardForRun("run-late"); // Stop got there first
+    release();
+    await running;
+    expect(v.get(made.id)).toBeUndefined();
+    expect(v.list()).toEqual([]);
+  });
+});
+
 describe("Variants.run", () => {
   it("reports each accepted submit even when the other one is refused", async () => {
     const runner = { submit: async (r: { strategy: string }) => { if (r.strategy === "strategies/ema.qkt") throw new Error("no data"); return { runId: "run-v", cached: false, joined: false }; }, waitFor: async () => ({}) } as unknown as Runner;

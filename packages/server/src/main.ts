@@ -51,7 +51,7 @@ export async function createStudio(cfg: ServerConfig) {
   chatStore?.markInterrupted(); // a message cut off by a restart
   const claude = new ClaudeStatusCache(cfg.claudeBin ?? "claude", cfg.workspace);
   const chat = chatStore
-    ? new ChatManager({ cfg, store: chatStore, tokens, events, view, status: claude, runner, jobs,
+    ? new ChatManager({ cfg, store: chatStore, tokens, events, view, status: claude, runner, jobs, variants,
         splitText: async () => describeSplit(await getSplit(cfg)), recordDir: process.env.CHAT_RECORD_DIR || undefined })
     : null;
   const app = await buildApp(cfg, (a) => {

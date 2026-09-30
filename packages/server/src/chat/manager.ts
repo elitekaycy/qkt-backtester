@@ -22,6 +22,8 @@ export interface ChatDeps {
   cfg: ServerConfig; store: ChatStore; tokens: ChatTokens; events: EventBus; view: ViewState; status: ClaudeStatusCache;
   /** Stop cancels the runs and jobs the message's tool calls started, through these. */
   runner: { cancel(id: string, o?: { purge?: boolean }): Promise<boolean> }; jobs: { cancel(id: string): Promise<boolean> };
+  /** A variant whose run Stop purged is discarded through this. */
+  variants?: { discardForRun(runId: string): Promise<void> };
   splitText(): Promise<string | null>;
   limits?: ChatLimits;
   /** When set, the CLI's raw stream-json lines are also saved as <dir>/<messageId>.jsonl (parser fixtures). */
@@ -108,7 +110,10 @@ export class ChatManager {
     if (!turn?.messageId) return false;
     const grant = turn.grant;
     const cancelOne = async (id: string) => {
-      try { if (!(await this.d.runner.cancel(id, { purge: true }))) await this.d.jobs.cancel(id); }
+      try {
+        if (await this.d.runner.cancel(id, { purge: true })) await this.d.variants?.discardForRun(id);
+        else await this.d.jobs.cancel(id);
+      }
       catch (e) { console.error(`chat: Stop could not cancel ${id}: ${(e as Error).message}`); }
     };
     if (grant) grant.afterStop = (id) => void cancelOne(id);
