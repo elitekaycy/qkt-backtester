@@ -9,6 +9,7 @@ say() { echo "qkt-backtester: $*" >&2; }
 # without needing --user. If the folder is owned by root (docker created it), stay root and say so.
 if [ "$(id -u)" = 0 ] && [ -d /workspace ] && [ -z "${STUDIO_KEEP_ROOT:-}" ]; then
   mkdir -p /workspace /data /home/studio/.claude
+  # a folder Docker created for a missing bind mount is root-owned and empty: hand it to PUID:PGID (default 1000)
   for d in /workspace /data; do
     if [ "$(stat -c %u "$d")" = 0 ] && [ -z "$(ls -A "$d" 2>/dev/null)" ] && [ -w "$d" ]; then
       chown "${PUID:-1000}:${PGID:-1000}" "$d" && say "note: $d was an empty root-owned folder; gave it to ${PUID:-1000}:${PGID:-1000} (set PUID/PGID to change)"
