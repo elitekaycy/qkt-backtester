@@ -265,4 +265,10 @@ describe("ChatManager", () => {
     const i = lines.findIndex((l) => l.startsWith("Do what the user asks."));
     expect(lines[i + 1]).toBe("Change only what the user asked for; leave every other value as it is (asked for a stop, do not set a target).");
   });
+  it("after close a send is refused", async () => {
+    const { mgr, store } = setup();
+    await mgr.close();
+    await expect(mgr.send({ text: "hi" })).rejects.toThrow(new ChatUnavailable("the studio is shutting down"));
+    expect(store.list(10)).toEqual([]);
+  });
 });

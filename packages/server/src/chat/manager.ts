@@ -43,6 +43,7 @@ const NO_SESSION = /No conversation found/i, SESSION_TAKEN = /already in use/i;
 export class ChatManager {
   private turn: Turn | null = null;
   private mcpUrl: string | null = null;
+  private closed = false;
   private limits: ChatLimits;
   constructor(private d: ChatDeps) { this.limits = d.limits ?? LIMITS; }
 
@@ -53,6 +54,7 @@ export class ChatManager {
   private get dir(): string { return path.join(this.d.cfg.workspace, ".qkt-studio", "chat"); }
 
   async send(r: SendRequest): Promise<{ conversationId: string; messageId: string }> {
+    if (this.closed) throw new ChatUnavailable("the studio is shutting down");
     if (this.turn) throw new ChatBusy("a message is already being answered; wait for it or press Stop");
     // reserve the slot before the first await: two sends at the same moment must not both start a process
     let release!: () => void;
@@ -116,6 +118,7 @@ export class ChatManager {
 
   /** The studio is shutting down: end a message in flight as interrupted. */
   async close(): Promise<void> {
+    this.closed = true; // a send that arrives from now on is refused
     const turn = this.turn;
     if (!turn) return;
     await this.halt(turn, "interrupted", "Interrupted: the studio stopped. Send again to continue.");
