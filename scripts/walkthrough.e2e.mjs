@@ -137,8 +137,9 @@ const runsBefore = (await api(`/api/runs?strategy=${encodeURIComponent(strategy)
 before = await kpiText();
 await edit("     AND trend.close > sma(trend.close, 20)", "     AND trend.close > ");
 await sleep(3000);
-const notice = await p.evaluate(() => [...document.querySelectorAll(".banner")].map((x) => x.textContent).find((t) => t.startsWith("Not run")) ?? "");
-ok("the error is named instead of running", /^Not run: line \d+/.test(notice), notice.slice(0, 90));
+// the notice is a toast since 0.3.1 (an inline banner before)
+const notice = await p.evaluate(() => [...document.querySelectorAll("[data-sonner-toast], .banner")].map((x) => x.textContent ?? "").find((t) => t.includes("Not run")) ?? "");
+ok("the error is named instead of running", /Not run: line \d+/.test(notice), notice.slice(0, 90));
 ok("no run was started", (await api(`/api/runs?strategy=${encodeURIComponent(strategy)}&limit=50`)).runs.length === runsBefore);
 ok("the last good numbers stay", (await kpiText()) === before);
 const squiggle = await p.evaluate(() => (window.__qktMarkers?.() ?? []).filter((m) => m.sev === 8).map((m) => `L${m.line}`));

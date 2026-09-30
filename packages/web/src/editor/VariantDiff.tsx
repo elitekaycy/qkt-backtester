@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { editor } from "monaco-editor/editor/editor.api.js";
 import { api } from "../api/client.js";
-import { useAgent, type VariantInfo } from "../state/agent.js";
+import { adoptVariant, discardVariant, useAgent, type VariantInfo } from "../state/agent.js";
 import { useDiffView } from "../state/diffView.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
@@ -122,8 +122,8 @@ export function VariantDiff({ variant }: { variant: VariantInfo }) {
           title={layout === "split" ? "Inline" : "Side by side"} onClick={() => useDiffView.getState().setMode(toggledMode(mode, width))}>
           {layout === "split" ? <Rows2 size={14} /> : <Columns2 size={14} />}{layout === "split" ? "Inline" : "Side by side"}
         </button>
-        <button className="btn sm primary" disabled={src === "gone"} onClick={() => void useAgent.getState().adopt(variant.id).catch(toastError)}>Adopt</button>
-        <button className="btn sm" onClick={() => void useAgent.getState().discard(variant.id).catch(toastError)}>Discard</button>
+        <button className="btn sm primary" disabled={src === "gone"} onClick={() => adoptVariant(variant.id)}>Adopt</button>
+        <button className="btn sm" onClick={() => discardVariant(variant.id)}>Discard</button>
         <button className="btn sm ghost" aria-label="Close the diff" title="Back to the editor" onClick={() => useDiffView.getState().close()}><X size={14} />Close</button>
       </div>
       {changed && <div className="variant-diff-note" role="status">{name} changed since this variant was made; the diff is against your current text.</div>}

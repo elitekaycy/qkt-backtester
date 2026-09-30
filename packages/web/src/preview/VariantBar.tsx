@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type PartStats } from "../api/client.js";
-import { useAgent, variantSide } from "../state/agent.js";
+import { adoptVariant, discardVariant, useAgent, variantSide } from "../state/agent.js";
 import { useDiffView } from "../state/diffView.js";
 import { fmtMoney } from "../util/format.js";
 
@@ -56,8 +56,8 @@ export function VariantBar() {
       <span className="grow" />
       <button className="btn sm auto-toggle" aria-pressed={diffOn} title={diffOn ? "Back to the editor" : "Show what the variant changes, in the editor"}
         onClick={() => void useDiffView.getState().toggle(showing)}>Diff</button>
-      <button className="btn sm primary" onClick={() => void useAgent.getState().adopt(showing.id)}>Adopt</button>
-      <button className="btn sm" onClick={() => void useAgent.getState().discard(showing.id)}>Discard</button>
+      <button className="btn sm primary" onClick={() => adoptVariant(showing.id)}>Adopt</button>
+      <button className="btn sm" onClick={() => discardVariant(showing.id)}>Discard</button>
       <button className="btn sm ghost" onClick={() => void useAgent.getState().back()}>Back to original</button>
     </div>
   );

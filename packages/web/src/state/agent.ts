@@ -235,3 +235,8 @@ export function scheduleViewReport(): void {
     })).catch(() => undefined);
   }, 400);
 }
+
+/** Adopt / Discard as every button in the studio calls them: one place that reports a failure as an error toast. */
+const reportError = (e: unknown) => useStore.getState().toast("error", (e as Error).message);
+export const adoptVariant = (id: string): void => void useAgent.getState().adopt(id).catch(reportError);
+export const discardVariant = (id: string): void => void useAgent.getState().discard(id).catch(reportError);

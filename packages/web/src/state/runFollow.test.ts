@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Run = { id: string; status: string; strategy: string; from: string; to: string; tier: "draft" | "full" };
-const server = vi.hoisted(() => ({ runs: new Map<string, Run>(), submit: [] as unknown[], events: new Map<string, (e: unknown) => void>() }));
+const server = vi.hoisted(() => ({ runs: new Map<string, Run>(), submit: [] as unknown[], events: new Map<string, (e: unknown) => void>(), gate: null as Promise<void> | null }));
 const saved = vi.hoisted(() => new Map<string, string>());
 vi.stubGlobal("localStorage", { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v) });
 
@@ -16,7 +16,7 @@ vi.mock("../api/client.js", () => {
     withToken: (u: string) => u,
     openRunEvents: (id: string, on: (e: unknown) => void) => { server.events.set(id, on); return () => server.events.delete(id); },
     api: {
-      run: async (id: string) => { const r = server.runs.get(id); if (!r) throw new Error("404"); return r; },
+      run: async (id: string) => { if (server.gate) await server.gate; const r = server.runs.get(id); if (!r) throw new Error("404"); return r; },
       submit: async (b: unknown) => { server.submit.push(b); return { runId: "never" }; },
       summary: notLoaded, integrity: notLoaded, monthly: notLoaded, equity: notLoaded, meta: notLoaded,
       runs: async () => ({ runs: [] }), variants: async () => ({ variants: [] }), proposals: async () => ({ proposals: [] }), split: async () => null,
@@ -44,7 +44,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 const prefs = () => JSON.parse(saved.get("qkt-studio-prefs-v1") ?? "{}") as Record<string, unknown>;
 
 beforeEach(() => {
-  server.runs.clear(); server.submit = []; saved.clear();
+  server.runs.clear(); server.submit = []; saved.clear(); server.gate = null;
   useStore.setState((s) => ({ cfg: { ...s.cfg, ...USER }, running: false, runId: null, run: null, activePath: "strategies/ema.qkt", submitError: "old refusal" }));
   useAgent.setState({ showing: null });
 });
@@ -66,6 +66,28 @@ describe("selectRun: the one path that puts a run on screen", () => {
     useStore.setState({ toast: () => undefined });
     await useStore.getState().selectRun("gone");
     expect(useStore.getState().cfg).toMatchObject(USER);
+  });
+
+  it("a top-bar edit made while the run's record loads wins over the run's window", async () => {
+    server.runs.set("r1", run("r1"));
+    let open!: () => void; server.gate = new Promise((r) => { open = r; });
+    const pending = useStore.getState().selectRun("r1");
+    useStore.getState().setCfg({ from: "2024-05-01", to: "2024-05-20" }); // the user picks a window meanwhile
+    server.gate = null; open(); await pending;
+    const s = useStore.getState();
+    expect(s.run?.id).toBe("r1");
+    expect({ from: s.cfg.from, to: s.cfg.to }).toEqual({ from: "2024-05-01", to: "2024-05-20" });
+  });
+
+  it("a newer run put on screen while an older record loads keeps the screen", async () => {
+    server.runs.set("old", run("old"));
+    let open!: () => void; server.gate = new Promise((r) => { open = r; });
+    const pending = useStore.getState().selectRun("old");
+    useStore.getState().attachRun("mine"); // e.g. the user's own run starts
+    server.gate = null; open(); await pending;
+    const s = useStore.getState();
+    expect(s.runId).toBe("mine");
+    expect(s.cfg).toMatchObject(USER);
   });
 
   it("gives the agent's view report the run's window", async () => {

@@ -30,6 +30,9 @@ const isStrategy = (p: string | null | undefined): p is string => !!p && p.endsW
 const CONFIG = "qkt.config.yaml";
 
 let closeEvents: (() => void) | null = null;
+/** Bumped by every action that decides which run is on screen (Run, attach, select): a selectRun whose record arrives
+ *  after a newer one of these must not apply that stale run's window to the top bar, nor replace what is on screen. */
+let screenSeq = 0;
 /** A run being submitted: the server has not answered with its id yet. Stop sets `stop`, and the run is cancelled the moment the id arrives. */
 let launching: { stop: boolean } | null = null;
 let autoTimer: ReturnType<typeof setTimeout> | null = null;
@@ -328,6 +331,7 @@ export const useStore = create<State>((set, get) => ({
 
   // ---- runs ---------------------------------------------------------------------------------------------
   async startRun(opts = {}) {
+    screenSeq++;
     const strategy = get().strategyPath();
     if (!strategy) { get().toast("error", "Open a .qkt strategy first."); return; }
     if (!(await get().saveAllDirty())) return;
@@ -359,6 +363,7 @@ export const useStore = create<State>((set, get) => ({
   /** Follow a run to its end: its status, progress and log, then its results. Used for a new run and, after a page
    *  load, for a run the server is still working on, so the Stop button is there whenever something runs. */
   attachRun(runId) {
+    screenSeq++;
     closeEvents?.();
     set({ runId, running: true });
     closeEvents = openRunEvents(runId, (e) => {
@@ -489,11 +494,14 @@ export const useStore = create<State>((set, get) => ({
     get().setCfg({ options });
   },
   async selectRun(id) {
+    const seq = ++screenSeq, cfgBefore = get().cfg;
     closeEvents?.();
     const run = await api.run(id).catch(() => null);
+    if (seq !== screenSeq) return; // a newer Run / attach / select took the screen while this record loaded
     if (!run) { get().toast("error", "Run not found"); return; }
     set({ runId: id, run, running: false, progress: null, logs: [], selectedTrip: null });
-    get().applyRunCfg(run);
+    // the user's own edit of the top bar while the record loaded wins over the run's window
+    if (get().cfg === cfgBefore) get().applyRunCfg(run);
     if (run.status === "done") await get().loadResults(id);
   },
   applyRunCfg(run) {

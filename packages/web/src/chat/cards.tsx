@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, type PartStats } from "../api/client.js";
 import { actOnProposal, DiffView } from "../shell/Proposals.js";
-import { useAgent, variantSide, type VariantInfo } from "../state/agent.js";
+import { adoptVariant, discardVariant, useAgent, variantSide, type VariantInfo } from "../state/agent.js";
 import { useDiffView } from "../state/diffView.js";
 import { useStore } from "../state/store.js";
 import { fmtMoney, polarity } from "../util/format.js";
@@ -41,8 +41,8 @@ function VariantButtons({ v, compact = false }: { v: VariantInfo | undefined; co
   if (!v) return <span className="muted">no longer kept</span>;
   return (
     <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
-      <button className={`btn sm${compact ? "" : " primary"}`} aria-label={`Adopt ${v.label}`} onClick={() => void useAgent.getState().adopt(v.id).catch(toastError)}>Adopt</button>
-      <button className={`btn sm${compact ? " ghost" : ""}`} aria-label={`Discard ${v.label}`} onClick={() => void useAgent.getState().discard(v.id).catch(toastError)}>Discard</button>
+      <button className={`btn sm${compact ? "" : " primary"}`} aria-label={`Adopt ${v.label}`} onClick={() => adoptVariant(v.id)}>Adopt</button>
+      <button className={`btn sm${compact ? " ghost" : ""}`} aria-label={`Discard ${v.label}`} onClick={() => discardVariant(v.id)}>Discard</button>
       <button className="btn sm ghost" title="Show what it changes, in the editor" aria-label={`View the diff of ${v.label}`} onClick={() => void useDiffView.getState().open(v).catch(toastError)}>{compact ? "Diff" : "View diff"}</button>
       {showing?.id === v.id
         ? compact && <span className="muted">on the chart</span>
