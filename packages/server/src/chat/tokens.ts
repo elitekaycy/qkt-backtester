@@ -1,5 +1,5 @@
 // packages/server/src/chat/tokens.ts
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 /**
  * What one CLI process may do: its token, the runs/jobs its tool calls started (Stop cancels them), its call budget.
@@ -11,14 +11,16 @@ export interface TurnGrant { token: string; started: Set<string>; calls: number;
 
 /** Random per-process tokens for /api/mcp, created for one CLI process and revoked when it exits. */
 export class ChatTokens {
+  // keyed by the token's SHA-256, so a lookup never compares the secret itself
   private grants = new Map<string, TurnGrant>();
+  private key = (token: string) => createHash("sha256").update(token).digest("hex");
   issue(o: { maxCalls: number; onLimit(): void }): TurnGrant {
     const g: TurnGrant = { token: randomBytes(24).toString("hex"), started: new Set(), calls: 0, maxCalls: o.maxCalls, onLimit: o.onLimit, afterStop: null };
-    this.grants.set(g.token, g);
+    this.grants.set(this.key(g.token), g);
     return g;
   }
-  lookup(token: string | undefined): TurnGrant | undefined { return token ? this.grants.get(token) : undefined; }
-  revoke(token: string): void { this.grants.delete(token); }
+  lookup(token: string | undefined): TurnGrant | undefined { return token ? this.grants.get(this.key(token)) : undefined; }
+  revoke(token: string): void { this.grants.delete(this.key(token)); }
   size(): number { return this.grants.size; }
 }
 

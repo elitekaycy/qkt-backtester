@@ -52,12 +52,12 @@ export async function createStudio(cfg: ServerConfig) {
     registerProposalRoutes(a, proposals);
     registerSplitRoutes(a, cfg, events, data);
     registerVariantRoutes(a, cfg, variants);
-    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants, started, budget }, tokens);
+    registerMcp(a, { cfg, runner, jobs, data, events, view, proposals, variants, started, budget });
     a.get("/api/info", async () => ({
       workspace: cfg.workspace, dataRoot: cfg.dataRoot, terminal: cfg.terminal, tokenRequired: Boolean(cfg.token),
       hasConfig: existsSync(`${cfg.workspace}/qkt.config.yaml`), maxParallel: cfg.maxParallel,
     }));
-  }, { mcpToken: (t) => tokens.lookup(t) !== undefined });
+  }, { mcpGrant: (t) => tokens.lookup(t) });
   app.addHook("onClose", async () => { await runner.close(); });
   return { app, runner, jobs, data, events, view, proposals, variants, budget, tokens };
 }

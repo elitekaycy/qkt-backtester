@@ -9,7 +9,7 @@ import { registerAuthoringTools } from "./tools-authoring.js";
 import { registerSplitTools } from "../split.js";
 import { registerTryTools } from "./tools-try.js";
 import { registerRunTools } from "./tools-runs.js";
-import { TeeSet, limitReply, toolCalls, type ChatTokens } from "../chat/tokens.js";
+import { TeeSet, limitReply, toolCalls } from "../chat/tokens.js";
 import type { ToolCtx } from "./util.js";
 
 /** Every tool group registers here; later tasks add their `register...` calls to this list. */
@@ -29,12 +29,12 @@ export function buildMcp(ctx: ToolCtx): McpServer {
  * Stateless streamable HTTP at /api/mcp: a fresh server + transport per request (no session to leak or expire). Under /api,
  * so the token, host and cross-site checks of app.ts apply unchanged.
  */
-export function registerMcp(app: FastifyInstance, ctx: ToolCtx, tokens?: ChatTokens): void {
+export function registerMcp(app: FastifyInstance, ctx: ToolCtx): void {
   app.route({
     method: ["GET", "POST", "DELETE"], url: "/api/mcp",
     handler: async (req, reply) => {
       if (req.method !== "POST") return reply.code(405).header("Allow", "POST").send({ error: "stateless MCP: POST only" });
-      const grant = tokens?.lookup(/^Bearer (.+)$/.exec(req.headers.authorization ?? "")?.[1]);
+      const grant = req.chatGrant;
       if (grant) {
         const n = toolCalls(req.body);
         grant.calls += n;

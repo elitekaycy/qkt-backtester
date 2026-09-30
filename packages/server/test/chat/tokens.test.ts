@@ -1,6 +1,7 @@
 // packages/server/test/chat/tokens.test.ts
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, realpathSync } from "node:fs";
+import http from "node:http";
 import os from "node:os"; import path from "node:path";
 import { createStudio } from "../../src/main.js";
 import { ChatTokens, TeeSet, toolCalls } from "../../src/chat/tokens.js";
@@ -17,15 +18,24 @@ beforeAll(async () => {
 });
 afterAll(async () => { await studio.app.close(); });
 
+const rawStatus = (p: string, headers: Record<string, string>, method = "GET") => new Promise<number>((resolve, reject) => {
+  const u = new URL(base);
+  const r = http.request({ host: u.hostname, port: u.port, path: p, method, headers }, (res) => { res.resume(); resolve(res.statusCode ?? 0); });
+  r.on("error", reject); r.end();
+});
+
 describe("per-process tokens", () => {
   it("open /api/mcp and nothing else, and stop working once revoked", async () => {
     const g = studio.tokens.issue({ maxCalls: 25, onLimit: () => undefined });
     const c = await mcpClient(base, g.token);
     expect((await c.listTools()).tools.length).toBeGreaterThan(10);
     await c.close();
-    for (const url of ["/api/info", "/api/health", "/api/chat/status", "/api/mcp/../info"]) {
-      expect((await fetch(`${base}${url}`, { headers: { Authorization: `Bearer ${g.token}` } })).status, url).toBe(401);
+    // raw paths, sent as written (fetch would normalise the ../ away)
+    for (const p of ["/api/info", "/api/health", "/api/chat/status", "/api/mcp/../info", "/api/mcp%2f..%2finfo"]) {
+      expect(await rawStatus(p, { Authorization: `Bearer ${g.token}` }), p).toBe(401);
     }
+    // a chat token is never accepted from the query string (it would dodge the call count)
+    expect(await rawStatus(`/api/mcp?token=${g.token}`, {}, "POST"), "query token").toBe(401);
     studio.tokens.revoke(g.token);
     await expect(mcpClient(base, g.token)).rejects.toThrow(/unauthorized|401/);
     expect(studio.tokens.size()).toBe(0);
