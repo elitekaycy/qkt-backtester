@@ -1,12 +1,10 @@
-import type { IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, Time, UTCTimestamp } from "lightweight-charts";
+import type { IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, Time } from "lightweight-charts";
 import type { RoundTrip } from "../api/types.js";
+import { tradeSpan } from "./barAnchor.js";
 
 type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
 export interface TradeColors { gain: string; loss: string; ink: string; surface: string }
-
-/** Snap a millisecond timestamp to the start of its bar (bars are UTC-aligned), as LWC seconds. */
-export const barTime = (ms: number, tfMs: number): UTCTimestamp => (Math.floor(ms / tfMs) * tfMs / 1000) as UTCTimestamp;
 
 /** Where a trade sits on screen, in CSS pixels of the pane. */
 export interface TradeGeo { trip: RoundTrip; x1: number; y1: number; x2: number; y2: number; left: number; right: number; top: number; bottom: number; slY?: number; tpY?: number }
@@ -23,6 +21,8 @@ const PRICE = (n: number) => (Math.abs(n) >= 1000 ? n.toFixed(2) : Math.abs(n) >
  *  - Crowded views drop the fills, then the markers, so a zoomed-out chart stays readable.
  *  - The SELECTED (or hovered) trade gets full detail: risk and reward zones, entry / stop / target lines with labels.
  * Only trades inside the visible time range are touched, so 20,000 trades stay cheap.
+ * A trade is placed on the displayed bars that hold its entry and exit (`tradeSpan`), so it lands right on merged bars
+ * and across gaps, and is clipped to the loaded data; only an open trade runs on to the data's end.
  */
 export class TradesPrimitive implements ISeriesPrimitive<Time> {
   private chart: IChartApi | null = null;
@@ -34,6 +34,8 @@ export class TradesPrimitive implements ISeriesPrimitive<Time> {
   private hoverId: number | null = null;
   private tfMs = 60_000;
   private dataEnd: number | null = null;
+  /** The series' bar times (LWC seconds, ascending), set with the bars (`setBars`). */
+  private times: readonly number[] = [];
   private colors: TradeColors = { gain: "#3987e5", loss: "#e66767", ink: "#ffffff", surface: "#1b1c20" };
   private geo: TradeGeo[] = [];
   private mode: 0 | 1 | 2 = 0;
@@ -69,17 +71,16 @@ export class TradesPrimitive implements ISeriesPrimitive<Time> {
     let lo = 0, hi = this.trips.length;
     const need = fromMs - this.maxHold;
     while (lo < hi) { const m = (lo + hi) >> 1; if (this.trips[m]!.entryTs < need) lo = m + 1; else hi = m; }
-    const endX = this.dataEnd === null ? null : ts.timeToCoordinate(barTime(this.dataEnd, this.tfMs));
     for (let i = lo; i < this.trips.length; i++) {
       const t = this.trips[i]!;
       if (t.entryTs > toMs) break;
       if ((t.exitTs ?? Number.POSITIVE_INFINITY) < fromMs) continue;
-      const x1 = ts.timeToCoordinate(barTime(t.entryTs, this.tfMs));
-      const xe = t.exitTs === null ? null : ts.timeToCoordinate(barTime(t.exitTs, this.tfMs));
+      const span = tradeSpan(this.times, this.tfMs, t, this.dataEnd);
+      if (!span) continue;
+      const x1 = ts.timeToCoordinate(span.entry), x2 = ts.timeToCoordinate(span.exit);
       const y1 = series.priceToCoordinate(t.entryPx);
       const y2 = t.exitPx === null ? y1 : series.priceToCoordinate(t.exitPx);
-      if (x1 === null || y1 === null || y2 === null) continue;
-      const x2 = t.open || xe === null ? (endX ?? Math.min(w, x1 + 40)) : xe;
+      if (x1 === null || x2 === null || y1 === null || y2 === null) continue;
       const left = Math.min(x1, x2), right = Math.max(x1, x2, x1 + 4);
       const pad = 2;
       const g: TradeGeo = { trip: t, x1, y1, x2, y2, left, right, top: Math.min(y1, y2) - pad, bottom: Math.max(y1, y2) + pad };
@@ -95,6 +96,8 @@ export class TradesPrimitive implements ISeriesPrimitive<Time> {
     this.maxHold = trips.reduce((m, t) => Math.max(m, t.holdMs ?? ((dataEndMs ?? t.entryTs) - t.entryTs)), 0);
     this.requestUpdate?.();
   }
+  /** The bar times the series now shows (LWC seconds, ascending): what trades are anchored on. */
+  setBars(times: readonly number[]): void { this.times = times; this.requestUpdate?.(); }
   setHover(id: number | null): void { if (id !== this.hoverId) { this.hoverId = id; this.requestUpdate?.(); } }
 
   /** Screen position of a trade that is currently in view (CSS px), for anchoring cards. */
