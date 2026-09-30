@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { textHash } from "@qkt-studio/core/texthash";
 import { api, withToken } from "../api/client.js";
 import { askConfirm } from "../ui/Ask.js";
-import { useChat, type ChatWire } from "../chat/state.js";
+import { shouldResync, useChat, type ChatWire } from "../chat/state.js";
 import { useStore } from "./store.js";
 
 export interface VariantInfo { id: string; label: string; base: string; runId: string | null; baseRunId: string | null; diff: string; notes: string[]; created: string }
@@ -112,6 +112,15 @@ export const useAgent = create<{
     es?.close();
     void get().refresh();
     const src = (es = new EventSource(withToken("/api/events")));
+    // The connection's own open (onopen, never a listener for a server event): the browser reconnects by itself after a
+    // drop or a studio restart, and whatever was sent meanwhile is lost, so the chat re-reads what it shows. Nothing is parsed here.
+    let connected = false;
+    src.onopen = () => {
+      const reconnect = connected;
+      connected = true;
+      if (reconnect) void get().refresh().then(() => get().forgetGone()).catch(() => undefined); // variants and proposals made meanwhile
+      if (shouldResync({ reconnect, chatLoaded: useChat.getState().status !== null })) void useChat.getState().resync();
+    };
     src.addEventListener("variant", (m) => {
       const e = JSON.parse((m as MessageEvent).data) as { variantId: string };
       void get().refresh().then(() => {
