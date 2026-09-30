@@ -6,9 +6,9 @@ import path from "node:path";
 import { createStudio } from "../src/main.js";
 import { parseDotEnv } from "../src/workspace-env.js";
 import type { ServerConfig } from "../src/config.js";
+import { haveQkt, qktBin } from "./helpers.js";
 
 const realData = path.join(os.homedir(), ".qkt", "data");
-const haveQkt = (() => { try { execSync("qkt --version", { stdio: "ignore" }); return true; } catch { return false; } })();
 const haveData = existsSync(path.join(realData, "bars", "BACKTEST", "XAUUSD", "15m", "2024-10-30.bin"));
 
 describe("parseDotEnv", () => {
@@ -32,7 +32,7 @@ describe.skipIf(!haveQkt || !haveData)("workspace .env, instruments.yaml and per
     mkdirSync(path.join(ws, "strategies"));
     writeFileSync(path.join(ws, "qkt.config.yaml"), "starting_balance: ${STUDIO_TEST_BALANCE:-10000}\n");
     writeFileSync(path.join(ws, "strategies", "a.qkt"), "STRATEGY a VERSION 1\n\nSYMBOLS\n    g = BACKTEST:XAUUSD EVERY 15m\n\nRULES\n    WHEN ema(g.close, 9) CROSSES ABOVE ema(g.close, 21)\n     AND POSITION.g = 0\n    THEN BUY g SIZING 0.1\n\n    WHEN ema(g.close, 9) CROSSES BELOW ema(g.close, 21)\n     AND POSITION.g > 0\n    THEN CLOSE g\n");
-    cfg = { workspace: ws, dataRoot: realData, defaultDataRoot: realData, qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
+    cfg = { workspace: ws, dataRoot: realData, defaultDataRoot: realData, qktBin, port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
     studio = await createStudio(cfg);
   });
   afterAll(async () => { await studio.app.close(); rmSync(ws, { recursive: true, force: true }); });

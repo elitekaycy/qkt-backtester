@@ -9,8 +9,8 @@ import { knownParsed, rememberParsed } from "./parse-cache.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
-  availableTimeframes, barBases, usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, lintAliases, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
-  parseIncomplete, parseStrategyInfo, redactConfig, relocate, runHash, tfMs, transition, uniqueStreams, warmupBarsEstimate,
+  availableTimeframes, barBases, usesIntrabarOrders, checkConfig, classifyLine, dataFingerprint, isTerminal, makeRunId, newRunJson, normalizeError, parseBuildBarsHint,
+  parseIncomplete, parseStrategyInfo, redactConfig, runHash, tfMs, transition, uniqueStreams, warmupBarsEstimate,
   type HoleDay, type RunError, type RunHashInput, type RunJson, type RunStatus, type StepId, type StepRecord, type StreamDecl, type Tier,
 } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
@@ -635,13 +635,10 @@ export class Runner {
     this.guardCancel(a);
     if (r.code !== 0) {
       const err = normalizeError(r.stderr || r.stdout, r.code);
-      if (err.kind === "unknown_indicator") { const loc = relocate(a.stratSource, err.message); if (loc) { err.line = loc.line; err.col = loc.col; } }
       err.file = a.run.strategy;
       throw new StepFailure("parse", err);
     }
     if (!already) rememberParsed(a.stratSource);
-    const lint = lintAliases(a.stratSource).filter((d) => d.severity === "error");
-    if (lint.length) { const d = lint[0]!; throw new StepFailure("parse", { kind: "unknown_alias", message: d.message, file: a.run.strategy, line: d.line, col: d.col }); }
     await this.endStep(a, "parse", "ok", already ? "syntax OK (checked while editing)" : "syntax OK");
   }
 
@@ -706,10 +703,10 @@ export class Runner {
     if (exit.code !== 0) {
       const err = normalizeError(exit.stderr, exit.code);
       const step: StepId = err.kind === "missing_data" || err.kind === "incomplete_data" ? "coverage"
-        : err.kind === "parse" || err.kind === "unknown_indicator" ? "parse"
+        : err.kind === "parse" || err.kind === "unknown_indicator" || err.kind === "unknown_alias" ? "parse"
         : err.kind === "bad_config_yaml" || err.kind === "bad_config_key" || err.kind === "missing_config" ? "config"
         : covDone ? "backtest" : "coverage";
-      if (err.kind === "unknown_indicator") { const loc = relocate(a.stratSource, err.message); if (loc) { err.line = loc.line; err.col = loc.col; } err.file = r.strategy; }
+      if (err.line !== undefined) err.file = r.strategy;
       throw new StepFailure(step, err);
     }
     if (!covDone) { await this.endStep(a, "coverage", "ok", "no coverage report from qkt"); await this.startStep(a, "backtest"); }

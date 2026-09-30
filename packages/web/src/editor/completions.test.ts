@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { localCompletions } from "./completions.js";
 import type { ScanReport } from "../api/types.js";
+import { setVocabulary } from "./vocabulary.js";
+import { parseVocabulary } from "@qkt-studio/core/vocabulary";
+import { readFileSync } from "node:fs";
+
+// the vocabulary of the qkt the studio runs, captured with `qkt dsl vocabulary --json`
+const vocab = parseVocabulary(JSON.parse(readFileSync(new URL("../../../core/test/fixtures/qkt-vocabulary.json", import.meta.url), "utf8")));
+setVocabulary(vocab);
 
 const SRC = `STRATEGY s VERSION 1
 
@@ -28,9 +35,14 @@ describe("local completions", () => {
     expect(labels(r)).toEqual(expect.arrayContaining(["close", "open", "high", "low", "volume"]));
     expect(labels(r)[0]).toBe("close");
   });
-  it("offers declared aliases after POSITION. and its members after POSITION.alias.", () => {
+  it("offers declared aliases after POSITION. and qkt's own POSITION members after POSITION.alias.", () => {
     expect(labels(at("    WHEN POSITION."))).toEqual(["gold", "btc"]);
-    expect(labels(at("    WHEN POSITION.gold."))).toEqual(expect.arrayContaining(["count", "mfe", "mae"]));
+    expect(labels(at("    WHEN POSITION.gold."))).toEqual(vocab.members.POSITION);
+  });
+  it("offers every stream and meta field the vocabulary has after `alias.`, close first", () => {
+    const l = labels(at("    WHEN gold."));
+    expect([...l].sort()).toEqual([...vocab.streamFields, ...vocab.metaFields].sort());
+    expect(l[0]).toBe("close");
   });
   it("lists the symbols found in the data source under a broker, with their span", () => {
     const r = localCompletions("SYMBOLS\n    x = BACKTEST:", 2, "    x = BACKTEST:".length + 1, scan);
@@ -42,8 +54,8 @@ describe("local completions", () => {
     expect(labels(r).slice(0, 2)).toEqual(["15m", "1h"]);
     expect(r.items.find((i) => i.label === "4h")!.detail).toMatch(/not built/);
   });
-  it("offers the actions after THEN, the aliases after BUY, SIZING forms and a bracket snippet", () => {
-    expect(labels(at("    THEN "))).toEqual(expect.arrayContaining(["BUY", "SELL", "CLOSE"]));
+  it("offers qkt's actions after THEN, the aliases after BUY, SIZING forms and a bracket snippet", () => {
+    expect(labels(at("    THEN ")).filter((l) => /^[A-Z_]+$/.test(l))).toEqual(vocab.keywordCategories.ACTION);
     expect(labels(at("    THEN BUY "))).toEqual(["gold", "btc"]);
     expect(labels(at("    THEN BUY gold SIZING "))).toEqual(expect.arrayContaining(["0.1", "0.5 PCT RISK"]));
     const b = at("    THEN BUY gold SIZING 0.1 ");
@@ -87,5 +99,21 @@ describe("portfolio completions", () => {
   it("a plain strategy file never sees portfolio completions", () => {
     const r = localCompletions("STRATEGY s VERSION 1\n\nRULES\n    RUN ", 4, 9, null, ["a.qkt"], "s.qkt");
     expect(r.items).toEqual([]);
+  });
+});
+
+describe("the studio's own context rules and snippets", () => {
+  // Names that are not DSL: sample venues and symbols, and the module's own constants.
+  const NOT_DSL = new Set(["BACKTEST", "XAUUSD", "EURUSD", "BTCUSD", "DEMOUSD", "TFS", "FIELD_DOC", "ACTION_DOC", "POSITION_DOC", "FIELD_ORDER"]);
+  it("embed no keyword the vocabulary does not have", () => {
+    for (const file of ["completions.ts", "snippets.ts"]) {
+      // code only: comments and the prose of labels and descriptions are not DSL
+      const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "")
+        .replace(/\b(label|detail|doc|filter):\s*(`[^`]*`|"(?:[^"\\]|\\.)*")/g, "");
+      const words = new Set([...src.matchAll(/\b[A-Z][A-Z_]+\b/g)].map((m) => m[0]).filter((w) => !NOT_DSL.has(w)));
+      const unknown = [...words].filter((w) => !vocab.keywords.includes(w));
+      expect(unknown, file).toEqual([]);
+    }
   });
 });

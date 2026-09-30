@@ -2,35 +2,52 @@ import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { lintAliases, normalizeError, relocate, type Diagnostic } from "@qkt-studio/core";
+import { lintAliases, locateImport, normalizeError, type Diagnostic } from "@qkt-studio/core";
 import type { ServerConfig } from "./config.js";
 import { execQkt } from "./proc.js";
 import { rememberParsed } from "./parse-cache.js";
 import { resolveInJail } from "./jail.js";
+import { qktLanguage } from "./qkt-lang.js";
+
+/** The identifier under `col` on `line` (1-based), so a position from qkt becomes a range the editor can underline. */
+function wordEnd(content: string, line: number, col: number): number {
+  const text = content.split(/\r?\n/)[line - 1] ?? "";
+  const m = /^\w+/.exec(text.slice(col - 1));
+  return col + Math.max(1, m?.[0].length ?? 0);
+}
 
 /**
  * `qkt parse` plus the studio's lint on a source string, checked as a hidden sibling of `rel` (so relative IMPORTs
  * resolve as in a run), or in /tmp. Shared by the editor's live check and every tool that writes or runs DSL.
+ * qkt reports every compile error at its own position; the studio adds the range and points a missing IMPORT (the one
+ * error qkt still reports at 1:1) at its line.
  */
 export async function checkQktSource(cfg: ServerConfig, content: string, rel?: string): Promise<{ ok: boolean; diagnostics: Diagnostic[] }> {
   const name = `.qkt-check-${randomBytes(6).toString("hex")}.qkt`;
   const dir = typeof rel === "string" && rel.endsWith(".qkt") ? await resolveInJail(cfg.workspace, rel).then((abs) => path.dirname(abs), () => null) : null;
   let tmp = dir ? path.join(dir, name) : path.join(os.tmpdir(), name);
+  const { vocabulary } = await qktLanguage(cfg.qktBin);
   try {
     try { await fs.writeFile(tmp, content, { flag: "wx" }); }
     catch { tmp = path.join(os.tmpdir(), name); await fs.writeFile(tmp, content, { flag: "wx" }); }
     const r = await execQkt(cfg.qktBin, ["parse", tmp], { cwd: cfg.workspace, timeoutMs: 20_000 });
     const diagnostics: Diagnostic[] = [];
+    let flaggedLine: number | null = null;
     if (r.code !== 0) {
       const err = normalizeError(r.stderr || r.stdout, r.code);
-      if (err.kind === "file_not_found" && err.file) err.message = `Imported file not found: ${path.relative(cfg.workspace, err.file).split(path.sep).join("/") || err.file}`;
-      let { line, col } = err;
-      let endCol = (col ?? 1) + 1;
-      if (err.kind === "unknown_indicator") { const loc = relocate(content, err.message); if (loc) { line = loc.line; col = loc.col; endCol = loc.endCol; } }
-      diagnostics.push({ severity: "error", code: err.kind, message: err.message, line: line ?? 1, col: col ?? 1, endCol });
+      let { line = 1, col = 1 } = err;
+      let endCol = wordEnd(content, line, col);
+      if (err.kind === "file_not_found" && err.file) {
+        err.message = `Imported file not found: ${path.relative(cfg.workspace, err.file).split(path.sep).join("/") || err.file}`;
+        const at = locateImport(content, err.file);
+        if (at) ({ line, col, endCol } = at);
+      }
+      flaggedLine = line;
+      diagnostics.push({ severity: "error", code: err.kind, message: err.message, line, col, endCol });
     }
     if (r.code === 0) rememberParsed(content);
-    diagnostics.push(...lintAliases(content));
+    // qkt stops at its first error; the lint reports every undeclared alias, but not the one qkt already named on that line
+    diagnostics.push(...lintAliases(content, vocabulary).filter((d) => !(d.code === "unknown_alias" && d.line === flaggedLine)));
     return { ok: !diagnostics.some((d) => d.severity === "error"), diagnostics };
   } finally {
     await fs.rm(tmp, { force: true }).catch(() => undefined);

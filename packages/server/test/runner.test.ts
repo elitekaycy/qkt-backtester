@@ -5,10 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { Runner, RunRequestError, type RunEvent } from "../src/runner.js";
 import type { ServerConfig } from "../src/config.js";
+import { haveQkt, qktBin } from "./helpers.js";
 
 // These tests drive the REAL qkt binary against the real local data store. They are skipped when either is absent.
 const dataRoot = path.join(os.homedir(), ".qkt", "data");
-const haveQkt = (() => { try { execSync("qkt --version", { stdio: "ignore" }); return true; } catch { return false; } })();
 const haveData = existsSync(path.join(dataRoot, "bars", "BACKTEST", "XAUUSD", "15m", "2024-10-30.bin"));
 const haveTicks = existsSync(path.join(dataRoot, "symbols", "XAUUSD", "2026-02-10.csv.gz"));
 const d = describe.skipIf(!haveQkt || !haveData);
@@ -32,7 +32,7 @@ const PARAMD = EMA.replace("STRATEGY xau_ema", "STRATEGY xau_p").replace("ema(go
 const CONFIG = `starting_balance: 10000\n`;
 
 let ws: string, runner: Runner;
-const cfg = (): ServerConfig => ({ workspace: ws, dataRoot, qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" });
+const cfg = (): ServerConfig => ({ workspace: ws, dataRoot, qktBin, port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" });
 const oct = { from: "2024-10-01", to: "2024-10-31", tier: "draft" as const };
 
 beforeEach(async () => {
@@ -193,16 +193,16 @@ d("failures are caught at the right step, with real positions", () => {
     expect(run.steps.find((s) => s.id === "parse")!.status).toBe("failed");
   });
 
-  it("an unknown indicator is relocated from qkt's 1:1 to the real identifier", async () => {
+  it("an unknown indicator fails the parse step at qkt's own position", async () => {
     writeFileSync(path.join(ws, "strategies", "bad.qkt"), EMA.replace("ema(gold.close, 9)", "emaa(gold.close, 9)"));
     const run = await runner.waitFor((await runner.submit({ strategy: "strategies/bad.qkt", ...oct })).runId);
     expect(run.error).toMatchObject({ kind: "unknown_indicator", line: 7, col: 10, file: "strategies/bad.qkt" });
   });
 
-  it("an unknown stream alias (which qkt silently runs with zero trades) is blocked", async () => {
+  it("an unknown stream alias is a compile error, at its position", async () => {
     writeFileSync(path.join(ws, "strategies", "bad.qkt"), EMA.replace("ema(gold.close, 9)", "ema(gld.close, 9)"));
     const run = await runner.waitFor((await runner.submit({ strategy: "strategies/bad.qkt", ...oct })).runId);
-    expect(run.error).toMatchObject({ kind: "unknown_alias", line: 7 });
+    expect(run.error).toMatchObject({ kind: "unknown_alias", line: 7, col: 14, file: "strategies/bad.qkt" });
     expect(run.steps.find((s) => s.id === "coverage")!.status).toBe("skipped");
   });
 

@@ -19,7 +19,7 @@
 
 ## Features
 
-- **Editor with qkt's own diagnostics.** Syntax highlighting from qkt's TextMate grammar, errors as you type, optional vim keybindings, undo/redo, auto-save. `qkt.config.yaml`, `instruments.yaml` and `.env` are edited in the same place.
+- **Editor with qkt's own diagnostics.** Syntax highlighting from the TextMate grammar qkt itself prints, completions from its vocabulary, errors as you type, optional vim keybindings, undo/redo, auto-save. `qkt.config.yaml`, `instruments.yaml` and `.env` are edited in the same place.
 - **Run from a button.** The window, data tier (bars or ticks) and options become a `qkt backtest` command that runs in the background. The Pipeline tab shows every step with its timing and the exact command. **Stop** kills the run and removes its partial output.
 - **A chart you can explain.** Green and red candles, one chart per timeframe, and a small box for each trade from entry to exit. Click a trade for its entry, exit, stop, target, size, risk, P&L and hold time, and step through trades one by one with the arrow keys.
 - **A trading journal.** Overview, calendar, daily and monthly P&L, trades with analysis, time and risk breakdowns, Monte Carlo, parameter grids and walk-forward. Search-driven filters with suggestions (`symbol:XAUUSD`, `side:long`, `entry:2024-10`, `exited:>=2024-10-15`, `held:<1h`, `pnl:>50`, `size:>=1`, `exit:stop`, `#12`) work in the Journal and in the chart's Trades tab and drive every chart; the charts hover, zoom and drill down.
@@ -160,8 +160,9 @@ A single-strategy run shows none of this: no extra columns, no legend, no Strate
 ## Known limits
 
 - Single-user / small-team. No accounts. One qkt version per image.
-- The LSP and `qkt parse` report **one error at a time**; unknown indicators are reported by qkt at `1:1` and relocated
-  by the studio. An unknown stream alias is silently accepted by qkt (it just never trades), so the studio blocks it.
+- The LSP and `qkt parse` report **one error at a time**, each at its own position; the studio's alias lint adds every
+  undeclared stream alias in the file. The editor's keywords, fields, members and highlighting are the ones the pinned
+  qkt reports about itself (`qkt dsl vocabulary`, `qkt editor grammar`), so an older qkt (before 0.54) does not start.
 - Terminal resize is not propagated to the shell (a pty without a native module). Sweeps use one run per grid point (max 200).
 - Tables page from memory up to 2,000,000 fills; beyond that the run is refused with a clear message.
 - `qkt fetch` needs network and broker access and was not exercised offline. Docker Desktop file-watching is not used at

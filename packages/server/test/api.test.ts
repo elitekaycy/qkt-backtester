@@ -8,9 +8,9 @@ import WebSocket from "ws";
 import { createStudio } from "../src/main.js";
 import type { ServerConfig } from "../src/config.js";
 import { tokenize, checkRestricted } from "../src/terminal.js";
+import { haveQkt, qktBin } from "./helpers.js";
 
 const realData = path.join(os.homedir(), ".qkt", "data");
-const haveQkt = (() => { try { execSync("qkt --version", { stdio: "ignore" }); return true; } catch { return false; } })();
 const haveData = existsSync(path.join(realData, "bars", "BACKTEST", "XAUUSD", "15m", "2024-10-30.bin"));
 const d = describe.skipIf(!haveQkt || !haveData);
 
@@ -48,7 +48,7 @@ beforeAll(async () => {
   writeFileSync(path.join(ws, "strategies", "xau-ema.qkt"), EMA);
   writeFileSync(path.join(ws, "strategies", "param.qkt"), PARAM);
   writeFileSync(path.join(ws, "strategies", "br.qkt"), BRACKET);
-  cfg = { workspace: ws, dataRoot: realData, qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
+  cfg = { workspace: ws, dataRoot: realData, qktBin, port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
   studio = await createStudio(cfg);
   await studio.app.listen({ port: 0, host: "127.0.0.1" });
   base = `http://127.0.0.1:${(studio.app.server.address() as { port: number }).port}`;
@@ -261,13 +261,16 @@ d("live check of unsaved buffers", () => {
     expect(d[0]).toMatchObject({ severity: "error", code: "parse" });
     expect(d[0].line).toBeGreaterThan(1);
   });
-  it("an unknown indicator is relocated from 1:1 to the identifier's range", async () => {
+  it("an unknown indicator carries qkt's own position, widened to the identifier", async () => {
     const d = (await check("qkt", EMA.replace("ema(gold.close, 9)", "emaa(gold.close, 9)"))).json().diagnostics;
     expect(d[0]).toMatchObject({ code: "unknown_indicator", line: 7, col: 10, endCol: 14 });
   });
-  it("the silent unknown-alias mistake is reported", async () => {
-    const d = (await check("qkt", EMA.replace("ema(gold.close, 9)", "ema(gld.close, 9)"))).json().diagnostics;
-    expect(d.find((x: { code: string }) => x.code === "unknown_alias")).toMatchObject({ severity: "error", line: 7 });
+  it("an unknown alias is one problem (qkt's, positioned); the lint adds the ones qkt stopped before", async () => {
+    const one = (await check("qkt", EMA.replace("ema(gold.close, 9)", "ema(gld.close, 9)"))).json().diagnostics;
+    expect(one).toHaveLength(1);
+    expect(one[0]).toMatchObject({ severity: "error", code: "unknown_alias", line: 7, col: 14, endCol: 17 });
+    const two = (await check("qkt", EMA.replace("ema(gold.close, 9)", "ema(gld.close, 9)").replace("AND POSITION.gold > 0", "AND POSITION.gold > 0 AND nope.close > 1"))).json().diagnostics;
+    expect(two.map((x: { line: number; code: string }) => [x.line, x.code])).toEqual([[7, "unknown_alias"], [12, "unknown_alias"]]);
   });
   it("checks config text: YAML errors and unknown keys", async () => {
     expect((await check("config", "starting_balance: 10000\n")).json().diagnostics).toEqual([]);
@@ -481,7 +484,7 @@ d("LSP bridge", () => {
     expect(JSON.parse(await s.wait((m) => JSON.parse(m).id === 2)).result.contents.value).toMatch(/ema\(value, period\)/);
     s.sock.close();
     await new Promise((r) => setTimeout(r, 800));
-    expect(execSync("ps -eo args | grep -F 'qkt' | grep -F ' lsp' | grep -v grep | grep -F -- \"-classpath\" | grep -F \"$(realpath ~/.local/bin/qkt | xargs dirname | xargs dirname)\" | wc -l || true").toString().trim()).toBe("0");
+    expect(execSync(`ps -eo args | grep -F 'qkt' | grep -F ' lsp' | grep -v grep | grep -F -- "-classpath" | grep -F "$(realpath "$(command -v ${qktBin})" | xargs dirname | xargs dirname)" | wc -l || true`).toString().trim()).toBe("0");
   });
 });
 

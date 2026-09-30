@@ -6,8 +6,8 @@ import { checkQktSource, checkSlots } from "./check.js";
 const MAX_BYTES = 1024 * 1024;
 
 /**
- * Live checking of an UNSAVED buffer. The LSP covers syntax as you type but not what `qkt parse` catches
- * (unknown indicators, reported at 1:1) nor the alias mistake qkt silently accepts, so this route adds both.
+ * Live checking of an UNSAVED buffer: `qkt parse` on the exact text (so a run of the same text skips its own parse)
+ * plus the studio's alias lint, which reports every undeclared alias where qkt stops at the first.
  */
 export function registerCheckRoutes(app: FastifyInstance, cfg: ServerConfig): void {
   app.post<{ Body: { kind?: "qkt" | "config"; content?: string; path?: string } }>("/api/check", async (req, reply) => {

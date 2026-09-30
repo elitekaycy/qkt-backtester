@@ -92,11 +92,11 @@ strategies may differ. Rules: every run, chart and metric carries its tier badge
   not `monaco-languageclient` (fewer moving parts; qkt LSP offers only sync/hover/completion).
   Measured **[probed]**: init 360 ms, diagnostics 1–29 ms, hover 8 ms, completion 30 ms (254 unfiltered
   items ⇒ client filters), 30 rapid edits fully diagnosed in 26 ms, RSS ≈ 92 MB.
-- **What the LSP misses [probed] and our fixes**:
+- **What the LSP misses [probed] and our fixes** (as of qkt 0.49; see §18 for what qkt 0.54 changed):
   1. Unknown indicator: only `qkt parse` reports it, at `file:1:1` ⇒ run `qkt parse` on 600 ms idle and
-     relocate the error by finding the offending identifier in the source.
+     relocate the error by finding the offending identifier in the source. *Superseded: qkt 0.54 positions it.*
   2. **Unknown stream alias produces a silent 0-trade run** ⇒ studio-side lint against declared
-     `SYMBOLS` aliases, plus a "0 trades" result warning.
+     `SYMBOLS` aliases, plus a "0 trades" result warning. *Superseded: qkt 0.54 makes it a compile error.*
   3. One parse error at a time ⇒ show it; do not pretend completeness.
 - `qkt.config.yaml` in the same editor: YAML syntax + JSON Schema written from `docs/reference/config-schema.md`
   (completion, unknown-key warnings; engine only rejects unknown `risk` keys **[probed]**), guarded by a
@@ -216,8 +216,8 @@ Optional upstream asks (never blockers): `--progress ndjson`, a flag to skip the
 | E1 | Missing explicit `--config` silently uses defaults | studio checks existence, blocks run | probed |
 | E2 | Unknown top-level config key silently accepted | JSON Schema warning | probed |
 | E3 | Bad YAML / unknown symbol → Java stack trace | normalise to `{kind,message}` | probed |
-| E4 | Unknown alias → 0-trade run, no error | alias lint + zero-trade warning | probed |
-| E5 | Unknown indicator reported at 1:1 | relocate by identifier search | probed |
+| E4 | Unknown alias → 0-trade run, no error (qkt ≤ 0.53) | qkt 0.54 reports it as a compile error at its position; the studio's lint still lists every one | probed, re-probed 2026-09-30 |
+| E5 | Unknown indicator reported at 1:1 (qkt ≤ 0.53) | qkt 0.54 positions it; relocation removed. Only a missing IMPORT stays at 1:1 (`locateImport`) | probed, re-probed 2026-09-30 |
 | E6 | Parser reports one error | show first; no false completeness | probed |
 | E7 | Bars ignore config `data_root` | set `QKT_DATA_HOME`; warn on mismatch | probed |
 | E8 | Coverage check silent 7–9 s | indeterminate "checking data" phase | probed |
@@ -281,8 +281,8 @@ Suites: core 143 tests, server 76 (real qkt + real data), web 9; browser e2e 35 
 | E1 missing config | done | runner test (never spawns qkt), lint tests |
 | E2 unknown top-level key | done | lint + `/api/check` tests |
 | E3 stack traces | done | outputs tests on real captures, runner bad-YAML test |
-| E4 unknown alias | done | lint, runner, `/api/check` tests, e2e |
-| E5 unknown indicator at 1:1 | done | relocate tests, runner test, `/api/check` test |
+| E4 unknown alias | done (qkt's error + lint) | lint, runner, `/api/check` tests, e2e |
+| E5 unknown indicator at 1:1 | gone in qkt 0.54 | runner and `/api/check` tests assert qkt's position; `locateImport` test for the IMPORT case |
 | E6 one error at a time | limit, documented | not fixable without touching qkt |
 | E7 `data_root` vs `QKT_DATA_HOME` | done | container run finds bars; mismatch warning tested |
 | E8 silent coverage phase | done (UI text), no automated UI test | screenshot review |
@@ -343,7 +343,7 @@ parent render and returned focus to the opener, so palette typing went into the 
 - **Per-symbol source/window:** `symbolPrefs`/`sources` in `.qkt-studio/settings.json`; a run with overridden symbols reads a folder of symlinks (`.qkt-studio/views/<hash>`), windows are enforced with a 400 naming the symbol.
 - **Terminal (restricted):** ls/cd/cat/head/tail/tree/pwd/echo/help builtins jailed to the workspace (`term-builtins.ts`); `clear`/Ctrl+L client side.
 - **Housekeeping:** `GET /api/runs-usage`, `POST /api/runs/prune`; DELETE removes the run folder, index row and caches.
-- **Diagnostics:** qkt reports "expected X, got 'TOKEN'" at the token that failed, usually the first token of the next line; `anchorParseError` moves the marker to the end of the unfinished line above.
+- **Diagnostics:** qkt reports "expected X, got 'TOKEN'" at the token that failed, usually the first token of the next line; `anchorParseError` moves the marker to the end of the unfinished line above (still true of qkt 0.54, re-probed 2026-09-30).
 
 ## 17. Portfolio support (2026-09-27)
 
@@ -370,3 +370,28 @@ parent render and returned focus to the opener, so palette typing went into the 
 - **Verified:** the whole existing regression set (`pnpm -r test`, `scripts/e2e.mjs`, shell-layout/editor/files-runs-terminal,
   lsp, vim-ex) still passes; a scripted browser check of a single-strategy run after this change shows no strategy
   legend, no Strategy column, and the same 8 journal nav items as before.
+
+## 18. The language comes from the qkt that runs (2026-09-30)
+
+- **Probed** on qkt 0.54.0: `qkt dsl vocabulary --json` prints one `qkt-vocabulary-v1` document (153 keywords in 14
+  categories, 61 indicators with arity/signature/doc, 18 functions, 8 constants, 11 stream fields, 6 meta fields,
+  `candle`/`tick`, the members of every pseudo-symbol, 4 shorthands); `qkt editor grammar --format textmate` prints the
+  TextMate grammar (`scopeName: source.qkt`). `qkt parse` and `qkt lsp` position every compile error
+  (`Unknown indicator: emax` at the identifier, `Unknown stream alias: gld` at the alias, `Unknown stream field for
+  gold: nope`, `Indicator ema expects 2 args, got 3`, `SIZING RISK ... requires` at the sizing, `BRACKET requires` at
+  BRACKET, `Unknown reference: BOGUS`); an undeclared alias is a compile error. Still at 1:1: a missing IMPORT (message
+  is the bare absolute path). Still on the next line's token: "expected X, got 'TOKEN'".
+- **Design:** the server reads both documents once at startup (`qkt-lang.ts`), refuses an older qkt with a message that
+  names the command, and serves them at `/api/qkt/vocabulary` and `/api/qkt/grammar` (strong ETag, `no-cache`, 304 on
+  revalidation: the URL does not change when the image's qkt does). The web app fetches both in `setupMonaco()` before
+  any editor exists; the vocabulary feeds completions (actions, POSITION members, stream and meta fields) and the
+  lint (fields; the price-scale averages for the cross-scale warning are the indicators whose doc says "moving
+  average" of a `value`), the grammar feeds Shiki. The hand-kept lists (`STREAM_FIELDS`, `ACTIONS`,
+  `POSITION_MEMBERS`, the MA-name regex, the bundled `qkt.tmLanguage.json`, `w` as a duration unit) and the 1:1
+  `relocate` logic are gone. A test scans the studio's own snippets and context rules for uppercase names and refuses
+  any the vocabulary lacks.
+- **Verification:** `packages/server/test/qkt-lang.test.ts` (both endpoints against the real binary, schema, key
+  order, categories, members, ETag/304, the old-binary refusal), `packages/core/test/vocabulary.test.ts` and the
+  lint/completions tests on `packages/core/test/fixtures/qkt-vocabulary.json` (a capture; regenerate after a qkt
+  release). The Docker image still pins the qkt by digest in `docker/Dockerfile` (`QKT_IMAGE`); it must be a 0.54+
+  build for the studio to start.

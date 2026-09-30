@@ -6,11 +6,12 @@ import { buildApp, originAllowed } from "../src/app.js";
 import { checkRestricted } from "../src/terminal.js";
 import { seedIfEmpty } from "../src/main.js";
 import type { ServerConfig } from "../src/config.js";
+import { qktBin } from "./helpers.js";
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = realpathSync(mkdtempSync(path.join(os.tmpdir(), p))); dirs.push(d); return d; };
 afterAll(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
-const cfgFor = (ws: string, extra: Partial<ServerConfig> = {}): ServerConfig => ({ workspace: ws, dataRoot: tmp("data-"), qktBin: "qkt", port: 0, host: "0.0.0.0", maxParallel: 1, terminal: "restricted", allowedHosts: [], allowedOrigins: [], ...extra });
+const cfgFor = (ws: string, extra: Partial<ServerConfig> = {}): ServerConfig => ({ workspace: ws, dataRoot: tmp("data-"), qktBin, port: 0, host: "0.0.0.0", maxParallel: 1, terminal: "restricted", allowedHosts: [], allowedOrigins: [], ...extra });
 
 describe("cross-site protection", () => {
   it("refuses a WebSocket or write from another site's page, allows the studio's own page and non-browser clients", async () => {

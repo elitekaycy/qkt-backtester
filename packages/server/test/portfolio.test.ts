@@ -1,15 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from "node:fs";
-import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createStudio } from "../src/main.js";
 import { listPortfolios, resolveStrategy } from "../src/portfolio.js";
 import { scanStore, readinessFor } from "../src/data-scan.js";
 import type { ServerConfig } from "../src/config.js";
+import { haveQkt, qktBin } from "./helpers.js";
 
 const realData = path.join(os.homedir(), ".qkt", "data");
-const haveQkt = (() => { try { execSync("qkt --version", { stdio: "ignore" }); return true; } catch { return false; } })();
 const haveData = existsSync(path.join(realData, "bars", "BACKTEST", "XAUUSD", "15m", "2024-10-30.bin")) && existsSync(path.join(realData, "bars", "BACKTEST", "BTCUSD", "15m", "2024-10-30.bin"));
 
 const child = (name: string, sym: string, tf: string, extra = "") => `STRATEGY ${name} VERSION 1
@@ -97,7 +96,7 @@ describe.skipIf(!haveQkt || !haveData)("a portfolio run through the studio (real
     ws = make();
     // 1h bars of XAUUSD are not in every store: give child b the 15m stream so the run is possible everywhere
     writeFileSync(path.join(ws, "strategies", "xau_b.qkt"), child("xau_b", "XAUUSD", "15m", "15").replace("EMA", "ema"));
-    cfg = { workspace: ws, dataRoot: realData, defaultDataRoot: realData, qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
+    cfg = { workspace: ws, dataRoot: realData, defaultDataRoot: realData, qktBin, port: 0, host: "127.0.0.1", maxParallel: 4, terminal: "restricted" };
     studio = await createStudio(cfg);
   });
   afterAll(async () => { await studio.app.close(); rmSync(ws, { recursive: true, force: true }); });

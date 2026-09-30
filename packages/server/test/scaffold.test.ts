@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync, realpathSync, readFileSync, existsSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createStudio } from "../src/main.js";
@@ -8,7 +7,6 @@ import { scanStore } from "../src/data-scan.js";
 import { instrumentsTemplate, scaffoldWorkspace, sampleStrategies } from "../src/scaffold.js";
 
 const realData = path.join(os.homedir(), ".qkt", "data");
-const haveQkt = (() => { try { execSync("qkt --version", { stdio: "ignore" }); return true; } catch { return false; } })();
 const haveData = existsSync(path.join(realData, "bars", "BACKTEST", "XAUUSD", "15m", "2024-10-30.bin"));
 
 describe("scaffold templates", () => {
@@ -35,7 +33,7 @@ describe.skipIf(!haveQkt || !haveData)("a scaffolded workspace runs out of the b
     ws = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sc2-")));
     const scan = await scanStore(realData);
     await scaffoldWorkspace(ws, scan);
-    studio = await createStudio({ workspace: ws, dataRoot: realData, defaultDataRoot: realData, qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 2, terminal: "restricted" });
+    studio = await createStudio({ workspace: ws, dataRoot: realData, defaultDataRoot: realData, qktBin, port: 0, host: "127.0.0.1", maxParallel: 2, terminal: "restricted" });
   });
   afterAll(async () => { await studio.app.close(); rmSync(ws, { recursive: true, force: true }); });
 
@@ -63,7 +61,7 @@ describe.skipIf(!haveQkt || !haveData)("a scaffolded workspace runs out of the b
 describe("scaffold endpoint defaults", () => {
   it("never creates sample strategies unless asked for by name", async () => {
     const ws = realpathSync(mkdtempSync(path.join(os.tmpdir(), "sc3-")));
-    const studio = await createStudio({ workspace: ws, dataRoot: os.tmpdir(), defaultDataRoot: os.tmpdir(), qktBin: "qkt", port: 0, host: "127.0.0.1", maxParallel: 1, terminal: "restricted" });
+    const studio = await createStudio({ workspace: ws, dataRoot: os.tmpdir(), defaultDataRoot: os.tmpdir(), qktBin, port: 0, host: "127.0.0.1", maxParallel: 1, terminal: "restricted" });
     const r = (await studio.app.inject({ method: "POST", url: "/api/workspace/scaffold", payload: {} })).json();
     expect(r.created).not.toContain("strategies/ema_cross.qkt");
     expect(existsSync(path.join(ws, "strategies"))).toBe(false);
@@ -80,6 +78,7 @@ describe("the starter config is clean", () => {
 });
 
 import { completeConfig, CONFIG_TEMPLATE } from "../src/scaffold.js";
+import { haveQkt, qktBin } from "./helpers.js";
 describe("completeConfig: the full reference around the user's own values", () => {
   it("keeps every value the user set and adds every other option", () => {
     const out = completeConfig("starting_balance: 25000\n");

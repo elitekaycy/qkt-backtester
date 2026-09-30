@@ -1,4 +1,5 @@
 import { LineCounter, parseDocument, isMap, isScalar } from "yaml";
+import { priceScaleIndicators, streamFieldSet, type QktVocabulary } from "./vocabulary.js";
 
 export interface Diagnostic {
   severity: "error" | "warning" | "info";
@@ -11,13 +12,7 @@ export interface Diagnostic {
 }
 export interface Range { line: number; col: number; endCol: number }
 
-// Mirrors ExprCompiler.CANDLE_FIELDS + META_FIELDS in qkt (a stream reference is `<alias>.<field>`).
-export const STREAM_FIELDS = new Set([
-  "close", "open", "high", "low", "volume", "price", "bid", "ask", "spread", "value", "timestamp",
-  "tick_size", "contract_size", "volume_step", "volume_min", "swap_long_points", "swap_short_points",
-]);
-
-/** Blank out string literals and `--` comments while preserving column positions. */
+/** Blank out string literals and comments (`--`, `#`, and a block comment within the line) while preserving column positions. */
 export function scrub(line: string): string {
   let out = "", i = 0;
   while (i < line.length) {
@@ -27,9 +22,14 @@ export function scrub(line: string): string {
       while (j < line.length && line[j] !== '"') j += line[j] === "\\" ? 2 : 1;
       out += " ".repeat(Math.min(j + 1, line.length) - i);
       i = Math.min(j + 1, line.length);
-    } else if (c === "-" && line[i + 1] === "-") {
+    } else if ((c === "-" && line[i + 1] === "-") || c === "#") {
       out += " ".repeat(line.length - i);
       break;
+    } else if (c === "/" && line[i + 1] === "*") {
+      const j = line.indexOf("*/", i + 2);
+      const end = j < 0 ? line.length : j + 2;
+      out += " ".repeat(end - i);
+      i = end;
     } else { out += c; i++; }
   }
   return out;
@@ -52,12 +52,16 @@ function declaredAliases(lines: string[]): Set<string> {
 }
 
 /**
- * qkt runs a strategy that references an undeclared stream alias inside a rule condition WITHOUT any error
- * (it just never trades) [probed]. Catch it while the user types.
+ * Stream aliases against the file's own SYMBOLS, with no JVM: every undeclared alias (qkt stops at the first), naming the
+ * aliases that ARE declared; POSITION.<not an alias>; and a CROSSES between two symbols' prices. The stream fields and
+ * price-scale indicators are the vocabulary's, never a list of the studio's own.
  */
-export function lintAliases(source: string): Diagnostic[] {
+export function lintAliases(source: string, vocab: QktVocabulary): Diagnostic[] {
   const lines = source.split(/\r?\n/);
   if (!lines.some((l) => /^STRATEGY\b/.test(scrub(l)))) return [];
+  const fields = streamFieldSet(vocab), averages = [...priceScaleIndicators(vocab)];
+  // `alias.close`, possibly inside a price-scale moving average: `ema(alias.close, n)`
+  const priceRef = new RegExp(`^${averages.length ? `(?:(?:${averages.join("|")})\\s*\\(\\s*)?` : ""}([a-z_]\\w*)\\.(open|high|low|close)\\b`);
   const aliases = declaredAliases(lines);
   // alias -> bare symbol, from "alias = BROKER:SYMBOL EVERY tf"
   const symbols = new Map<string, string>();
@@ -67,10 +71,10 @@ export function lintAliases(source: string): Diagnostic[] {
     const l = scrub(raw);
     const stream = /(?<![\w.])([a-z_]\w*)\.([a-z_]\w*)/g;
     for (let m = stream.exec(l); m; m = stream.exec(l)) {
-      if (aliases.has(m[1]!) || !STREAM_FIELDS.has(m[2]!)) continue;
+      if (aliases.has(m[1]!) || !fields.has(m[2]!)) continue;
       out.push({
         severity: "error", code: "unknown_alias", line: idx + 1, col: m.index + 1, endCol: m.index + 1 + m[1]!.length,
-        message: `Unknown stream alias '${m[1]}'. Declared in SYMBOLS: ${[...aliases].join(", ") || "(none)"}. qkt would run without error and never trade.`,
+        message: `Unknown stream alias '${m[1]}'. Declared in SYMBOLS: ${[...aliases].join(", ") || "(none)"}.`,
       });
     }
     // CROSSES between the prices of two different symbols (gold near 4,400 and a pair near 0.6) can never happen: the
@@ -78,8 +82,7 @@ export function lintAliases(source: string): Diagnostic[] {
     const cross = /^(.*?)\bCROSSES\s+(?:ABOVE|BELOW)\b(.*?)(?:\bAND\b|\bOR\b|$)/.exec(l);
     if (cross) {
       const priceOf = (side: string) => {
-        const t = side.replace(/^\s*(WHEN|AND|OR)\b/, "").trim();
-        const m = /^(?:(?:ema|sma|wma|hma|vwma|dema|tema|kama|smma|rma)\s*\(\s*)?([a-z_]\w*)\.(open|high|low|close)\b/.exec(t);
+        const m = priceRef.exec(side.replace(/^\s*(WHEN|AND|OR)\b/, "").trim());
         return m && aliases.has(m[1]!) ? m[1]! : null;
       };
       const a = priceOf(cross[1]!), b = priceOf(cross[2]!);
@@ -100,25 +103,17 @@ export function lintAliases(source: string): Diagnostic[] {
   return out;
 }
 
-/** qkt reports some semantic errors at 1:1. Find the identifier in the source and return its real range. */
-export function relocate(source: string, message: string): Range | null {
+/**
+ * The one error qkt still reports at 1:1: a missing IMPORT, whose message is only the file's absolute path (`qkt parse`
+ * and `qkt lsp` alike). Point at the IMPORT line that names it. Every other compile error carries its own position.
+ */
+export function locateImport(source: string, missingPath: string): Range | null {
+  const base = missingPath.split("/").pop();
+  if (!base) return null;
+  const re = new RegExp(`\\b(IMPORT\\s+'[^']*${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}')`);
   const lines = source.split(/\r?\n/);
-  let re: RegExp | null = null;
-  let m = /^Unknown indicator:\s*(\w+)/i.exec(message);
-  if (m) re = new RegExp(`(?<![\\w.])(${m[1]})\\s*\\(`);
-  else if ((m = /^Unknown stream alias:\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})(?=\\.|\\b)`);
-  else if ((m = /^Unknown (?:function|constant):\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})\\b`);
-  // qkt reports these without a position: point at the text they are about
-  else if ((m = /^Unknown stream field for (\w+):\s*(\w+)/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]}\\.${m[2]})\\b`);
-  else if ((m = /^Indicator (\w+) expects/i.exec(message))) re = new RegExp(`(?<![\\w.])(${m[1]})\\s*\\(`);
-  else if (/SIZING RISK|PCT RISK/i.test(message)) re = /\b(SIZING\s+[\w.]+\s+PCT\s+RISK)\b/;
-  else if (/BRACKET requires/i.test(message)) re = /\b(BRACKET)\b/;
-  else if ((m = /(?:^|\/|Imported file not found: )([\w.-]+\.qkt)$/.exec(message))) re = new RegExp(`\\b(IMPORT\\s+'[^']*${m[1]!.replace(/\./g, "\\.")}')`);
-  if (!re) return null;
   for (let i = 0; i < lines.length; i++) {
-    const l = scrub(lines[i]!);
-    if (/^\s*SYMBOLS\b/.test(l) || (/^\s+\w+\s*=\s*\S+:/.test(l) && !/WHEN|AND|THEN/.test(l))) continue;
-    const mm = re.exec(l);
+    const mm = re.exec(scrub(lines[i]!));
     if (mm) { const col = mm.index + 1; return { line: i + 1, col, endCol: col + mm[1]!.length }; }
   }
   return null;

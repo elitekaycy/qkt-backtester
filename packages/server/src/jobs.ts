@@ -33,7 +33,7 @@ export interface Job {
 }
 
 const NAME = /^(?!\.+$)[A-Za-z0-9_.\-]{1,40}$/;
-const TF = /^\d{1,4}[smhdw]$/;
+const TF = /^\d{1,4}[smhd]$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DUR = /^\d{1,4}d$/;
 const RANKS = ["sharpe", "calmar", "profitFactor", "totalPnL", "winRate"] as const;
