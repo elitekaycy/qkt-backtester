@@ -21,6 +21,8 @@ export interface ServerConfig {
   /** Per-symbol data preferences. Absent = use `dataRoot` and the full range found there. */
   symbolPrefs?: Record<string, SymbolPref>;
   qktBin: string;
+  /** The Claude Code CLI the chat runs (`CLAUDE_BIN`, default `claude` on PATH). */
+  claudeBin?: string;
   port: number;
   host: string;
   /** When set, /api and /ws require `Authorization: Bearer <token>` (or ?token=). */
@@ -53,6 +55,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     dataRoot: path.resolve(env.QKT_DATA_HOME ?? path.join(os.homedir(), ".qkt", "data")),
     defaultDataRoot: path.resolve(env.QKT_DATA_HOME ?? path.join(os.homedir(), ".qkt", "data")),
     qktBin: env.QKT_BIN ?? "qkt",
+    claudeBin: env.CLAUDE_BIN || "claude",
     port: Number(env.PORT ?? 8080),
     host,
     token,

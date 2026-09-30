@@ -8,6 +8,8 @@ export interface SpawnOptions {
   timeoutMs?: number;
   /** Mirror raw output to these files (created by the caller's directory). */
   logFiles?: { out: string; err: string };
+  /** Written to the child's stdin, which is then closed; without it stdin is ignored. */
+  input?: string;
   onLine?: (line: string, stream: "out" | "err") => void;
 }
 
@@ -39,7 +41,9 @@ function bounded(prev: string, chunk: string): string {
  * output line by line. Only ever signals the group it created.
  */
 export function spawnGroup(bin: string, args: string[], opts: SpawnOptions): ProcHandle {
-  const child = spawn(bin, args, { cwd: opts.cwd, env: opts.env ?? process.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(bin, args, { cwd: opts.cwd, env: opts.env ?? process.env, detached: true, stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"] });
+  // a child that exits before reading its input must not crash the studio with EPIPE
+  if (opts.input !== undefined) { child.stdin!.on("error", () => undefined); child.stdin!.end(opts.input); }
   const files: { out?: WriteStream; err?: WriteStream } = {};
   if (opts.logFiles) { files.out = createWriteStream(opts.logFiles.out); files.err = createWriteStream(opts.logFiles.err); }
 
