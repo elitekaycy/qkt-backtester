@@ -23,9 +23,9 @@ export function DockBar() {
   ];
   return (
     <div className="dock-bar">
-      <div role="tablist" aria-label="Output" style={{ display: "contents" }}>
+      <div role="tablist" aria-label="Output" className="dock-tabs">
         {tabs.map((t) => (
-          <button key={t.id} role="tab" id={`dock-tab-${t.id}`} aria-controls={`dock-panel-${t.id}`} className="dock-tab" aria-selected={ui.dockOpen && ui.dockTab === t.id} onClick={() => ui.showDock(t.id)}>{t.icon}{t.label}{t.badge}</button>
+          <button key={t.id} role="tab" id={`dock-tab-${t.id}`} aria-controls={`dock-panel-${t.id}`} className="dock-tab" aria-selected={ui.dockOpen && ui.dockTab === t.id} title={t.label} onClick={() => ui.showDock(t.id)}>{t.icon}<span className="dock-tab-label">{t.label}</span>{t.badge}</button>
         ))}
       </div>
       <span style={{ flex: 1 }} />

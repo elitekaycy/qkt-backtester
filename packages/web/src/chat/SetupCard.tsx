@@ -7,7 +7,8 @@ import { useChat } from "./state.js";
 export function SetupCard() {
   const s = useChat((x) => x.status)!;
   const [checking, setChecking] = useState(false);
-  const cmd = `docker exec -it -u ${s.uid ?? 1000} qkt-backtester claude auth login`;
+  // the sign-in must be written as the user the studio runs as; never guess a uid the server did not report
+  const cmd = `docker exec -it ${typeof s.uid === "number" ? `-u ${s.uid} ` : ""}qkt-backtester claude auth login`;
   if (!s.installed) return (
     <div className="card pad chat-setup"><b>Claude Code is not in this image</b>
       <p className="muted">The chat runs the Claude Code CLI inside the studio's container. Use the qkt-backtester image 0.3.0 or newer.</p></div>
@@ -17,6 +18,7 @@ export function SetupCard() {
       <b>Sign in to Claude Code (once)</b>
       <p>The chat runs Claude Code on your own Claude plan. Sign in with Anthropic's own flow, inside the container, from a terminal on the machine that runs it:</p>
       <pre className="mono chat-cmd">{cmd}</pre>
+      {typeof s.uid !== "number" && <p className="muted">(use -u with the uid that owns the workspace: run <code>id -u</code> in the container)</p>}
       <div className="row" style={{ gap: 6 }}>
         <button className="btn sm" onClick={() => void navigator.clipboard?.writeText(cmd)}><Copy size={14} />Copy</button>
         <button className="btn sm primary" disabled={checking} onClick={async () => { setChecking(true); await useChat.getState().loadStatus(true); setChecking(false); }}>{checking ? "Checking…" : "Check again"}</button>

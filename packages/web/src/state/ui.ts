@@ -89,9 +89,19 @@ export const useUi = create<Ui>((set, get) => ({
     if (Object.keys(patch).length) u.set(patch);
   },
   showSection(s) { const u = get(); u.set({ section: s, ...(u.maxed && u.maxed !== "sidebar" ? { maxed: null } : {}) }); },
-  showDock(tab) { get().reveal("dock"); get().set({ dockTab: tab }); },
+  showDock(tab) {
+    get().reveal("dock");
+    const vh = typeof window === "undefined" ? 1000 : window.innerHeight;
+    get().set({ dockTab: tab, ...(tab === "chat" ? { dockH: chatDockHeight(get().dockH, vh) } : {}) });
+  },
   // "Reset layout" restores panes and sizes only: editor preferences (vim, auto-save, font size) are the user's, not layout
   reset() { const { vim, autosave, fontSize } = get(); get().set({ ...DEFAULTS, vim, autosave, fontSize, journalOpen: false, maxed: null }); },
 }));
+
+/** The dock height the Chat tab opens at: a short dock grows to 420px (less in a small window: the top bar, the editor's minimum
+ *  and the status bar stay visible); a taller one is kept. */
+export function chatDockHeight(current: number, viewportH: number): number {
+  return Math.max(current, Math.min(420, viewportH - 280));
+}
 
 export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));

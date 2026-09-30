@@ -1,6 +1,8 @@
 // packages/web/src/chat/Thread.tsx
 import { AssistantRuntimeProvider, MessagePrimitive, ThreadPrimitive, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
 import { toThreadMessage } from "./convert.js";
+import { useMentionOptions } from "./Composer.js";
+import { mentionsIn } from "./mentions.js";
 import { DataPart, MarkdownText, ToolStep, UserText } from "./parts.js";
 import { useChat } from "./state.js";
 
@@ -21,10 +23,10 @@ function EmptyHint() {
 
 /** The conversation, rendered by assistant-ui's unstyled primitives; the messages come from our store (the studio's stream). */
 export function Thread() {
-  const messages = useChat((s) => s.messages), busy = useChat((s) => s.busy);
+  const messages = useChat((s) => s.messages), busy = useChat((s) => s.busy), options = useMentionOptions();
   const runtime = useExternalStoreRuntime({
     messages, isRunning: busy, convertMessage: toThreadMessage,
-    onNew: async (m: AppendMessage) => { await useChat.getState().send(textOf(m), []); },
+    onNew: async (m: AppendMessage) => { const t = textOf(m); await useChat.getState().send(t, mentionsIn(t, options)); },
     onCancel: async () => { await useChat.getState().stop(); },
   });
   return (

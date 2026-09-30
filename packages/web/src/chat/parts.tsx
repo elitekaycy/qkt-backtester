@@ -23,7 +23,7 @@ export function ToolStep({ toolName, args, result, isError, artifact }: ToolCall
         {ms !== null && <span className="muted num">· {(ms / 1000).toFixed(1)} s</span>}
       </summary>
       <pre className="mono chat-json">{JSON.stringify(args, null, 1)}</pre>
-      {done && <pre className="mono chat-json">{String(result)}</pre>}
+      {done && <pre className="mono chat-json">{typeof result === "string" ? result : JSON.stringify(result, null, 1)}</pre>}
     </details>
   );
 }

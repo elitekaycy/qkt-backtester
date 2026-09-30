@@ -1,6 +1,6 @@
 /* packages/web/src/chat/chat.css */
 .chat { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
-.chat-head { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); min-width: 0; }
+.chat-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); min-width: 0; }
 .chat-head .select { flex: 0 1 220px; min-width: 120px; }
 .chat-plan { font-size: var(--fs-xs); white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-long { margin: var(--s2) var(--s3) 0; align-items: center; }
@@ -25,6 +25,7 @@
 .chat-chips .chip.off { text-decoration: line-through; opacity: .6; }
 .chat-input { height: auto; resize: vertical; min-height: 44px; max-height: 240px; padding: var(--s2) var(--s3); font: inherit; line-height: 1.45; }
 .chat-down { margin: var(--s2) var(--s3) 0; }
+.chat-wait { font-size: var(--fs-xs); margin-top: calc(-1 * var(--s1)); }
 .chat-actions { display: flex; align-items: center; gap: var(--s2); }
 .chat-err { color: var(--loss-ink); font-size: var(--fs-xs); }
 .chat-picker { position: absolute; bottom: 100%; left: var(--s3); margin: 0; padding: 4px; list-style: none; background: var(--card-2); border: 1px solid var(--line-2); border-radius: var(--r-md); min-width: 260px; max-height: 240px; overflow: auto; z-index: 5; }

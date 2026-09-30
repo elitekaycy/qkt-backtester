@@ -20,7 +20,7 @@ const r = await mcp.callTool({ name: "try_change", arguments: { changes: [{ op: 
 ok("try_change succeeds", !r.isError, r.content?.[0]?.text?.slice(0, 200));
 await p.waitForFunction(() => /Variant: 1% \/ 2%/.test(document.body.innerText), { timeout: 60_000 }).then(() => ok("the chart switches to the variant", true), () => ok("the chart switches to the variant", false));
 await mcp.callTool({ name: "set_split", arguments: { split: { test_last: "1 weeks" } } });
-await p.waitForFunction(() => /Split: test = last 1 weeks/.test(document.body.innerText), { timeout: 10_000 }).then(() => ok("the split chip follows set_split", true), () => ok("the split chip follows set_split", false));
+await p.waitForFunction(() => /Split: test = last 1 week(?!s)/.test(document.body.innerText), { timeout: 10_000 }).then(() => ok("the split chip follows set_split", true), () => ok("the split chip follows set_split", false));
 await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Adopt")?.click()); await wait(3000);
 const text = await p.evaluate(() => window.__qktEditor?.getModel()?.getValue() ?? "");
 ok("Adopt puts the change in the editor", /STOP_LOSS BY 1 PCT/.test(text), text.slice(0, 200));

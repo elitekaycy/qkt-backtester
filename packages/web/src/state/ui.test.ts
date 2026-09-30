@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useUi } from "./ui.js";
+import { chatDockHeight, useUi } from "./ui.js";
 
 const ui = () => useUi.getState();
 beforeEach(() => ui().reset());
@@ -48,5 +48,23 @@ describe("asking for a pane leaves a maximized one", () => {
     ui().maximize("sidebar");
     ui().openJournal("trades");
     expect([ui().maxed, ui().journalOpen, ui().journalSection]).toEqual([null, true, "trades"]);
+  });
+});
+
+describe("the Chat tab needs room for a conversation", () => {
+  it("opening it raises a short dock to 420px, as far as the window allows", () => {
+    expect(chatDockHeight(260, 1000)).toBe(420);
+    expect(chatDockHeight(260, 600)).toBe(320);
+  });
+  it("never shrinks a taller dock", () => {
+    expect(chatDockHeight(500, 1000)).toBe(500);
+    expect(chatDockHeight(300, 400)).toBe(300);
+  });
+  it("showDock('chat') applies it; other tabs leave the height alone", () => {
+    ui().set({ dockH: 200 });
+    ui().showDock("pipeline");
+    expect(ui().dockH).toBe(200);
+    ui().showDock("chat");
+    expect(ui().dockH).toBe(420);
   });
 });
