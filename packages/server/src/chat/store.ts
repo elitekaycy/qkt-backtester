@@ -1,6 +1,6 @@
 // packages/server/src/chat/store.ts
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ChatMessage } from "@qkt-studio/core";
@@ -8,9 +8,10 @@ import type { ChatMessage } from "@qkt-studio/core";
 export interface ConversationRow { id: string; sessionId: string; sessionStarted: boolean; title: string; created: string; updated: string; messages: number }
 type Row = Record<string, unknown>;
 const conv = (r: Row): ConversationRow => ({ id: String(r.id), sessionId: String(r.session_id), sessionStarted: r.session_started === 1, title: String(r.title), created: String(r.created), updated: String(r.updated), messages: Number(r.messages ?? 0) });
+const parse = <T>(text: unknown, fallback: T): T => { try { return JSON.parse(String(text)) as T; } catch { return fallback; } };
 const message = (r: Row): ChatMessage => ({
   id: String(r.id), conversationId: String(r.conversation_id), role: r.role === "user" ? "user" : "assistant", text: String(r.text), model: (r.model as string | null) ?? null,
-  status: r.status as ChatMessage["status"], error: (r.error as string | null) ?? null, items: JSON.parse(String(r.items)), usage: r.usage ? JSON.parse(String(r.usage)) : null, created: String(r.created),
+  status: r.status as ChatMessage["status"], error: (r.error as string | null) ?? null, items: parse(r.items, []), usage: r.usage ? parse(r.usage, null) : null, created: String(r.created),
 });
 
 /**
@@ -18,11 +19,26 @@ const message = (r: Row): ChatMessage => ({
  * transcripts in its config directory; this is what the Chat tab shows and which session each conversation resumes.
  */
 export class ChatStore {
+  /**
+   * Open the store without ever taking the studio down: a file that is not a usable database is moved aside to
+   * `<file>.corrupt-<ms>` (with its -wal/-shm) and a fresh one is made; if that fails too, null (the chat is disabled).
+   */
+  static open(file: string): ChatStore | null {
+    try { return new ChatStore(file); }
+    catch (e) {
+      const aside = `${file}.corrupt-${Date.now()}`;
+      for (const x of ["", "-wal", "-shm"]) if (existsSync(file + x)) { try { renameSync(file + x, aside + x); } catch { /* keep going */ } }
+      console.error(`chat: ${path.basename(file)} could not be opened (${(e as Error).message}); kept as ${path.basename(aside)}, starting empty`);
+      try { return new ChatStore(file); }
+      catch (e2) { console.error(`chat: disabled, the chat store cannot be opened: ${(e2 as Error).message}`); return null; }
+    }
+  }
   private db: DatabaseSync;
   constructor(file: string) {
     mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(`
+      PRAGMA busy_timeout = 5000;
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL, session_started INTEGER NOT NULL DEFAULT 0,

@@ -1,6 +1,6 @@
 // packages/server/test/chat/store.test.ts
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import os from "node:os"; import path from "node:path";
 import type { ChatMessage } from "@qkt-studio/core";
 import { ChatStore } from "../../src/chat/store.js";
@@ -40,5 +40,17 @@ describe("ChatStore", () => {
     expect(s.conversation(c.id)).toMatchObject({ sessionId: "00000000-0000-4000-8000-000000000000", sessionStarted: false });
     expect(s.conversation("nope")).toBeUndefined();
     s.close();
+  });
+
+  it("opens over a corrupt file by moving it aside, and never throws", () => {
+    const dir = path.join(realpathSync(mkdtempSync(path.join(os.tmpdir(), "chat-"))), "chat");
+    mkdirSync(dir);
+    const file = path.join(dir, "chat.sqlite");
+    writeFileSync(file, "this is not a database, just bytes ".repeat(200));
+    const s = ChatStore.open(file);
+    expect(s).not.toBeNull();
+    expect(s!.createConversation("after").title).toBe("after");
+    expect(readdirSync(dir).some((f) => f.startsWith("chat.sqlite.corrupt-"))).toBe(true);
+    s!.close();
   });
 });
