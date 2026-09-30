@@ -74,6 +74,14 @@ if (CONTAINER) {
   execFileSync("docker", ["exec", CONTAINER, "sh", "-c", "rm -f /home/studio/.claude/fake-signed-out"]);
   await click("Check again");
   ok("Check again brings the chat back", await until(() => !!document.querySelector("textarea[aria-label=Message]"), null, 15_000));
+
+  // the studio dies mid-answer (no end event reaches the tab) and comes back: the tab resyncs when its event stream reconnects
+  await send("keep working on it");
+  ok("a message is being answered", await until(() => [...document.querySelectorAll(".chat-actions button")].some((x) => x.textContent.trim() === "Stop"), null, 15_000));
+  execFileSync("docker", ["kill", CONTAINER]);
+  execFileSync("docker", ["start", CONTAINER]);
+  ok("after the restart the message reads interrupted, without a reload", await bodyHas(/Interrupted by a studio restart/, 90_000));
+  ok("and Send is available again", await idle());
 }
 await b.close();
 console.log(failed ? `chat-ui: ${failed} failed` : "chat-ui: all passed"); process.exit(failed ? 1 : 0);
