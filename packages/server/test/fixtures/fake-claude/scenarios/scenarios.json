@@ -7,5 +7,8 @@
   { "match": "stop.*1 ?(%|percent)", "file": "try-change.jsonl" },
   { "match": "stop.*2 ?(%|percent)", "file": "stop-2pct.jsonl" },
   { "match": "split", "file": "set-split.jsonl" },
-  { "match": "propose", "file": "propose.jsonl" }
+  { "match": "propose", "file": "propose.jsonl" },
+  { "match": "compare (the )?stops", "file": "try-variants.jsonl" },
+  { "match": "sweep", "file": "sweep.jsonl" },
+  { "match": "run (the )?backtest", "file": "run-backtest.jsonl" }
 ]

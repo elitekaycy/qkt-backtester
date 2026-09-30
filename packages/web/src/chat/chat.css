@@ -34,7 +34,12 @@
 .chat-setup { margin: var(--s4); align-self: flex-start; display: flex; flex-direction: column; gap: var(--s2); max-width: 640px; font-size: var(--fs-sm); }
 .chat-setup p { margin: 0; }
 .chat-cmd { padding: var(--s2); background: var(--card-2); border-radius: var(--r-md); overflow-x: auto; }
-.chat-card { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s2) var(--s3); display: flex; flex-direction: column; gap: var(--s2); font-size: var(--fs-sm); }
+.chat-card { min-width: 0; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s2) var(--s3); display: flex; flex-direction: column; gap: var(--s2); font-size: var(--fs-sm); }
 .chat-table { border-collapse: collapse; font-size: var(--fs-xs); } .chat-table td, .chat-table th { padding: 2px 8px; text-align: right; } .chat-table td:first-child, .chat-table th:first-child { text-align: left; }
-.chat-table tr.flag td { color: var(--warn); }
+.chat-table { align-self: flex-start; } .chat-table th { font-weight: 500; color: var(--ink-3); white-space: nowrap; } .chat-table td { border-top: 1px solid var(--line); white-space: nowrap; }
+.chat-table tr.flag td { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+.chat-row-end { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.chat-card-note { margin: 0; font-size: var(--fs-xs); }
+.chat-card .diff { margin: 0; }
 .dock-chat { display: flex; flex: 1; min-height: 0; }
+.chat-run-id { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
