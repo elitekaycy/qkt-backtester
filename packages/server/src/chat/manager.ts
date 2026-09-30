@@ -134,9 +134,10 @@ export class ChatManager {
   private async run(turn: Turn, first: ChatMessage, prompt: string, model: AgentModel): Promise<void> {
     let msg = first;
     const emit = (ev: ChatEvent) => {
-      msg = foldEvent(msg, ev);
+      const seq = (msg.evSeq ?? 0) + 1;
+      msg = { ...foldEvent(msg, ev), evSeq: seq };
       this.d.store.saveMessage(msg); // every event: a tab that (re)loads the conversation mid-stream sees it all
-      this.d.events.emit({ t: "chat", conversationId: msg.conversationId, messageId: msg.id, ev });
+      this.d.events.emit({ t: "chat", conversationId: msg.conversationId, messageId: msg.id, seq, ev });
     };
     try {
       for (let attempt = 0; ; attempt++) {

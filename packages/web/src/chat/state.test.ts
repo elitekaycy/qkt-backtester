@@ -8,9 +8,19 @@ const msg = (id: string): ChatMessage => ({ id, conversationId: "c1", role: "ass
 describe("chat state helpers", () => {
   it("applies a streamed event to the open conversation; unknown message -> null (refetch); other conversation -> unchanged", () => {
     const ms = [msg("m1")];
-    expect(applyWire(ms, "c1", { conversationId: "c1", messageId: "m1", ev: { k: "text", text: "hi" } })![0]!.text).toBe("hi");
-    expect(applyWire(ms, "c1", { conversationId: "c1", messageId: "m2", ev: { k: "text", text: "hi" } })).toBeNull();
-    expect(applyWire(ms, "c1", { conversationId: "c9", messageId: "m1", ev: { k: "text", text: "hi" } })).toBe(ms);
+    expect(applyWire(ms, "c1", { conversationId: "c1", messageId: "m1", seq: 1, ev: { k: "text", text: "hi" } })![0]!.text).toBe("hi");
+    expect(applyWire(ms, "c1", { conversationId: "c1", messageId: "m2", seq: 1, ev: { k: "text", text: "hi" } })).toBeNull();
+    expect(applyWire(ms, "c1", { conversationId: "c9", messageId: "m1", seq: 1, ev: { k: "text", text: "hi" } })).toBe(ms);
+  });
+  it("is idempotent: a replayed event changes nothing, and an event the snapshot already holds is not folded twice", () => {
+    const once = applyWire([msg("m1")], "c1", { conversationId: "c1", messageId: "m1", seq: 1, ev: { k: "text", text: "hi" } })!;
+    expect(once[0]!.evSeq).toBe(1);
+    expect(applyWire(once, "c1", { conversationId: "c1", messageId: "m1", seq: 1, ev: { k: "text", text: "hi" } })).toBe(once);
+    const notice = applyWire(once, "c1", { conversationId: "c1", messageId: "m1", seq: 2, ev: { k: "notice", text: "n" } })!;
+    expect(applyWire(notice, "c1", { conversationId: "c1", messageId: "m1", seq: 2, ev: { k: "notice", text: "n" } })).toBe(notice);
+    const snapshot = [{ ...msg("m1"), text: "hi", items: [{ type: "text" as const, text: "hi" }], evSeq: 3 }];
+    expect(applyWire(snapshot, "c1", { conversationId: "c1", messageId: "m1", seq: 3, ev: { k: "text", text: "hi" } })).toBe(snapshot);
+    expect(applyWire(snapshot, "c1", { conversationId: "c1", messageId: "m1", seq: 4, ev: { k: "text", text: "!" } })![0]!.text).toBe("hi!");
   });
   it("the pipeline pops up for runs, except over an open Chat tab that is answering", () => {
     expect(shouldRevealPipeline({ dockOpen: true, dockTab: "chat", chatBusy: true })).toBe(false);

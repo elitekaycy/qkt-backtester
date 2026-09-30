@@ -1,6 +1,7 @@
 // packages/web/src/chat/state.ts
 import { create } from "zustand";
 import { foldEvent, tokensIn, type ChatEvent, type ChatMessage, type Mention, type Usage, type ViewKey } from "@qkt-studio/core/chat";
+import { useStore } from "../state/store.js";
 import { api } from "../api/client.js";
 import type { DockTab } from "../state/ui.js";
 
@@ -11,7 +12,8 @@ export interface ChatStatusInfo {
   uid: number | null; busy: { conversationId: string; messageId: string } | null; limits: { calls: number; minutes: number };
 }
 export interface ConversationInfo { id: string; title: string; updated: string; messages: number }
-export interface ChatWire { conversationId: string; messageId: string; ev: ChatEvent }
+/** `seq` is the message's event counter: an event at or below the message's `evSeq` is already in it (a snapshot fetched after it was sent). */
+export interface ChatWire { conversationId: string; messageId: string; seq: number; ev: ChatEvent }
 /** A chat this long re-reads a lot on every message: the header offers a fresh one. */
 export const LONG_CHAT = 20;
 
@@ -20,8 +22,10 @@ export function applyWire(messages: ChatMessage[], conversationId: string | null
   if (w.conversationId !== conversationId) return messages;
   const i = messages.findIndex((m) => m.id === w.messageId);
   if (i < 0) return null;
+  const cur = messages[i]!;
+  if (w.seq <= (cur.evSeq ?? 0)) return messages; // already folded: a duplicate, or covered by the snapshot
   const next = messages.slice();
-  next[i] = foldEvent(next[i]!, w.ev);
+  next[i] = { ...foldEvent(cur, w.ev), evSeq: w.seq };
   return next;
 }
 
@@ -70,19 +74,25 @@ export const useChat = create<{
     catch (e) { set({ sendError: (e as Error).message }); }
   },
   async loadConversations() { try { set({ conversations: (await api.chatConversations()).conversations }); } catch { /* the list refreshes on the next message */ } },
-  async open(id) { const r = await api.chatConversation(id); set({ conversationId: id, messages: r.messages }); },
+  async open(id) {
+    const r = await api.chatConversation(id);
+    // a snapshot fetched before events that have since been folded must not roll those back
+    const have = get().conversationId === id ? get().messages : [];
+    set({ conversationId: id, messages: r.messages.map((m) => { const cur = have.find((x) => x.id === m.id); return cur && (cur.evSeq ?? 0) > (m.evSeq ?? 0) ? cur : m; }) });
+  },
   newChat() { set({ conversationId: null, messages: [], sendError: null }); },
   async send(text, mentions) {
     set({ sendError: null });
     try {
       const r = await api.chatSend({ conversationId: get().conversationId, text, think: get().think, omit: get().omit, mentions });
       set({ busy: true, omit: [], think: false, conversationId: r.conversationId }); // Think harder and removed chips are for one message
-      await get().open(r.conversationId);
+      // the message is sent whatever happens next: a failed refetch is retried, never reported as a failed send
+      await get().open(r.conversationId).catch(() => setTimeout(() => void get().open(r.conversationId).catch(() => undefined), 1500));
       void get().loadConversations();
       return true;
     } catch (e) { set({ sendError: (e as Error).message }); return false; }
   },
-  async stop() { await api.chatStop().catch(() => undefined); },
+  async stop() { try { await api.chatStop(); } catch (e) { useStore.getState().toast("error", (e as Error).message); } },
   onEvent(w) {
     if (w.ev.k === "end") { set({ busy: false }); void get().loadConversations(); }
     else if (!get().busy) set({ busy: true }); // a message sent from another tab

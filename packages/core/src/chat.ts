@@ -18,6 +18,8 @@ export type ChatItem =
 export interface ChatMessage {
   id: string; conversationId: string; role: "user" | "assistant"; text: string; model: string | null;
   status: ChatStatus; error: string | null; items: ChatItem[]; usage: Usage | null; created: string;
+  /** Sequence number of the last streamed event folded into this message (absent = none). Events carry theirs; one at or below it is already in the message. */
+  evSeq?: number;
 }
 /** Parts of the view reference the user can leave out of one message (the chips above the message box). */
 export const VIEW_KEYS = ["file", "run", "range", "trade", "variant", "split"] as const;

@@ -28,8 +28,8 @@ function setup(o: { limits?: ChatLimits; bin?: string; statusBin?: string; ws?: 
   const bin = o.bin ?? fakeClaude;
   const store = ChatStore.open(path.join(ws, ".qkt-studio", "chat", "chat.sqlite"))!;
   const events = new EventBus(), view = new ViewState(), tokens = o.tokens ?? new ChatTokens();
-  const cancelled: string[] = [], got: ChatEvent[] = [];
-  events.subscribe((e) => { if (e.t === "chat") got.push(e.ev); });
+  const cancelled: string[] = [], got: ChatEvent[] = [], seqs: number[] = [];
+  events.subscribe((e) => { if (e.t === "chat") { got.push(e.ev); seqs.push(e.seq); } });
   const mgr = new ChatManager({ cfg: testConfig(ws, { claudeBin: bin }), store, tokens, events, view, status: new ClaudeStatusCache(o.statusBin ?? bin, ws),
     runner: { cancel: async (id) => { cancelled.push(id); return true; } }, jobs: { cancel: async () => false },
     splitText: async () => "test = last 25 %", limits: o.limits });
@@ -38,7 +38,7 @@ function setup(o: { limits?: ChatLimits; bin?: string; statusBin?: string; ws?: 
   // the MCP config files the CLI was given: each must be gone once its process has exited
   const configs = () => { const d = path.join(ws, ".qkt-studio", "chat", "run"); return existsSync(d) ? readdirSync(d) : []; };
   const children = () => (existsSync(childLog) ? readFileSync(childLog, "utf8").trim().split("\n").filter(Boolean).map(Number) : []);
-  return { ws, mgr, store, view, tokens, cancelled, got, argvs, configs, children };
+  return { ws, mgr, store, view, tokens, cancelled, got, seqs, argvs, configs, children };
 }
 const until = async (f: () => boolean, ms = 15_000) => { const end = Date.now() + ms; while (!f()) { if (Date.now() > end) throw new Error("timed out"); await new Promise((r) => setTimeout(r, 25)); } };
 const reply = (store: ChatStore, conv: string): ChatMessage => store.messages(conv).filter((m) => m.role === "assistant").at(-1)!;
@@ -59,6 +59,14 @@ describe("ChatManager", () => {
     expect(tokens.size()).toBe(0);
     expect(configs()).toEqual([]);
     expect(store.conversation(conversationId)!.sessionStarted).toBe(true);
+  });
+  it("stamps each event with a rising sequence number and the stored message carries the last one", async () => {
+    const { mgr, store, got, seqs } = setup();
+    const { conversationId } = await mgr.send({ text: "hi" });
+    await until(() => mgr.busy() === null);
+    expect(seqs).toEqual(got.map((_, i) => i + 1));
+    expect(reply(store, conversationId).evSeq).toBe(got.length);
+    expect(store.messages(conversationId)[0]!.evSeq).toBe(0);
   });
   it("starts a session on the first message and resumes it on the next; Think harder is sonnet", async () => {
     const { mgr, argvs } = setup();

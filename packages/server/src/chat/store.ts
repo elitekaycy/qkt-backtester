@@ -11,7 +11,7 @@ const conv = (r: Row): ConversationRow => ({ id: String(r.id), sessionId: String
 const parse = <T>(text: unknown, fallback: T): T => { try { return JSON.parse(String(text)) as T; } catch { return fallback; } };
 const message = (r: Row): ChatMessage => ({
   id: String(r.id), conversationId: String(r.conversation_id), role: r.role === "user" ? "user" : "assistant", text: String(r.text), model: (r.model as string | null) ?? null,
-  status: r.status as ChatMessage["status"], error: (r.error as string | null) ?? null, items: parse(r.items, []), usage: r.usage ? parse(r.usage, null) : null, created: String(r.created),
+  status: r.status as ChatMessage["status"], error: (r.error as string | null) ?? null, items: parse(r.items, []), usage: r.usage ? parse(r.usage, null) : null, created: String(r.created), evSeq: Number(r.ev_seq ?? 0),
 });
 
 /**
@@ -50,6 +50,7 @@ export class ChatStore {
       );
       CREATE INDEX IF NOT EXISTS messages_conv ON messages(conversation_id, seq);
     `);
+    if (!(this.db.prepare("PRAGMA table_info(messages)").all() as Row[]).some((c) => c.name === "ev_seq")) this.db.exec("ALTER TABLE messages ADD COLUMN ev_seq INTEGER NOT NULL DEFAULT 0");
   }
   createConversation(title: string): ConversationRow {
     const now = new Date().toISOString(), id = randomBytes(6).toString("hex");
@@ -73,8 +74,8 @@ export class ChatStore {
     this.touch(m.conversationId);
   }
   saveMessage(m: ChatMessage): void {
-    this.db.prepare("UPDATE messages SET text = ?, status = ?, error = ?, items = ?, usage = ? WHERE id = ?")
-      .run(m.text, m.status, m.error, JSON.stringify(m.items), m.usage ? JSON.stringify(m.usage) : null, m.id);
+    this.db.prepare("UPDATE messages SET text = ?, status = ?, error = ?, items = ?, usage = ?, ev_seq = ? WHERE id = ?")
+      .run(m.text, m.status, m.error, JSON.stringify(m.items), m.usage ? JSON.stringify(m.usage) : null, m.evSeq ?? 0, m.id);
     this.touch(m.conversationId);
   }
   messages(conversationId: string): ChatMessage[] {

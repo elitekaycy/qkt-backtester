@@ -6,7 +6,7 @@ export type StudioEvent =
   | { t: "split" }
   | { t: "open_file"; path: string }
   | { t: "run"; runId: string }
-  | { t: "chat"; conversationId: string; messageId: string; ev: ChatEvent };
+  | { t: "chat"; conversationId: string; messageId: string; seq: number; ev: ChatEvent };
 /** Effects of tool calls the UI must show (a variant to display, a proposal to review): one SSE stream per browser tab. */
 export class EventBus {
   private subs = new Set<(e: StudioEvent) => void>();

@@ -118,7 +118,7 @@ export const useAgent = create<{
         if (v && variantMayTakeOver({ running: st.running, runId: st.runId, showing: get().showing })) void get().show(v);
       });
     });
-    src.addEventListener("chat", (m) => useChat.getState().onEvent(JSON.parse((m as MessageEvent).data as string) as ChatWire));
+    src.addEventListener("chat", (m) => { const d = (m as MessageEvent).data; if (typeof d === "string") useChat.getState().onEvent(JSON.parse(d) as ChatWire); });
     src.addEventListener("proposal", () => void get().refresh());
     src.addEventListener("split", () => void get().refresh());
     // not "open": that is the EventSource's own connection event; the data guard stays as a second line of defence
