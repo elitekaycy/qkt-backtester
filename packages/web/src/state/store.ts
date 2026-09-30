@@ -7,6 +7,7 @@ import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJs
 import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
 import type { SymbolReport } from "../api/types.js";
+import { runCfgPatch } from "./runCfg.js";
 
 export interface OpenFile { path: string; content: string; saved: string; etag: string; conflict?: boolean }
 export interface Progress { phase: string; fills: number; orders: number; elapsedMs: number; etaMs: number | null }
@@ -123,7 +124,10 @@ interface State {
   toggleCompare(id: string): void;
   reorderFiles(from: string, to: string): void;
   setOption<K extends keyof RunOptions>(key: K, value: RunOptions[K] | undefined): void;
+  /** Put a run on screen: the one path for history, Lab, chat cards and the agent. It also sets the top bar from the run. */
   selectRun(id: string): Promise<void>;
+  /** The top bar takes the window and tier the run used (through setCfg, as a user's pick would); never starts a run. */
+  applyRunCfg(run: RunJson): void;
   loadResults(id: string): Promise<void>;
   attachRun(runId: string): void;
   refreshRuns(): Promise<void>;
@@ -496,7 +500,12 @@ export const useStore = create<State>((set, get) => ({
     const run = await api.run(id).catch(() => null);
     if (!run) { get().toast("error", "Run not found"); return; }
     set({ runId: id, run, running: false, progress: null, logs: [], selectedTrip: null });
+    get().applyRunCfg(run);
     if (run.status === "done") await get().loadResults(id);
+  },
+  applyRunCfg(run) {
+    const patch = runCfgPatch(run, get().cfg);
+    if (patch) get().setCfg(patch);
   },
   async loadResults(id) {
     try {

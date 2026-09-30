@@ -20,10 +20,11 @@ export function viewReport(s: { activePath: string | null; cursorLine: number | 
 }
 
 /** Pure: whether a run finished by an agent tool (the SSE `run` event) should take over the chart in this tab.
- *  Only when it is the strategy currently open here and no variant is being reviewed — a run of some other
- *  strategy, or one started while a variant is showing, must not yank the chart out from under the user. */
-export function shouldShowRun(a: { runStrategy: string | null; activePath: string | null; variantShowing: boolean }): boolean {
-  return !a.variantShowing && a.runStrategy !== null && a.runStrategy === a.activePath;
+ *  Only when it is the strategy currently open here, no variant is being reviewed and the tab is not following a live
+ *  run of the user's own — a run of some other strategy, or one arriving while a variant is showing or the user's run
+ *  is going, must not yank the chart (and with it the top bar's window, see selectRun) out from under the user. */
+export function shouldShowRun(a: { runStrategy: string | null; activePath: string | null; variantShowing: boolean; userRunLive?: boolean }): boolean {
+  return !a.variantShowing && !a.userRunLive && a.runStrategy !== null && a.runStrategy === a.activePath;
 }
 
 export type AdoptAction = "saveFailed" | "autoRun" | "startRun";
@@ -144,7 +145,9 @@ export const useAgent = create<{
       void useStore.getState().refreshRuns();
       if (useStore.getState().running) return; // this tab is following a live run of its own: leave it alone
       void api.run(e.runId).then((run) => {
-        if (shouldShowRun({ runStrategy: run.strategy, activePath: useStore.getState().activePath, variantShowing: !!get().showing })) void useStore.getState().selectRun(e.runId);
+        // asked again: the user may have pressed Run while the record was loading
+        const st = useStore.getState();
+        if (shouldShowRun({ runStrategy: run.strategy, activePath: st.activePath, variantShowing: !!get().showing, userRunLive: st.running })) void st.selectRun(e.runId);
       }).catch(() => undefined);
     });
     return () => { if (es === src) { src.close(); es = null; } };
@@ -159,13 +162,14 @@ export const useAgent = create<{
     set({ showing: null });
     if (v.baseRunId && (await api.run(v.baseRunId).catch(() => null))) await useStore.getState().selectRun(v.baseRunId);
   },
-  /** Show a variant's run: a finished one is selected, one still going is followed live so its results load when it ends. */
+  /** Show a variant's run: a finished one is selected, one still going is followed live so its results load when it ends.
+   *  Either way the top bar takes the run's window and tier (selectRun does it; a live one gets it here, before attaching). */
   async show(v) {
     set({ showing: v });
     if (!v.runId) return;
     const run = await api.run(v.runId).catch(() => null);
     if (get().showing?.id !== v.id) return;
-    if (run && !isTerminalStatus(run.status)) useStore.getState().attachRun(v.runId);
+    if (run && !isTerminalStatus(run.status)) { useStore.getState().applyRunCfg(run); useStore.getState().attachRun(v.runId); }
     else await useStore.getState().selectRun(v.runId);
   },
   async back() { const v = get().showing; set({ showing: null }); if (v?.baseRunId) await useStore.getState().selectRun(v.baseRunId); },
