@@ -6,6 +6,7 @@ import { api } from "../api/client.js";
 import { LspClient, toMarkers } from "./lsp.js";
 import { enableVim, languageFor, setupMonaco, themeFor, type Monaco } from "./monaco.js";
 import { fileProblems, useStore } from "../state/store.js";
+import { scheduleViewReport } from "../state/agent.js";
 import { useUi } from "../state/ui.js";
 import { cycleRegion } from "../util/regions.js";
 
@@ -93,7 +94,7 @@ export function EditorPane() {
         ed.trigger("keyboard", "hideSuggestWidget", null); ed.trigger("keyboard", "closeParameterHints", null);
         if (!useUi.getState().vim) { e.stopPropagation(); e.preventDefault(); }
       }, true);
-      ed.onDidChangeCursorPosition((e) => setCursor({ line: e.position.lineNumber, col: e.position.column }));
+      ed.onDidChangeCursorPosition((e) => { setCursor({ line: e.position.lineNumber, col: e.position.column }); scheduleViewReport(); });
       setBooted(true);
       (host.current as HTMLDivElement & { __dispose?: () => void }).__dispose = () => { vimOff.current?.(); provider.dispose(); lsp.dispose(); ed.dispose(); for (const mm of S.current?.models.values() ?? []) mm.dispose(); };
     });

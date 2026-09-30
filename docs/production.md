@@ -114,3 +114,24 @@ Every push runs the `check` workflow: unit tests, then the image itself on an em
 accuracy against an independent reimplementation, byte-for-byte determinism, what the UI displays, a whole-session
 walkthrough (create, run, edit with auto-run, ticks, a parameter grid), and keyboard and extension compatibility. The
 release workflow only publishes a commit whose image starts and passes the smoke test.
+
+## 5. The studio's tools (MCP)
+
+The studio serves its abilities as MCP tools at `/api/mcp` (same token as the rest of the API): read what you are
+looking at, the DSL reference, diagnose a run's exits, try a change on a copy and see it on the chart, propose edits to
+strategies, `qkt.config.yaml` and `instruments.yaml`, set the split, run backtests, sweeps and walk-forwards.
+
+From Claude Code on your laptop (Tailscale):
+
+```sh
+claude mcp add --transport http qkt-studio http://bot2:8080/api/mcp --header "Authorization: Bearer <STUDIO_TOKEN>"
+```
+
+Then ask, in plain English, with the studio open in the browser: "make the stop-loss 2 % and let's see". The change runs
+on a copy and appears on the chart with Adopt / Discard / Back; edits to your files appear under **Proposals** until you
+apply them. Nothing a tool does changes an existing file without your click.
+
+Each open studio tab keeps one event stream to the server (for what the tools do), plus one more while a run is
+going. Over plain HTTP (for example `http://bot2:8080`) browsers allow 6 connections per host, so with about five tabs
+of the studio open, requests in every tab start to wait. Close tabs you do not use, or serve the studio over HTTPS
+(HTTP/2) behind a proxy, where this limit does not apply.

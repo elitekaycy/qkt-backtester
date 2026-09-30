@@ -16,3 +16,7 @@ export * from "./portfolio.js";
 export * from "./stats.js";
 export * from "./rejections.js";
 export * from "./calendars.js";
+export * from "./diagnose.js";
+export * from "./dslops.js";
+export * from "./split.js";
+export * from "./texthash.js";

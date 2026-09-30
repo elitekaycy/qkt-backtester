@@ -1,6 +1,6 @@
 {
   "name": "@qkt-studio/core",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "files": ["dist"],
@@ -34,6 +34,10 @@
     "./ranges": {
       "types": "./dist/ranges.d.ts",
       "default": "./dist/ranges.js"
+    },
+    "./texthash": {
+      "types": "./dist/texthash.d.ts",
+      "default": "./dist/texthash.js"
     }
   },
   "scripts": {

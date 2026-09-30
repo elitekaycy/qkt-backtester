@@ -3,6 +3,7 @@ import { AskHost } from "../ui/Ask.js";
 import { ApiError, getToken, setToken } from "../api/client.js";
 import { DockBar, DockBody } from "../dock/Dock.js";
 import { EditorPane } from "../editor/EditorPane.js";
+import { scheduleViewReport, useAgent } from "../state/agent.js";
 const Journal = lazy(() => import("../journal/Journal.js").then((m) => ({ default: m.Journal })));
 import { PreviewPane } from "../preview/PreviewPane.js";
 import { DataSection } from "../sections/DataSection.js";
@@ -74,6 +75,16 @@ function Shell() {
   // the output panel opens by itself when a run starts or fails, so the steps are never hidden
   useEffect(() => { if (running) useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [running]);
   useEffect(() => { if (run?.status === "failed") useUi.getState().set({ dockOpen: true, dockTab: "pipeline" }); }, [run?.status]);
+
+  // the agent slice (variants, proposals, split) and the SSE stream that keeps them live; start() closes any
+  // previous stream and returns a stop function, so a StrictMode remount never leaves a duplicate stream open
+  useEffect(() => { const stop = useAgent.getState().start(); return stop; }, []);
+  // report what the user is looking at, debounced, whenever the store changes (file, run, window, selection)
+  useEffect(() => {
+    const unsub = useStore.subscribe(() => scheduleViewReport());
+    scheduleViewReport();
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => {

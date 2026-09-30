@@ -41,6 +41,13 @@ const MAX_GRID = 200;
 const LOG_KEEP = 200;
 
 const need = (cond: unknown, msg: string) => { if (!cond) throw new RunRequestError(msg); };
+
+/** Symbol/tf/date validation shared by data-job submission (Jobs.validateRange) and tool-side proposal checks. */
+export function validateBuildRange(r: { symbol?: string; tf?: string; from?: string; to?: string }): void {
+  need(r.symbol && NAME.test(r.symbol), "symbol must be a plain identifier");
+  need(r.tf && TF.test(r.tf), "tf must look like 15m, 1h, 1d");
+  need(r.from && DATE.test(r.from) && r.to && DATE.test(r.to) && Date.parse(r.from) < Date.parse(r.to), "from/to must be YYYY-MM-DD with from before to");
+}
 const quote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : JSON.stringify(s));
 
 function cartesian(axes: Record<string, string[]>): Array<Record<string, string>> {
@@ -115,9 +122,7 @@ export class Jobs {
   // ---- data jobs ----------------------------------------------------------------------------------------------
 
   private validateRange(r: { symbol?: string; tf?: string; from?: string; to?: string }): void {
-    need(r.symbol && NAME.test(r.symbol), "symbol must be a plain identifier");
-    need(r.tf && TF.test(r.tf), "tf must look like 15m, 1h, 1d");
-    need(r.from && DATE.test(r.from) && r.to && DATE.test(r.to) && Date.parse(r.from) < Date.parse(r.to), "from/to must be YYYY-MM-DD with from before to");
+    validateBuildRange(r);
   }
 
   private async cleanup(job: Job): Promise<void> {
@@ -186,7 +191,7 @@ export class Jobs {
 
   // ---- parameter grid: one full run per point (qkt sweep produces no per-scenario bundles) --------------------
 
-  async grid(req: { strategy: string; from: string; to: string; tier: Tier; params: Record<string, string[]>; rank?: (typeof RANKS)[number]; allowIncomplete?: boolean }): Promise<Job> {
+  async grid(req: { strategy: string; from: string; to: string; tier: Tier; params: Record<string, string[]>; rank?: (typeof RANKS)[number]; allowIncomplete?: boolean; source?: "user" | "tool" }): Promise<Job> {
     need(req && typeof req.strategy === "string", "strategy is required");
     const rank = req.rank ?? "sharpe";
     need(RANKS.includes(rank), `rank must be one of ${RANKS.join(", ")}`);
@@ -207,7 +212,7 @@ export class Jobs {
       await Promise.all(rows.map(async (row) => {
         try {
           if (this.cancelled.has(job.id)) { row.status = "cancelled"; return; }
-          const { runId } = await this.runner.submit({ strategy: req.strategy, from: req.from, to: req.to, tier: req.tier, params: row.params, allowIncomplete: req.allowIncomplete });
+          const { runId } = await this.runner.submit({ strategy: req.strategy, from: req.from, to: req.to, tier: req.tier, params: row.params, allowIncomplete: req.allowIncomplete, source: req.source === "tool" ? "tool" : "user" });
           row.runId = runId; row.status = "running";
           const run = await this.runner.waitFor(runId);
           row.status = run.status;
@@ -266,7 +271,7 @@ export function registerJobRoutes(app: FastifyInstance, jobs: Jobs): void {
   const accepted = (job: Job) => ({ jobId: job.id });
   app.post<{ Body: Parameters<Jobs["buildBars"]>[0] }>("/api/data/build-bars", async (req, reply) => reply.code(202).send(accepted(jobs.buildBars(req.body))));
   app.post<{ Body: Parameters<Jobs["fetch"]>[0] }>("/api/data/fetch", async (req, reply) => reply.code(202).send(accepted(jobs.fetch(req.body))));
-  app.post<{ Body: Parameters<Jobs["grid"]>[0] }>("/api/jobs/grid", async (req, reply) => reply.code(202).send(accepted(await jobs.grid(req.body))));
+  app.post<{ Body: Parameters<Jobs["grid"]>[0] }>("/api/jobs/grid", async (req, reply) => reply.code(202).send(accepted(await jobs.grid({ ...req.body, source: "user" }))));
   app.post<{ Body: Parameters<Jobs["walkForward"]>[0] }>("/api/jobs/walkforward", async (req, reply) => reply.code(202).send(accepted(await jobs.walkForward(req.body))));
   app.get("/api/jobs", async () => ({ jobs: jobs.list().map(({ log: _l, result: _r, ...j }) => j) }));
   app.get<{ Params: { id: string } }>("/api/jobs/:id", async (req, reply) => jobs.get(req.params.id) ?? reply.code(404).send({ error: "job not found" }));

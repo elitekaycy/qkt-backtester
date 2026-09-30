@@ -3,7 +3,9 @@ import { CandlestickSeries, ColorType, CrosshairMode, createChart, type IChartAp
 import { X } from "lucide-react";
 import { api, type Coverage, type RunMeta } from "../api/client.js";
 import type { RoundTrip } from "../api/types.js";
+import { SplitPrimitive } from "../charts/SplitPrimitive.js";
 import { TradesPrimitive } from "../charts/TradesPrimitive.js";
+import { useAgent } from "../state/agent.js";
 import { ordered, useChartPrefs } from "../state/chartPrefs.js";
 import { useStore } from "../state/store.js";
 import { Maximize2, Minimize2 } from "../ui/icons.js";
@@ -75,11 +77,12 @@ interface PriceChartProps {
 
 export function PriceChart({ stream, win, runId, registry, trips, tripsReady, maximized, onMax, onHide, onSelect }: PriceChartProps) {
   const plot = useRef<HTMLDivElement>(null);
-  const parts = useRef<{ chart: IChartApi; series: ISeriesApi<"Candlestick">; prim: TradesPrimitive; tfMs: number; first: number; last: number } | null>(null);
+  const parts = useRef<{ chart: IChartApi; series: ISeriesApi<"Candlestick">; prim: TradesPrimitive; splitPrim: SplitPrimitive; tfMs: number; first: number; last: number } | null>(null);
   const id = keyOf(stream);
   const selected = useStore((s) => s.selectedTrip);
   const focus = useStore((s) => s.focus);
   const theme = useStore((s) => s.theme);
+  const split = useAgent((s) => s.split);
   const [info, setInfo] = useState<{ count: number; source: number; missing: number; error?: string } | null>(null);
   const [hover, setHover] = useState<string>("");
   const [tip, setTip] = useState<{ trip: RoundTrip; x: number; y: number } | null>(null);
@@ -103,7 +106,9 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
     const series = chart.addSeries(CandlestickSeries, { upColor: up, downColor: dn, borderUpColor: up, borderDownColor: dn, wickUpColor: up, wickDownColor: dn, priceLineVisible: false, lastValueVisible: true });
     const prim = new TradesPrimitive();
     series.attachPrimitive(prim);
-    parts.current = { chart, series, prim, tfMs: 0, first: 0, last: 0 };
+    const splitPrim = new SplitPrimitive();
+    series.attachPrimitive(splitPrim);
+    parts.current = { chart, series, prim, splitPrim, tfMs: 0, first: 0, last: 0 };
     registry.charts.set(id, chart);
     (plot.current as HTMLDivElement & { __chart?: IChartApi; __prim?: TradesPrimitive }).__chart = chart;
     (plot.current as HTMLDivElement & { __prim?: TradesPrimitive }).__prim = prim;
@@ -168,6 +173,16 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
     if (!p || !p.tfMs) return;
     p.prim.set(mine, p.tfMs, selected?.id ?? null, colors(), win.to - 1, stratColor);
   }, [mine, selected?.id, ready, theme, win.to, stratColor]);
+
+  // the test part shading: where the split's cut falls in this run's trades, from the server (no re-run: same
+  // rule the split chip and the parts stats use). Re-fetched whenever the run or the split setting changes.
+  useEffect(() => {
+    const p = parts.current;
+    if (!p) return;
+    if (!runId) { p.splitPrim.setCut(null); return; }
+    void api.runParts(runId).then((r) => parts.current?.splitPrim.setCut(r.cut ? Date.parse(`${r.cut}T00:00:00Z`) : null))
+      .catch(() => parts.current?.splitPrim.setCut(null));
+  }, [runId, split?.text, ready]);
 
   useEffect(() => {
     const p = parts.current;

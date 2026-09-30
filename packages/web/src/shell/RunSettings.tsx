@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
 import { rangeDays } from "@qkt-studio/core/ranges";
-import { api } from "../api/client.js";
+import { api, type SettingsView } from "../api/client.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { addDays, daysBetween } from "../util/format.js";
 import { insideRanges } from "../util/datawindow.js";
 import { CircleAlert, CircleCheck, Database, Hammer, Zap } from "../ui/icons.js";
 
+const NO_PREFS: SettingsView["symbolPrefs"] = {};   // a stable fallback: a fresh {} per call makes the selector unequal every time
 const PRESETS: Array<[string, number]> = [["1M", 30], ["3M", 91], ["6M", 182], ["1Y", 365]];
 const EXEC = ["paper-fast", "mt5-basic", "mt5-realistic", "stress"] as const;
 
@@ -26,7 +27,7 @@ export function RunSettings() {
   const ready = readiness.find((r) => r.strategy === strategy);
   const mode = ticks ? ready?.ticks : ready?.bars;
   const submitError = useStore((s) => s.submitError);
-  const prefs = useStore((s) => s.settings?.symbolPrefs ?? {});
+  const prefs = useStore((s) => s.settings?.symbolPrefs ?? NO_PREFS);
   const limited = ready ? ready.streams.filter((x) => prefs[x.symbol]?.from || prefs[x.symbol]?.to).map((x) => x.symbol) : [];
   const outside = !!mode && mode.runnable && !!cfg.from && !!cfg.to && !insideRanges(cfg.from, cfg.to, mode.ranges);
 

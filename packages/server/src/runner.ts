@@ -34,6 +34,8 @@ export interface RunRequest {
   auto?: boolean;
   /** Extra qkt options (starting balance, position mode, seed; broker/execution/slippage for Full runs). */
   options?: RunOptions;
+  /** Who asked: the user's own runs (the default) start ahead of runs queued by the studio's tools. Not part of the run's identity. */
+  source?: "user" | "tool";
 }
 
 export class RunRequestError extends Error {
@@ -307,7 +309,12 @@ export class Runner {
         return { runId: done.id, cached: true, joined: false };
       }
       const live = this.index.findActive(hash);
-      if (live && this.active.has(live.id)) return { runId: live.id, cached: false, joined: true };
+      const joined = live ? this.active.get(live.id) : undefined;
+      if (joined) {
+        // the user now waits on this run too: it keeps the user's place in the queue
+        if ((req.source ?? "user") === "user") joined.request = { ...joined.request, source: "user" };
+        return { runId: joined.run.id, cached: false, joined: true };
+      }
     }
 
     if (req.auto) for (const a of this.active.values()) if (a.run.strategy === stratRel && a.request.auto) void this.cancel(a.run.id);
@@ -459,7 +466,9 @@ export class Runner {
 
   private async pump(): Promise<void> {
     while (this.running < this.cfg.maxParallel && this.queue.length) {
-      const a = this.queue.shift()!;
+      // the user's own runs go first; tool runs keep their order behind them
+      const u = this.queue.findIndex((q) => (q.request.source ?? "user") === "user");
+      const a = this.queue.splice(u >= 0 ? u : 0, 1)[0]!;
       this.running++;
       void this.execute(a)
         .catch((e) => console.error(`run ${a.run.id}: ${(e as Error).stack ?? e}`))
@@ -593,6 +602,8 @@ export class Runner {
   }
 
   activeIds(): string[] { return [...this.active.keys()]; }
+  /** Queued or running (not yet finished). */
+  isActive(id: string): boolean { return this.active.has(id); }
 
   private async stepProject(a: Active): Promise<void> {
     await this.startStep(a, "project");

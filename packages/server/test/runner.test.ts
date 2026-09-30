@@ -323,6 +323,20 @@ dt("cancel and supersede (Full tier is slow enough to interrupt)", () => {
     expect((await runner.waitFor(a.runId)).status).toBe("done");
   }, 120_000);
 
+  it("the user's own queued run starts ahead of runs queued by tools", async () => {
+    const tight = new Runner({ ...cfg(), maxParallel: 1 });
+    await tight.init();
+    const a = await tight.submit({ strategy: "strategies/xau-ema.qkt", ...oct, source: "tool" });   // takes the only slot
+    const b = await tight.submit({ strategy: "strategies/xau-ema.qkt", from: "2024-09-02", to: "2024-09-30", tier: "draft", source: "tool" });
+    const c = await tight.submit({ strategy: "strategies/xau-ema.qkt", from: "2024-10-01", to: "2024-10-15", tier: "draft" });   // the user's, submitted last
+    const [rb, rc] = [await tight.waitFor(b.runId), await tight.waitFor(c.runId)];
+    await tight.waitFor(a.runId);
+    const began = (r: typeof rb) => Date.parse(r.steps.find((x) => x.startedAt)!.startedAt!);
+    expect([rb.status, rc.status]).toEqual(["done", "done"]);
+    expect(began(rc)).toBeLessThan(began(rb));
+    await tight.close();
+  }, 120_000);
+
   it("cancelling a queued run never starts it", async () => {
     const tight = new Runner({ ...cfg(), maxParallel: 1 });
     await tight.init();

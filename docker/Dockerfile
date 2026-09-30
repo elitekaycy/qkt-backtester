@@ -44,6 +44,7 @@ USER root
 COPY --from=nodebin /usr/local/bin/node /usr/local/bin/node
 COPY --from=nodebin /usr/bin/tini /usr/bin/tini
 COPY --from=build /out/server /app/server
+COPY packages/server/assets /app/server/assets
 COPY --from=build /src/packages/web/dist /app/web
 COPY tools /app/tools
 COPY docker/entrypoint.sh /usr/local/bin/studio-entrypoint

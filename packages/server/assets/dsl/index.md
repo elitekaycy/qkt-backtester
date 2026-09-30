@@ -1,0 +1,228 @@
+# DSL reference
+
+The qkt strategy language, explained one construct at a time. Each page covers a single concept — what it does, every variant the parser accepts, examples for each, and what it pairs with.
+
+If you want the one-page cheat sheet, see [DSL grammar (one-pager)](../dsl-grammar.md). If you want to learn it properly, start at the top of this page and work down.
+
+## Structure of a strategy file
+
+<div class="grid cards" markdown>
+
+- :material-file-document-outline:{ .lg .middle } **The STRATEGY block**
+
+    ---
+
+    The outer envelope: `STRATEGY name VERSION n`, the SYMBOLS / RULES sections, what's required and what's optional.
+
+    [:octicons-arrow-right-24: STRATEGY block](strategy-block.md)
+
+- :material-chart-line:{ .lg .middle } **Streams: SYMBOLS**
+
+    ---
+
+    Declaring which markets your strategy listens to. Broker prefixes, symbols, timeframes, multiple streams.
+
+    [:octicons-arrow-right-24: Streams](streams.md)
+
+- :material-chart-timeline-variant:{ .lg .middle } **Synthetic series**
+
+    ---
+
+    Read-only engine state as candle streams, starting with account equity for indicator-based meta-risk filters.
+
+    [:octicons-arrow-right-24: Synthetic series](series.md)
+
+- :material-variable:{ .lg .middle } **LET and DEFAULTS**
+
+    ---
+
+    Naming values so you can reuse them. The two ways: `LET` (per-strategy aliases) and `DEFAULTS` (action defaults).
+
+    [:octicons-arrow-right-24: LET / DEFAULTS](let-defaults.md)
+
+</div>
+
+## Conditions — when to act
+
+<div class="grid cards" markdown>
+
+- :material-arrow-decision:{ .lg .middle } **The WHEN clause**
+
+    ---
+
+    The "if" half of every rule. Edge-triggered vs level-triggered, combining conditions with AND/OR/NOT.
+
+    [:octicons-arrow-right-24: WHEN](conditions.md)
+
+- :material-function-variant:{ .lg .middle } **Indicators**
+
+    ---
+
+    Every indicator the parser knows — ema, sma, rsi, atr, vwap, macd, bollinger, donchian (highest/lowest), and the math helpers.
+
+    [:octicons-arrow-right-24: Indicators](indicators.md)
+
+- :material-calculator-variant:{ .lg .middle } **Expressions**
+
+    ---
+
+    Arithmetic, comparisons, account references (`account.equity`), position references (`POSITION.stream`).
+
+    [:octicons-arrow-right-24: Expressions](expressions.md)
+
+- :material-timeline-check:{ .lg .middle } **SEQUENCE**
+
+    ---
+
+    Ordered multi-stage setups with per-stage timeouts, snapshots, and a one-pass completion edge.
+
+    [:octicons-arrow-right-24: SEQUENCE](sequence.md)
+
+</div>
+
+## Actions — what to do
+
+<div class="grid cards" markdown>
+
+- :material-cash-multiple:{ .lg .middle } **BUY / SELL / CLOSE / CANCEL / LOG**
+
+    ---
+
+    The action verbs. What each does, what they accept, how to combine them.
+
+    [:octicons-arrow-right-24: Actions](actions.md)
+
+- :material-resize:{ .lg .middle } **SIZING**
+
+    ---
+
+    Every way to size a position: fixed lots, percent of equity, fixed USD, risk-based, full-position close.
+
+    [:octicons-arrow-right-24: SIZING](sizing.md)
+
+- :material-bracket-arrow-down:{ .lg .middle } **BRACKET**
+
+    ---
+
+    Atomic stop-loss + take-profit groups. Fixed prices, percent offsets, ATR-based, scale-out targets.
+
+    [:octicons-arrow-right-24: BRACKET](bracket.md)
+
+- :material-stairs-up:{ .lg .middle } **STACK pyramiding**
+
+    ---
+
+    Layered entries — one signal becomes N price-triggered orders. Time fences, custom per-layer sizing.
+
+    [:octicons-arrow-right-24: STACK](stack.md)
+
+- :material-stairs:{ .lg .middle } **STACK_AT conditional stacks**
+
+    ---
+
+    Fire independent micro-trades when the primary leg's MFE crosses thresholds within time windows. Each stack tracks as its own leg with its own bracket.
+
+    [:octicons-arrow-right-24: STACK_AT](stack-at.md)
+
+- :material-content-duplicate:{ .lg .middle } **TIMES repeated entries**
+
+    ---
+
+    Emit one entry N times in a single evaluation, each its own ticket and bracket. The count is an expression, so it can follow conviction, volatility, or the account balance.
+
+    [:octicons-arrow-right-24: TIMES](times.md)
+
+- :material-call-split:{ .lg .middle } **OTO one-triggers-other**
+
+    ---
+
+    Place child orders only when a parent fills (`ON_FILL`). Children can be a different symbol, the opposite side, and priced relative to the parent fill via `entry` — legged hedges, scale-ins, reversals.
+
+    [:octicons-arrow-right-24: OTO](oto.md)
+
+</div>
+
+## Looping and composition
+
+<div class="grid cards" markdown>
+
+- :material-repeat-variant:{ .lg .middle } **FOR EACH**
+
+    ---
+
+    Apply the same rule body to multiple streams. AST-level expansion at compile time.
+
+    [:octicons-arrow-right-24: FOR EACH](foreach.md)
+
+- :material-folder-multiple-outline:{ .lg .middle } **PORTFOLIO files**
+
+    ---
+
+    Composing N strategies into a portfolio with regime-gated activation. `IMPORT`, `RUN`, `HOLD`.
+
+    [:octicons-arrow-right-24: PORTFOLIO](portfolio.md)
+
+- :material-basket-outline:{ .lg .middle } **BASKET synthetic instruments**
+
+    ---
+
+    Bind several streams into one tradeable pseudo-stream. An equal-weight log-return index you can read, and BUY/SELL/CLOSE that fan out to one equal-notional order per constituent.
+
+    [:octicons-arrow-right-24: BASKET](basket.md)
+
+</div>
+
+## How qkt parses your strategy
+
+When you run `qkt parse strategy.qkt`, the compiler walks the file in this order:
+
+1. **Header** — `STRATEGY name VERSION n` or `PORTFOLIO ...`
+2. **DEFAULTS** (optional) — captures default values for all later actions
+3. **SYMBOLS** — declares every stream the strategy listens to
+4. **PARAM** (optional) — numeric strategy inputs and overrides
+5. **LET** (optional) — name-bound expressions for reuse
+6. **SCHEDULE** (optional) — clock-driven actions
+7. **SEQUENCE** (optional) — ordered setup state machines
+8. **RULES** — pairs of `WHEN <condition> THEN <action>`
+9. **FOR EACH** (optional, end of file) — macro expansion that emits additional rules
+
+Errors are line/column tagged. A typo in `WHEN` or a missing `THEN` produces a clear error pointing to the line, not a cryptic stack trace.
+
+## Quick legal/illegal
+
+```qkt
+-- legal: minimum valid strategy
+STRATEGY hello VERSION 1
+SYMBOLS
+    btc = BACKTEST:BTCUSDT EVERY 1m
+RULES
+    WHEN btc.close > 0
+    THEN LOG "tick received"
+```
+
+<!-- qkt-doc: illegal -->
+```qkt
+-- illegal: SYMBOLS must come before RULES
+STRATEGY hello VERSION 1
+RULES
+    WHEN btc.close > 0 THEN BUY btc
+SYMBOLS
+    btc = BACKTEST:BTCUSDT EVERY 1m
+-- parse error: SYMBOLS must come before RULES (line 5)
+```
+
+<!-- qkt-doc: illegal -->
+```qkt
+-- illegal: missing VERSION
+STRATEGY hello
+SYMBOLS ...
+-- parse error: expected VERSION, got 'SYMBOLS' (line 2)
+```
+
+The parser is strict by design. A strategy file that compiles is one where the engine knows exactly what to do — there's no "interpret loosely and hope" mode.
+
+## See also
+
+- [Examples](../../examples/index.md) — every DSL feature used in a real strategy
+- [Recipes](../../how-to/index.md) — task-oriented walkthroughs
+- [CLI commands](../cli-commands.md) — `qkt parse`, `qkt backtest`, etc.

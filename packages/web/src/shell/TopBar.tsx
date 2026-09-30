@@ -6,6 +6,7 @@ import { Menu, Popover, type MenuEntry } from "../ui/Popover.js";
 import { Tip } from "../ui/Tip.js";
 import { addDays, daysBetween, fmtDur } from "../util/format.js";
 import { Square, CalendarDays, ChevronDown, RefreshCw, ChevronRight, CircleAlert, CircleCheck, Layers, OctagonX, Play, Search, SlidersHorizontal, TriangleAlert, Zap, Database } from "../ui/icons.js";
+import { ProposalsButton } from "./Proposals.js";
 import { RunSettings } from "./RunSettings.js";
 
 const fmtChip = (iso: string) => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -123,6 +124,7 @@ export function TopBar() {
       {approx && <Tip label="This strategy uses stops, targets or brackets. Bars approximate their fills; verify on ticks." side="bottom"><span className="badge warn hide-md"><TriangleAlert size={12} />stops on bars ≈</span></Tip>}
 
       <span className="sep" />
+      <ProposalsButton />
       <RunControls openSettings={() => ui.set({ runSettings: true })} />
       <Tip label="Search commands and files" kbd="Ctrl+K" side="bottom">
         <button className="btn ghost icon" aria-label="Command palette" onClick={() => ui.set({ palette: true })}><Search size={16} /></button>
