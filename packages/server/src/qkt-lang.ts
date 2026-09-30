@@ -19,6 +19,17 @@ export interface QktLanguage {
 
 const cache = new Map<string, Promise<QktLanguage>>();
 
+/**
+ * Tests without a qkt binary hand the studio a stand-in language (the committed vocabulary fixture) so the routes that
+ * never run DSL still boot. The production entry point never calls this: an unusable binary is refused at startup.
+ */
+export function provideQktLanguageForTests(qktBin: string, vocabularyDoc: unknown): void {
+  const vocabularyJson = JSON.stringify(vocabularyDoc);
+  const grammarJson = JSON.stringify({ scopeName: "source.qkt", patterns: [] });
+  const etag = `"${createHash("sha256").update(vocabularyJson).update(grammarJson).digest("hex").slice(0, 32)}"`;
+  cache.set(qktBin, Promise.resolve({ vocabulary: parseVocabulary(vocabularyDoc), vocabularyJson, grammarJson, etag }));
+}
+
 /** The language of `qktBin`, loaded on first use. A binary without these commands fails with a message that says so. */
 export function qktLanguage(qktBin: string): Promise<QktLanguage> {
   let p = cache.get(qktBin);
