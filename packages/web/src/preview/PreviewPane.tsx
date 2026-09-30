@@ -7,6 +7,17 @@ import { PaneControls } from "../ui/PaneControls.js";
 import { ChartsBody } from "./Charts.js";
 import { SplitChip } from "./SplitChip.js";
 import { VariantBar } from "./VariantBar.js";
+import { onceGate, useNotice } from "../ui/notify.js";
+import { askConfirm } from "../ui/Ask.js";
+import { AUTO_SKIPPED_TOAST, autoSkippedNotice, REJECTIONS_TOAST, rejectionDetail, rejectionNotice } from "./runNotices.js";
+
+/** Runs whose rejections were already announced: reopening one, or a remount, stays quiet. */
+const rejectionsShown = onceGate();
+
+/** The rejection toast's "Show": every reason with an example, and the way to the settings that cause most of them. */
+async function showRejections(title: string, detail: string) {
+  if (await askConfirm({ title, message: detail, confirmLabel: "Open qkt.config.yaml" })) void useStore.getState().openFile("qkt.config.yaml");
+}
 
 /** `d`: the change against the previous run of this strategy, with `better` saying whether it went the good way. */
 function Kpi({ l, v, s, tone, d, onClick }: { l: string; v: string; s?: string; tone?: "gain" | "loss"; d?: { text: string; better: boolean | null } | null; onClick(): void }) {
@@ -30,6 +41,10 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
   const open = (sec: "overview" | "trades" | "monthly" = "overview") => ui.openJournal(sec);
   const prev = useStore((st) => st.previous)?.summary ?? null;
   const autoSkipped = useStore((st) => st.autoSkipped);
+  // news about the run is a toast, not a banner above the chart: once per skipped save, once per run with rejections
+  useNotice(AUTO_SKIPPED_TOAST, autoSkippedNotice(autoSkipped));
+  const rejected = rejectionNotice({ runId: results?.runId, rejections: meta?.rejections, fills: s ? s.fills : null, stale });
+  useNotice(REJECTIONS_TOAST, rejected && { ...rejected, action: { label: "Show", onClick: () => void showRejections(rejected.text, rejectionDetail(meta?.rejections)) } }, rejectionsShown);
   // change since the previous run of this strategy: the answer to "did my edit help?"
   const delta = (cur: number | null, was: number | null | undefined, fmt: (x: number) => string, higherIsBetter: boolean) => {
     if (!prev || stale || cur === null || was === null || was === undefined || !Number.isFinite(cur) || !Number.isFinite(was)) return null;
@@ -70,19 +85,6 @@ export function PreviewPane({ maxed, onMax }: { maxed: boolean; onMax(): void })
         </span></div>
       )}
       {s?.blown && !stale && <div className="banner bad rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>The account went below zero in this run</b> (max drawdown {fmtPct(s.maxDrawdown, 0)}): it lost more than the starting balance, so Sharpe, Sortino and Calmar mean nothing here and are not shown. Trade a smaller size or raise the starting balance.</span></div>}
-      {autoSkipped && <div className="banner warn rejections" role="status"><TriangleAlert size={14} aria-hidden="true" /><span><b>{autoSkipped}</b>. The results below are from the last version that ran; saving a fix runs it again.</span></div>}
-      {meta?.rejections && meta.rejections.count > 0 && !stale && (() => {
-        const rj = meta.rejections, top = rj.reasons[0]!, all = s ? s.fills === 0 : false;
-        return (
-          <div className="banner warn rejections" role="status" title={rj.reasons.map((x) => `${x.count.toLocaleString()} × ${x.example}`).join("\n")}>
-            <TriangleAlert size={14} aria-hidden="true" />
-            <span><b>qkt rejected {rj.count.toLocaleString()} order{rj.count === 1 ? "" : "s"}{all ? ", so this run made no trades" : ""}</b>
-              {" "}· {rj.reasons.slice(0, 2).map((x) => `${x.count.toLocaleString()} × ${x.label}`).join(", ")}{rj.reasons.length > 2 ? ", …" : ""}
-              {top.hint && <span className="ink2">. {top.hint}</span>}
-              {" "}<button className="link" onClick={() => void useStore.getState().openFile("qkt.config.yaml")}>Open qkt.config.yaml</button></span>
-          </div>
-        );
-      })()}
       <ChartsBody onOpenJournal={() => open()} />
       <span hidden>{run?.id}</span>
     </section>

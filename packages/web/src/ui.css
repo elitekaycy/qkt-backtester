@@ -108,6 +108,3 @@ body.resizing.v { cursor: col-resize; } body.resizing.h { cursor: row-resize; }
 .banner.warn { border-color: color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 9%, transparent); }
 .banner.bad { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 9%, transparent); }
 .banner.info { border-color: color-mix(in srgb, var(--info) 40%, transparent); background: var(--accent-soft); }
-.toasts { position: fixed; right: var(--s4); bottom: calc(var(--status-h) + var(--s3)); display: flex; flex-direction: column; gap: var(--s2); z-index: var(--z-toast); max-width: 420px; }
-.toast { padding: var(--s3) var(--s4); border-radius: var(--r-md); background: var(--card-3); border: 1px solid var(--line-2); border-left: 3px solid var(--info); box-shadow: var(--shadow-2); animation: popin var(--t-med) var(--ease); cursor: pointer; }
-.toast.error { border-left-color: var(--danger); } .toast.ok { border-left-color: var(--ok); }

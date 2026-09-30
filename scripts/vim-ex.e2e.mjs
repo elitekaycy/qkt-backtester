@@ -9,7 +9,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await p.evaluateOnNewDocument(() => { localStorage.clear(); localStorage.setItem("qkt-studio-ui-v3", JSON.stringify({ vim: true, autosave: false })); });
 await p.goto(process.env.BASE ?? "http://127.0.0.1:8099/"); await sleep(3500);
 const FILE = process.env.FILE;
-const toasts = () => p.evaluate(() => [...document.querySelectorAll(".toast")].map((t) => t.textContent));
+const toasts = () => p.evaluate(() => [...document.querySelectorAll("[data-sonner-toast]")].map((t) => t.textContent));
 const ex = async (cmd) => { await p.keyboard.press("Escape"); await p.keyboard.down("Shift"); await p.keyboard.press("Semicolon"); await p.keyboard.up("Shift"); await p.keyboard.type(cmd); await p.keyboard.press("Enter"); await sleep(600); };
 await p.click(".monaco-editor .view-lines");
 await p.keyboard.press("Escape"); await p.keyboard.press("G"); await p.keyboard.press("o"); await p.keyboard.type("-- EXTEST"); await p.keyboard.press("Escape"); await sleep(200);

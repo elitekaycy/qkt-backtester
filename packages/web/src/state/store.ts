@@ -8,11 +8,13 @@ import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
 import type { SymbolReport } from "../api/types.js";
 import { runCfgPatch } from "./runCfg.js";
+import { notify } from "../ui/notify.js";
 
 export interface OpenFile { path: string; content: string; saved: string; etag: string; conflict?: boolean }
 export interface Progress { phase: string; fills: number; orders: number; elapsedMs: number; etaMs: number | null }
 export interface Results { runId: string; summary: Summary; integrity: IntegrityReport; monthly: MonthRow[]; equity: Equity; meta: RunMeta; strategy: string }
-export interface Toast { id: number; kind: "info" | "error" | "ok"; text: string }
+/** The store's toast kinds; `toast()` hands them to ui/notify, the one place notifications go through. */
+export type ToastKind = "info" | "error" | "ok";
 export type DiagSource = "lsp" | "check" | "run" | "config";
 
 export interface RunConfig { tier: Tier; from: string; to: string; autoRun: boolean; paramsByStrategy: Record<string, Record<string, string>>; options: RunOptions; allowIncomplete: boolean }
@@ -31,12 +33,10 @@ let closeEvents: (() => void) | null = null;
 /** A run being submitted: the server has not answered with its id yet. Stop sets `stop`, and the run is cancelled the moment the id arrives. */
 let launching: { stop: boolean } | null = null;
 let autoTimer: ReturnType<typeof setTimeout> | null = null;
-let toastSeq = 1;
 
 interface State {
   info: Info | null;
   theme: "dark" | "light";
-  toasts: Toast[];
 
   tree: Record<string, TreeEntry[]>;
   expanded: Record<string, boolean>;
@@ -89,8 +89,7 @@ interface State {
   problems: Record<string, Partial<Record<DiagSource, Diagnostic[]>>>;
 
   init(): Promise<void>;
-  toast(kind: Toast["kind"], text: string): void;
-  dismissToast(id: number): void;
+  toast(kind: ToastKind, text: string): void;
   setTheme(t: "dark" | "light"): void;
 
   refreshTree(path?: string): Promise<void>;
@@ -145,7 +144,6 @@ const prefs = loadPrefs();
 export const useStore = create<State>((set, get) => ({
   info: null,
   theme: prefs.theme === "light" ? "light" : "dark",
-  toasts: [],
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
   cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun !== false, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
   settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
@@ -173,12 +171,7 @@ export const useStore = create<State>((set, get) => ({
     void get().refreshData();
   },
 
-  toast(kind, text) {
-    const id = toastSeq++;
-    set((s) => ({ toasts: [...s.toasts.slice(-4), { id, kind, text }] }));
-    setTimeout(() => get().dismissToast(id), kind === "error" ? 9000 : 4000);
-  },
-  dismissToast(id) { set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })); },
+  toast(kind, text) { notify[kind](text); },
   setTheme(t) {
     document.documentElement.dataset.theme = t;
     set({ theme: t });

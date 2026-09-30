@@ -6,9 +6,13 @@ import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { DASH, fmtDur, fmtR, fmtMoney, fmtNum, fmtPrice, fmtTs, glyph } from "../util/format.js";
 import { ArrowUpRight } from "../ui/icons.js";
+import { notify, useNotice } from "../ui/notify.js";
 import { strategyColor } from "../util/strategyColor.js";
 import { useAnalytics } from "./useAnalytics.js";
 import { SignedBars, Widget } from "./widgets.js";
+
+/** The id of the one "cannot load trades" toast: a repeat failure updates it rather than stacking. */
+const TRADES_TOAST = "trades-load";
 
 const ROW = 34, PAGE = 200, OVERSCAN = 6;
 type SortKey = NonNullable<TripQuery["sort"]>;
@@ -49,7 +53,7 @@ export function TradesTable() {
   const template = useMemo(() => cols.map((c) => c.w).join(" "), [cols]);
   const ui = useUi();
   const [sort, setSort] = useState<SortKey>("entryTs"), [dir, setDir] = useState<"asc" | "desc">("desc");
-  const [total, setTotal] = useState(0), [, tick] = useState(0), [err, setErr] = useState<string | null>(null);
+  const [total, setTotal] = useState(0), [, tick] = useState(0), [err, setErr] = useState<string | null>(null), [attempt, setAttempt] = useState(0);
   const cache = useRef(new Map<number, RoundTrip[]>()), inflight = useRef(new Set<number>()), gen = useRef(0);
   const scroller = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ top: 0, h: 360 });
@@ -62,7 +66,10 @@ export function TradesTable() {
     api.trades(runId, { ...filters, sort, dir, offset: p * PAGE, limit: PAGE }).then((r) => { if (g !== gen.current) return; cache.current.set(p, r.rows); setTotal(r.total); setErr(null); tick((n) => n + 1); })
       .catch((e: Error) => g === gen.current && setErr(e.message)).finally(() => inflight.current.delete(p));
   };
-  useEffect(() => { gen.current++; cache.current.clear(); inflight.current.clear(); setTotal(0); if (scroller.current) scroller.current.scrollTop = 0; setView((v) => ({ ...v, top: 0 })); load(0); }, [runId, fkey, sort, dir]);
+  useEffect(() => { gen.current++; cache.current.clear(); inflight.current.clear(); setTotal(0); if (scroller.current) scroller.current.scrollTop = 0; setView((v) => ({ ...v, top: 0 })); load(0); }, [runId, fkey, sort, dir, attempt]);
+  // a failed page load is a toast with Retry (one toast, updated in place), not a banner inside the table
+  useNotice(TRADES_TOAST, err ? { key: `trades:${err}`, kind: "error", text: "Cannot load trades", description: err, action: { label: "Retry", onClick: () => { setErr(null); setAttempt((n) => n + 1); } } } : null);
+  useEffect(() => () => notify.dismiss(TRADES_TOAST), []);
   useEffect(() => { const el = scroller.current; if (!el) return; const ro = new ResizeObserver(() => setView((v) => ({ ...v, h: el.clientHeight }))); ro.observe(el); return () => ro.disconnect(); }, []);
   const first = Math.max(0, Math.floor(view.top / ROW) - OVERSCAN), last = Math.min(Math.max(total - 1, 0), Math.ceil((view.top + view.h) / ROW) + OVERSCAN);
   useEffect(() => { for (let p = Math.floor(first / PAGE); p <= Math.floor(last / PAGE); p++) load(p); }, [first, last, total]);
@@ -86,7 +93,7 @@ export function TradesTable() {
         ))}
       </div>
       <div ref={scroller} onScroll={(e) => setView({ top: e.currentTarget.scrollTop, h: e.currentTarget.clientHeight })} style={{ overflow: "auto", height: 420, position: "relative" }}>
-        {err && <div className="banner bad">{err}</div>}
+        {err && total === 0 && <div className="empty">Trades could not be loaded.</div>}
         {total === 0 && !err && <div className="empty">No trades match these filters.</div>}
         <div style={{ height: total * ROW, position: "relative" }}>
           {rows.map(([i, t]) => (
