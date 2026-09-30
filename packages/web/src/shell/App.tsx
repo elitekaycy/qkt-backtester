@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AskHost } from "../ui/Ask.js";
+import { NotifyHost } from "../ui/NotifyHost.js";
 import { ApiError, getToken, setToken } from "../api/client.js";
 import { DockBar, DockBody } from "../dock/Dock.js";
 import { EditorPane } from "../editor/EditorPane.js";
@@ -22,8 +23,8 @@ import { TopBar } from "./TopBar.js";
 import { shouldRevealPipeline, useChat } from "../chat/state.js";
 
 function Toasts() {
-  const toasts = useStore((s) => s.toasts);
-  return <div className="toasts" role="status" aria-live="polite">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`} onClick={() => useStore.getState().dismissToast(t.id)}>{t.text}</div>)}</div>;
+  const theme = useStore((s) => s.theme);
+  return <NotifyHost theme={theme} />;
 }
 
 /** Run started / finished / failed, for screen readers: the visual progress text updates too often to be a live region. */

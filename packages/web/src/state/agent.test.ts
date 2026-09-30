@@ -25,6 +25,9 @@ describe("shouldShowRun", () => {
   it("ignores a run when nothing is open", () => {
     expect(shouldShowRun({ runStrategy: "strategies/ema.qkt", activePath: null, variantShowing: false })).toBe(false);
   });
+  it("never takes over while the user's own run is going (it would also move their window)", () => {
+    expect(shouldShowRun({ runStrategy: "strategies/ema.qkt", activePath: "strategies/ema.qkt", variantShowing: false, userRunLive: true })).toBe(false);
+  });
 });
 
 describe("decideAdoptAction", () => {

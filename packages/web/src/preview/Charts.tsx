@@ -148,6 +148,7 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
       const data = new Array(cols.ts.length);
       for (let i = 0; i < cols.ts.length; i++) data[i] = { time: (cols.ts[i]! / 1000) as UTCTimestamp, open: cols.open[i], high: cols.high[i], low: cols.low[i], close: cols.close[i] };
       parts.current.series.setData(data);
+      parts.current.prim.setBars(Array.from(cols.ts, (t) => t / 1000));
       parts.current.tfMs = cols.tfMs;
       parts.current.first = cols.ts[0] ?? win.from; parts.current.last = cols.ts[cols.ts.length - 1] ?? win.to;
       setInfo({ count: cols.ts.length, source: sourceCount, missing: missingDays });

@@ -68,7 +68,7 @@ const runMeta = await api(`/api/runs/${runId}/derived/meta`);
 const blownText = await p.evaluate(() => [...document.querySelectorAll(".banner.rejections")].map((b) => b.textContent).join(" "));
 if (s.blown) has("blown account is announced", blownText, "The account went below zero");
 else ok("no blown banner for a solvent account", !blownText.includes("went below zero"), blownText);
-const rjText = await p.evaluate(() => [...document.querySelectorAll(".banner.rejections")].map((b) => b.textContent).find((t) => t.startsWith("qkt rejected")) ?? "");
+const rjText = await p.evaluate(() => [...document.querySelectorAll("[data-sonner-toast], .banner.rejections")].map((b) => b.textContent).map((t) => (t ?? "").slice((t ?? "").indexOf("qkt rejected"))).find((t) => t.startsWith("qkt rejected")) ?? "");
 if (runMeta.rejections?.count) has("rejections banner shows qkt's count", rjText, `qkt rejected ${runMeta.rejections.count.toLocaleString("en-US")} order`);
 else ok("no rejections banner when qkt rejected nothing", rjText === "", rjText);
 ok("run records its account currency", typeof runMeta.currency === "string" && /^[A-Z]{3}$/.test(runMeta.currency), JSON.stringify(runMeta.currency));

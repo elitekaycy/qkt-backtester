@@ -21,7 +21,23 @@ ok("try_change succeeds", !r.isError, r.content?.[0]?.text?.slice(0, 200));
 await p.waitForFunction(() => /Variant: 1% \/ 2%/.test(document.body.innerText), { timeout: 60_000 }).then(() => ok("the chart switches to the variant", true), () => ok("the chart switches to the variant", false));
 await mcp.callTool({ name: "set_split", arguments: { split: { test_last: "1 weeks" } } });
 await p.waitForFunction(() => /Split: test = last 1 week(?!s)/.test(document.body.innerText), { timeout: 10_000 }).then(() => ok("the split chip follows set_split", true), () => ok("the split chip follows set_split", false));
-await p.evaluate(() => [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Adopt")?.click()); await wait(3000);
+// the variant bar's Diff shows the variant against the base's current text in the editor area; Adopt from its header
+const clickIn = (sel, label) => p.evaluate((sel, label) => { const x = [...document.querySelectorAll(`${sel} button`)].find((x) => x.textContent.trim() === label); x?.click(); return !!x; }, sel, label);
+ok("the variant bar has a Diff toggle", await clickIn(".variant-bar", "Diff"));
+await p.waitForFunction(() => (window.__qktDiff?.getLineChanges()?.length ?? 0) > 0, { timeout: 10_000 }).catch(() => undefined);
+const d = await p.evaluate(() => {
+  const ed = window.__qktDiff, mod = ed?.getModifiedEditor().getModel(), orig = ed?.getOriginalEditor().getModel();
+  const added = (ed?.getLineChanges() ?? []).filter((c) => c.modifiedEndLineNumber > 0).flatMap((c) => Array.from({ length: c.modifiedEndLineNumber - c.modifiedStartLineNumber + 1 }, (_, i) => mod.getLineContent(c.modifiedStartLineNumber + i)));
+  return { added, orig: orig?.getValue() ?? "", head: document.querySelector(".variant-diff-head")?.innerText ?? "", editorHidden: getComputedStyle(document.getElementById("editor")).display === "none" };
+});
+ok("the diff shows the BRACKET line added", d.added.some((l) => /BRACKET \{ STOP_LOSS BY 1 PCT, TAKE_PROFIT BY 2 PCT \}/.test(l)) && !/BRACKET/.test(d.orig), JSON.stringify(d.added));
+ok("... under a header naming the base and the variant", /ema_cross\.qkt ← 1% \/ 2%/.test(d.head) && /\+1/.test(d.head), d.head);
+ok("... in place of the editor", d.editorHidden);
+await clickIn(".variant-bar", "Diff"); await wait(300);
+ok("Diff again goes back to the editor", await p.evaluate(() => !document.querySelector(".variant-diff")));
+await clickIn(".variant-bar", "Diff"); await p.waitForSelector(".variant-diff-head", { timeout: 5000 }).catch(() => undefined);
+ok("the diff header has Adopt", await clickIn(".variant-diff-head", "Adopt")); await wait(3000);
+ok("Adopt closes the diff", await p.evaluate(() => !document.querySelector(".variant-diff") && getComputedStyle(document.getElementById("editor")).display !== "none"));
 const text = await p.evaluate(() => window.__qktEditor?.getModel()?.getValue() ?? "");
 ok("Adopt puts the change in the editor", /STOP_LOSS BY 1 PCT/.test(text), text.slice(0, 200));
 await p.evaluate(() => window.__qktEditor.trigger("e2e", "undo", null)); await wait(300);

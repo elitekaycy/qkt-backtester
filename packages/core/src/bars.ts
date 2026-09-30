@@ -138,28 +138,48 @@ export function tfToMs(tf: string): number {
   return Number(m[1]) * UNIT_MS[m[2]!]!;
 }
 
-/**
- * Reduce to at most `maxBars` by merging consecutive bars into OHLCV buckets (first open, max high,
- * min low, last close, summed volume). Bucket start = first bar's start, so times stay real bar times.
- */
-export function lodAggregate(b: BarCols, maxBars: number): BarCols {
-  const n = b.ts.length;
-  if (n <= maxBars || maxBars < 1) return b;
-  const step = Math.ceil(n / maxBars);
-  const m = Math.ceil(n / step);
-  const out = emptyBars(b.tfMs * step);
-  out.ts = new Float64Array(m); out.open = new Float64Array(m); out.high = new Float64Array(m);
-  out.low = new Float64Array(m); out.close = new Float64Array(m); out.volume = new Float64Array(m);
-  for (let j = 0; j < m; j++) {
-    const s = j * step, e = Math.min(n, s + step) - 1;
-    let hi = -Infinity, lo = Infinity, vol = 0;
-    for (let i = s; i <= e; i++) { hi = Math.max(hi, b.high[i]!); lo = Math.min(lo, b.low[i]!); vol += b.volume[i]!; }
-    out.ts[j] = b.ts[s]!; out.open[j] = b.open[s]!; out.high[j] = hi; out.low[j] = lo; out.close[j] = b.close[e]!; out.volume[j] = vol;
-  }
-  return out;
+const MIN_MS = 60_000;
+/** Familiar chart timeframes, tried first when merging bars for display so a merged candle is one a trader recognises. */
+const NICE_MS = [1, 2, 3, 5, 10, 15, 20, 30, 60, 120, 180, 240, 360, 480, 720, 1440].map((m) => m * MIN_MS);
+
+/** Number of buckets of `bucketMs` (on the UTC grid from the epoch) that sorted times `ts` fall into. */
+function bucketCount(ts: Float64Array, bucketMs: number): number {
+  let n = 0, prev = Number.NaN;
+  for (let i = 0; i < ts.length; i++) { const k = Math.floor(ts[i]! / bucketMs); if (k !== prev) { n++; prev = k; } }
+  return n;
 }
 
-/** Aggregate bars into a coarser timeframe on UTC-aligned boundaries (used only when a real store tf is absent). */
+/**
+ * The merged timeframe for showing `b` in at most `maxBars` bars: a whole multiple of `b.tfMs`, preferring the familiar
+ * timeframes (1h, 4h, 1d...) and then whole days, else the smallest multiple that fits. Gaps in the data only mean
+ * fewer buckets, so the first candidate that fits is taken; at worst one bucket spans the data.
+ */
+export function lodBucketMs(b: BarCols, maxBars: number): number {
+  const tf = b.tfMs, n = b.ts.length;
+  if (n <= maxBars || maxBars < 1 || tf <= 0) return tf;
+  const minMs = Math.ceil(n / maxBars) * tf; // fewer bars per bucket than this can never fit
+  for (const ms of NICE_MS) if (ms >= minMs && ms % tf === 0 && bucketCount(b.ts, ms) <= maxBars) return ms;
+  const unit = DAY_MS % tf === 0 ? DAY_MS : tf; // whole days when the base tf divides a day, else multiples of the base
+  const span = b.ts[n - 1]! - b.ts[0]! + tf;
+  for (let k = Math.ceil(minMs / unit); ; ) {
+    const ms = unit * k;
+    if (bucketCount(b.ts, ms) <= maxBars) return ms;
+    k = ms < span ? k + 1 : k * 2; // past the span only a grid boundary inside the data is left to escape
+  }
+}
+
+/**
+ * Reduce to at most `maxBars` by merging bars into OHLCV buckets (first open, max high, min low, last close, summed
+ * volume) on regular UTC clock boundaries: bucket start = floor(ts / bucketMs) * bucketMs, like qkt's own aggregated
+ * bars. So a merged bar is a real candle (a merged "1h" bar starts at :00), and the bar holding any time is found by
+ * flooring it, whatever gaps the data has (a gap only means fewer buckets). The result's `tfMs` is the bucket size.
+ */
+export function lodAggregate(b: BarCols, maxBars: number): BarCols {
+  const bucket = lodBucketMs(b, maxBars);
+  return bucket === b.tfMs ? b : resampleTo(b, bucket);
+}
+
+/** Aggregate bars into a coarser timeframe on UTC-aligned boundaries (a tf the store lacks, and lodAggregate's display merge). */
 export function resampleTo(b: BarCols, tfMs: number): BarCols {
   if (b.tfMs === tfMs || !b.ts.length) return b;
   const rows: number[][] = [];

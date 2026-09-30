@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import { api, type PartStats } from "../api/client.js";
 import { actOnProposal, DiffView } from "../shell/Proposals.js";
-import { useAgent, variantSide, type VariantInfo } from "../state/agent.js";
+import { adoptVariant, discardVariant, useAgent, variantSide, type VariantInfo } from "../state/agent.js";
+import { useDiffView } from "../state/diffView.js";
 import { useStore } from "../state/store.js";
 import { fmtMoney, polarity } from "../util/format.js";
 import { overfitFlags, parseResult } from "./results.js";
@@ -33,15 +34,16 @@ function useParts(runIds: Array<string | undefined>): Array<Parts | null> {
   return parts;
 }
 
-/** Adopt / Discard / Show for one variant; `compact` (a row of the comparison table) keeps the buttons short and quiet. */
+/** Adopt / Discard / View diff / Show for one variant; `compact` (a row of the comparison table) keeps the buttons short and quiet. */
 function VariantButtons({ v, compact = false }: { v: VariantInfo | undefined; compact?: boolean }) {
   const showing = useAgent((s) => s.showing);
   // gone from the list: discarded, dropped past the kept-variants cap, or its run was stopped
   if (!v) return <span className="muted">no longer kept</span>;
   return (
     <span className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
-      <button className={`btn sm${compact ? "" : " primary"}`} aria-label={`Adopt ${v.label}`} onClick={() => void useAgent.getState().adopt(v.id).catch(toastError)}>Adopt</button>
-      <button className={`btn sm${compact ? " ghost" : ""}`} aria-label={`Discard ${v.label}`} onClick={() => void useAgent.getState().discard(v.id).catch(toastError)}>Discard</button>
+      <button className={`btn sm${compact ? "" : " primary"}`} aria-label={`Adopt ${v.label}`} onClick={() => adoptVariant(v.id)}>Adopt</button>
+      <button className={`btn sm${compact ? " ghost" : ""}`} aria-label={`Discard ${v.label}`} onClick={() => discardVariant(v.id)}>Discard</button>
+      <button className="btn sm ghost" title="Show what it changes, in the editor" aria-label={`View the diff of ${v.label}`} onClick={() => void useDiffView.getState().open(v).catch(toastError)}>{compact ? "Diff" : "View diff"}</button>
       {showing?.id === v.id
         ? compact && <span className="muted">on the chart</span>
         : <button className="btn sm ghost" title="Show on the chart" aria-label={`Show ${v.label} on the chart`} onClick={() => void useAgent.getState().show(v)}>{compact ? "Show" : "Show on the chart"}</button>}
