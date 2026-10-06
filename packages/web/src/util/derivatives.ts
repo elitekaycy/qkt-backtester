@@ -1,6 +1,6 @@
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { contextFromCatalog, fieldAllowed, kindOf, tierProblem, type CostBridge, type InstrumentKind, type KindContext, type MarginDay, type RollRow, type StructureRow } from "@qkt-studio/core";
-import type { InstrumentsInfo } from "../api/client.js";
+import { contextFromCatalog, fieldAllowed, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
+import type { DerivFetchKind, DerivFetchReq, InstrumentsInfo } from "../api/client.js";
 
 /** What the browser needs of `GET /api/instruments` to tell a future from a CFD: the same context the server's gate uses. */
 export function kindContextFrom(info: InstrumentsInfo | null): KindContext {
@@ -70,6 +70,11 @@ export function effectiveTier(requested: "draft" | "full", streams: ReadonlyArra
   return { tier: requested, note: null };
 }
 
+/** True when any stream is a future, perpetual or option: those fill on qkt's exchange simulator, whatever the broker model says. */
+export function hasDerivativeStreams(source: string, ctx: KindContext): boolean {
+  return [...streamKinds(source, ctx).values()].some((k) => k !== "cfd" && k !== "hub" && k !== "analytic");
+}
+
 /** True when a strategy trades a perpetual, the only case the Funding option means anything. */
 export function streamsPerpetual(source: string, ctx: KindContext): boolean {
   return [...streamKinds(source, ctx).values()].includes("perpetual");
@@ -114,3 +119,86 @@ export function rollSummary(rolls: readonly RollRow[]): Array<{ stream: string; 
 }
 
 export const legText = (l: StructureRow["legs"][number]): string => `${l.side === "BUY" ? "Buy" : "Sell"} ${l.quantity} ${l.symbol.split(":").pop()} @ ${l.entry}`;
+
+// ---- the fix a blocked stream names ----------------------------------------------------------------------------------
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const KIND_FLAG: Array<[string, DerivFetchKind]> = [["--catalog", "catalog"], ["--rolls", "rolls"], ["--funding", "funding"], ["--open-interest", "open-interest"], ["--marks", "marks"], ["--chains", "chains"], ["--tape", "tape"], ["--liquidations", "liquidations"], ["--depth", "depth"]];
+
+/**
+ * The job a `qkt fetch ...` command line stands for, or null when it is not one the studio can run as written (a placeholder
+ * such as `<from>` is still in it, or it is not a fetch). The readiness check names the exact command; the studio runs that
+ * very command only when it can be run without guessing, so Copy is always there and Run only sometimes.
+ */
+export function fetchRequestFrom(command: string): DerivFetchReq | null {
+  const t = command.trim().split(/\s+/);
+  if (t[0] !== "qkt" || t[1] !== "fetch" || !t[2] || t[2].startsWith("--")) return null;
+  const flag = (name: string) => { const i = t.indexOf(name); return i >= 0 ? t[i + 1] : undefined; };
+  const kind = KIND_FLAG.find(([f]) => t.includes(f))?.[1] ?? (t.includes("--tf") ? "bars" : null);
+  if (!kind) return null;
+  const req: DerivFetchReq = { target: t[2], kind };
+  const tf = flag("--tf"), from = flag("--from"), to = flag("--to");
+  if (tf) req.tf = tf;
+  if (from) { if (!DATE.test(from)) return null; req.from = from; }
+  if (to) { if (!DATE.test(to)) return null; req.to = to; }
+  if (t.includes("--live")) req.live = true;
+  const needsRange = kind === "funding" || kind === "open-interest" || kind === "marks" || kind === "tape" || kind === "liquidations" || kind === "depth" || kind === "bars" || (kind === "chains" && !req.live);
+  if (needsRange && (!req.from || !req.to)) return null;
+  if ((kind === "marks" || kind === "bars") && !req.tf) return null;
+  return req;
+}
+
+/** The `qkt fetch ...` commands written in backticks inside a scan note. */
+export const commandsIn = (note: string): string[] => [...note.matchAll(/`(qkt fetch [^`]+)`/g)].map((m) => m[1]!);
+
+/** What a job does, for its label in the Jobs list and on its button. */
+export function fetchLabel(r: DerivFetchReq): string {
+  const what: Record<DerivFetchKind, string> = { catalog: "contract catalog", rolls: "rolls", funding: "funding", marks: "marks", "open-interest": "open interest", chains: "option chains", tape: "trade tape", liquidations: "liquidations", depth: "order-book depth", bars: `${r.tf ?? ""} bars` };
+  return `Fetch ${what[r.kind]} · ${r.target}`;
+}
+
+// ---- roots in the Data section ---------------------------------------------------------------------------------------
+
+const yr = (iso: string | null | undefined) => iso?.slice(0, 4) ?? "";
+const span = (a: string | null | undefined, b: string | null | undefined) => (!a ? "" : yr(a) === yr(b) ? yr(a) : `${yr(a)}–${yr(b).slice(2)}`);
+
+export interface RootLine { key: string; title: string; facts: string[]; attention: string | null; status: "ok" | "warn" | "bad" }
+
+/** One line per futures root, the way a symbol gets one: what is there at a glance, and the first thing that needs doing. */
+export function futureRootLine(r: FutureRootReport): RootLine {
+  const facts: string[] = [];
+  if (r.catalog) facts.push(`${r.catalog.contracts} contract${r.catalog.contracts === 1 ? "" : "s"}`, span(r.catalog.first, r.catalog.last));
+  if (r.rolls) facts.push(`${r.rolls.count} roll${r.rolls.count === 1 ? "" : "s"}`);
+  if (r.perpetual) facts.push(`perpetual ${r.perpetual.name}`, r.perpetual.funding ? "funding" : "no funding stored");
+  const built = r.contracts.filter((c) => c.bars.some((b) => b.files > 0)).length;
+  if (r.contracts.length && !r.perpetual) facts.push(`${built} with bars`);
+  const hasData = built > 0 || (r.perpetual?.bars.some((b) => b.files > 0) ?? false);
+  const attention = r.notes[0] ?? (hasData ? null : "no bars stored for any contract");
+  return { key: r.key, title: r.root, facts: facts.filter(Boolean), attention, status: !hasData && !r.catalog ? "bad" : attention ? "warn" : "ok" };
+}
+
+export function optionRootLine(r: OptionRootReport): RootLine {
+  const facts: string[] = [];
+  if (r.catalog) facts.push(`${r.catalog.contracts} contract${r.catalog.contracts === 1 ? "" : "s"}`);
+  if (r.chains.trade) facts.push(`trade chains ${span(r.chains.trade.first, r.chains.trade.last)}`);
+  if (r.chains.book) facts.push(`book chains ${span(r.chains.book.first, r.chains.book.last)}`);
+  if (!r.chains.trade && !r.chains.book) facts.push("no chains stored");
+  const attention = r.notes[0] ?? (!r.chains.trade && !r.chains.book ? "no chain history stored" : null);
+  return { key: r.key, title: r.root, facts: facts.filter(Boolean), attention, status: !r.catalog && !r.chains.trade && !r.chains.book ? "bad" : attention ? "warn" : "ok" };
+}
+
+/** The `VENUE:ROOT` key of the root a stream reads, or null when the store has none for it (a CFD, or a root it does not know yet). */
+export function rootKeyFor(s: { broker: string; symbol: string }, d: DerivativesReport | undefined): string | null {
+  if (!d) return null;
+  const hit = [...d.futures, ...d.options].find((r) => readsRoot(s, { venue: r.venue, root: r.root, contracts: "contracts" in r ? r.contracts : undefined, perpetual: "perpetual" in r ? r.perpetual : undefined }));
+  return hit?.key ?? null;
+}
+
+/** Whether a stream reads a root: the root itself (`@front`, a perpetual), one of its contracts, or its option chain. */
+export function readsRoot(s: { broker: string; symbol: string }, root: { venue: string; root: string; contracts?: ReadonlyArray<{ symbol: string }>; perpetual?: { name: string } | null }): boolean {
+  const b = s.broker.toUpperCase();
+  if (b === "OPTIONS" || b === "CHAIN") return s.symbol === `${root.venue}.${root.root}` || s.symbol.startsWith(`${root.venue}.${root.root}.`);
+  if (s.broker !== root.venue) return false;
+  const bare = s.symbol.replace(/@(front|next)$/, "");
+  return bare === root.root || s.symbol === root.perpetual?.name || (root.contracts?.some((c) => c.symbol === bare) ?? false) || bare.startsWith(`${root.root}_`);
+}

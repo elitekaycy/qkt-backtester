@@ -25,7 +25,7 @@ const seriesOf = (rep: SymbolReport | null): Series[] => !rep ? [] : [
 ];
 
 /** Calendar heat-map of one series: a small month grid per year, missing days in red, click a day to start a range there. */
-function Heatmap({ symbol, kind, source, onPick, sel }: { symbol: string; kind: string; source?: string; onPick(day: string): void; sel: { from: string; to: string } }) {
+export function Heatmap({ symbol, kind, source, onPick, sel }: { symbol: string; kind: string; source?: string; onPick(day: string): void; sel: { from: string; to: string } }) {
   const [data, setData] = useState<{ first: string; last: string; days: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {

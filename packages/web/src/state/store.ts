@@ -2,11 +2,11 @@ import { anchorParseError, locateImport } from "@qkt-studio/core/lint";
 import { create } from "zustand";
 import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { api, ApiError, openRunEvents, type Equity, type Info, type InstrumentsInfo, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
+import { api, ApiError, openRunEvents, type Equity, type DerivFetchReq, type Info, type InstrumentsInfo, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
 import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJson, RunOptions, ScanReport, Summary, Tier, TripQuery } from "../api/types.js";
 import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
-import { effectiveTier } from "../util/derivatives.js";
+import { effectiveTier, fetchLabel } from "../util/derivatives.js";
 import type { SymbolReport } from "../api/types.js";
 import { runCfgPatch } from "./runCfg.js";
 import { notify } from "../ui/notify.js";
@@ -60,6 +60,11 @@ interface State {
   /** Symbol whose detail dialog is open. */
   symbolDialog: string | null;
   openSymbol(symbol: string | null): void;
+  /** The futures or options root whose dialog is open, as `VENUE:ROOT`. */
+  rootDialog: string | null;
+  openRoot(key: string | null): void;
+  /** Run a derivatives fetch the user asked for; progress shows in the Jobs list. */
+  runFetch(req: DerivFetchReq): Promise<boolean>;
   /** The server's last message when a run was refused (e.g. window outside a symbol's range); shown in Run settings. */
   submitError: string | null;
   /** One sentence for screen readers when a run starts, finishes or fails (read by a polite live region). */
@@ -152,7 +157,7 @@ export const useStore = create<State>((set, get) => ({
   theme: prefs.theme === "light" ? "light" : "dark",
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
   cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun !== false, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
-  settings: null, scan: null, instruments: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
+  settings: null, scan: null, instruments: null, readiness: [], overrideReports: {}, symbolDialog: null, rootDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
   runId: null, run: null, progress: null, logs: [], running: false, runs: [],
   results: null, previous: null, autoSkipped: null, resultsStale: false,
   filters: {}, selectedTrip: null, focus: null,
@@ -440,6 +445,11 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) { set({ scanning: false }); if (!(e instanceof ApiError && e.status === 401)) get().toast("error", `Data scan failed: ${(e as Error).message}`); }
   },
   openSymbol(symbol) { set({ symbolDialog: symbol }); },
+  openRoot(key) { set({ rootDialog: key }); },
+  async runFetch(req) {
+    try { const { jobId } = await api.fetchDerivatives(req); get().trackJob(jobId, fetchLabel(req)); return true; }
+    catch (e) { get().toast("error", (e as Error).message); return false; }
+  },
   async setSymbolPref(symbol, pref) {
     const r = await api.setSymbolPref(symbol, pref);
     set({ settings: r });
