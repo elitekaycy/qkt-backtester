@@ -52,7 +52,9 @@ describe("derived files of a futures run", () => {
     expect(d.read("derivatives.json").liquidations[0].equity).toBeCloseTo(22335.27, 2);
   });
   it("an option held to expiry settles; its structure legs list", async () => {
-    expect((await derive("option-expiry")).read("derivatives.json").settlements[0].price).toBe(457.17);
+    const opt = await derive("option-expiry");
+    expect(opt.read("derivatives.json").settlements[0].price).toBe(457.17);
+    expect(opt.read("meta.json").streams[0].kind).toBe("option");
     expect((await derive("structure")).read("derivatives.json").structures).toHaveLength(2);
   });
   it("funding shows as a cost on a perpetual", async () => {

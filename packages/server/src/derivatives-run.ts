@@ -11,7 +11,8 @@ export const isOptionStream = (s: { broker: string; symbol: string }): boolean =
  * Which data tier a strategy's streams can run on, probed on qkt 0.55:
  *  - a continuous stream is built from each contract's bars: `Full` (ticks) fails with "no market data for ROOT@front";
  *  - an option contract, chain or analytic is read from stored chains: `Draft` (`--bars`) fails asking for bars that cannot exist;
- *  - listed contracts and perpetuals run on both (they are bars either way; futures fill on qkt's exchange simulator whatever the tier).
+ *  - listed contracts and perpetuals run on Draft; Full needs a tick store under symbols/<NAME> (a venue archive of bars has none, and qkt then
+ *    stops with "No data for <NAME>", which the run reports as it is). Futures fill on qkt's exchange simulator whatever the tier.
  * Returns the sentence to refuse the run with, or null when the tier is fine.
  */
 export function tierProblem(streams: ReadonlyArray<{ broker: string; symbol: string }>, tier: Tier): string | null {

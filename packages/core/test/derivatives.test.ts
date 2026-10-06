@@ -76,9 +76,9 @@ describe("the venue ending a position", () => {
     expect(trips).toHaveLength(1);
     expect(trips[0]).toMatchObject({ venueExit: "expiry", exit: "signal", pnl: 5629.77 });
     expect(reconcile(trips, Number(result("expiry").global.realizedTotal)).ok).toBe(true);
-    expect(matches(trips[0]!, { exit: "expiry" })).toBe(true);
+    expect(matches(trips[0]!, { venueExit: "expiry" })).toBe(true);
     expect(matches(trips[0]!, { exit: "signal" })).toBe(true);
-    expect(matches(trips[0]!, { exit: "liquidation" })).toBe(false);
+    expect(matches(trips[0]!, { venueExit: "liquidation" })).toBe(false);
   });
   it("marks a liquidation and reads the row that triggered it", () => {
     const trips = pairRoundTrips(fills("liquidation"));

@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { isOptionStream } from "./derivatives-run.js";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
@@ -146,7 +147,8 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   const fromMs = Date.parse(run.from + "T00:00:00Z"), toMs = Date.parse(run.to + "T00:00:00Z");
   const streams = Object.keys(result.inputSummary.streamCandles ?? {}).map(parseStreamKey).filter((s): s is StreamRef => s !== null);
   const kctx = contextFromCatalog(parseInstruments(args.instrumentsText ?? ""), { futureRoots: await storeRoots(dataRoot) });
-  for (const s of streams) { const k = kindOf(s, kctx); if (k !== "cfd") s.kind = k; }
+  // an option contract is named by its qkt code (`BTC_USDC_26SEP26_84500_P`, every `-` of the venue name written `_`), which kindOf does not know
+  for (const s of streams) { const k = kindOf(s, kctx); if (k !== "cfd") s.kind = k; else if (isOptionStream(s)) s.kind = "option"; }
   // which bar folder each stream's candles come from: in a bars run exactly qkt's choice; in a tick run the stream's own folder
   // when it is built, else the coarsest built one that divides it (for display: qkt built those candles from ticks)
   const built = new Map<string, string[]>();

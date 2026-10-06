@@ -1,4 +1,4 @@
-import { VENUE_EXITS, type ExitReason, type RoundTrip, type VenueExit } from "./roundtrips.js";
+import type { ExitReason, RoundTrip, VenueExit } from "./roundtrips.js";
 
 export type TripSort = "entryTs" | "exitTs" | "pnl" | "holdMs" | "qty";
 
@@ -26,8 +26,10 @@ export interface TripQuery {
   maxHoldMs?: number;
   minPnl?: number;
   maxPnl?: number;
-  /** How the trade ended. `expiry`, `liquidation` and `roll_failed` are the venue ending a futures/options position. */
-  exit?: ExitReason | VenueExit;
+  /** How the trade ended. */
+  exit?: ExitReason;
+  /** The venue ended the trade: `expiry`, `liquidation` or `roll_failed` (the API reads `exit=expiry` etc. into this). Separate from `exit`, which stays the 4 values a rule or order produces. */
+  venueExit?: VenueExit;
   /** Continuous futures: a contract the trade entered or exited on (`ESH19`, with or without the venue prefix). */
   contract?: string;
   /** R-multiple bounds (pnl / entry risk); trades without recorded risk never match when set. */
@@ -66,10 +68,8 @@ export function matches(t: RoundTrip, q: TripQuery): boolean {
   }
   if (q.minHoldMs !== undefined && (t.holdMs === null || t.holdMs < q.minHoldMs)) return false;
   if (q.maxHoldMs !== undefined && (t.holdMs === null || t.holdMs >= q.maxHoldMs)) return false;
-  if (q.exit) {
-    if ((VENUE_EXITS as readonly string[]).includes(q.exit)) { if (t.venueExit !== q.exit) return false; }
-    else if (t.exit !== q.exit) return false;
-  }
+  if (q.exit && t.exit !== q.exit) return false;
+  if (q.venueExit && t.venueExit !== q.venueExit) return false;
   if (q.contract) {
     const bare = (c?: string) => (c ? c.slice(c.lastIndexOf(":") + 1).toUpperCase() : "");
     const want = bare(q.contract);
