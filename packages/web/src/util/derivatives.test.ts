@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { CostBridge, DerivativesReport, FutureRootReport, MarginDay, OptionRootReport, RollRow } from "@qkt-studio/core";
 import { parseInstruments } from "@qkt-studio/core";
 import type { InstrumentsInfo } from "../api/client.js";
-import { closedDaysFor, commandsIn, contractNames, costLines, effectiveTier, fetchLabel, fetchRequestFrom, fieldsFor, futureRootLine, kindContextFrom, kindMarks, marginView, optionRootLine, pruneRunFilters, qtyUnit, readsRoot, rollSummary, rootKeyFor, showKind, streamKinds, streamsPerpetual, tierRule } from "./derivatives.js";
+import { closedDaysFor, commandsIn, contractNames, costLines, effectiveTier, fetchLabel, fetchRequestFrom, fieldsFor, futureRootLine, kindContextFrom, kindMarks, marginView, optionRootLine, pruneRunFilters, qtyUnit, readsRoot, rollSummary, rootKeyFor, shownTier, showKind, streamKinds, streamsPerpetual, tierRule } from "./derivatives.js";
 
 const YAML = `
 futures:
@@ -78,6 +78,12 @@ describe("tier rules", () => {
     expect(effectiveTier("draft", opt)).toMatchObject({ tier: "full", note: expect.any(String) });
     expect(effectiveTier("full", cfd)).toEqual({ tier: "full", note: null });
     expect(effectiveTier("draft", cont)).toEqual({ tier: "draft", note: null });
+  });
+  it("the tier the card and the top bar show is the one the run will use, not the saved one", () => {
+    expect(shownTier("draft", opt)).toBe("full");
+    expect(shownTier("full", cont)).toBe("draft");
+    expect(shownTier("draft", cfd)).toBe("draft");
+    expect(shownTier("full", cfd)).toBe("full");
   });
   it("leaves the request alone when both tiers are refused: the server says what to do", () => {
     expect(effectiveTier("draft", [...cont, ...opt]).tier).toBe("draft");

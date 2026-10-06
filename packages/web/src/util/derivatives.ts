@@ -73,6 +73,9 @@ export function effectiveTier(requested: "draft" | "full", streams: ReadonlyArra
   return { tier: requested, note: null };
 }
 
+/** The tier a strategy will actually run on: what the card and the top bar show, whatever tier was saved. */
+export const shownTier = (requested: "draft" | "full", streams: ReadonlyArray<{ broker: string; symbol: string }>): "draft" | "full" => effectiveTier(requested, streams).tier;
+
 /** True when any stream is a future, perpetual or option: those fill on qkt's exchange simulator, whatever the broker model says. */
 export function hasDerivativeStreams(source: string, ctx: KindContext): boolean {
   return [...streamKinds(source, ctx).values()].some((k) => k !== "cfd" && k !== "hub" && k !== "analytic");

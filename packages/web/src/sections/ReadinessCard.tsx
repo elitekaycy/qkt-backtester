@@ -6,7 +6,7 @@ import { useStore } from "../state/store.js";
 import { addDays } from "../util/format.js";
 import { ChevronRight, CircleAlert, CircleCheck, CircleX, CloudDownload, Hammer } from "../ui/icons.js";
 import { BuildForm, FetchForm, FixCommand } from "./dataParts.js";
-import { kindShort, kindTitle, rootKeyFor, showKind, tierRule } from "../util/derivatives.js";
+import { kindShort, kindTitle, rootKeyFor, shownTier, showKind, tierRule } from "../util/derivatives.js";
 
 const fmtDay = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 /** A day range with an exclusive end, as the inclusive dates it covers. */
@@ -25,7 +25,8 @@ export function ReadinessCard() {
   const [fix, setFix] = useState<Fix>(null);
   const fixAnchor = useRef<HTMLElement | null>(null);
   const r = readiness.find((x) => x.strategy === activePath);
-  const onBars = cfg.tier !== "full";
+  // the tier the run will use: an option strategy runs on ticks and a continuous future on bars, whatever was saved
+  const onBars = (r ? shownTier(cfg.tier, r.streams) : cfg.tier) !== "full";
 
   // which bar folder each stream is read from (qkt aggregates a coarser stream from a finer built one)
   const bases = useMemo(() => {
@@ -142,7 +143,7 @@ function OtherStrategies({ open: open0 = false, heading }: { open?: boolean; hea
   const others = readiness.filter((x) => x.strategy !== activePath);
   if (!others.length) return heading ? <div className="ready-card muted">{heading}.</div> : null;
   const pick = (x: Readiness) => {
-    const m = cfg.tier === "full" ? x.ticks : x.bars;
+    const m = shownTier(cfg.tier, x.streams) === "full" ? x.ticks : x.bars;
     void useStore.getState().openFile(x.strategy);
     if (m.longest) setCfg({ from: m.longest.from, to: m.longest.to });
   };
