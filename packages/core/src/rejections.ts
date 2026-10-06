@@ -4,7 +4,7 @@
  */
 export interface RejectionReason {
   /** Stable id for the known reasons; "other" for anything else. */
-  kind: "notional-cap" | "qty-cap" | "daily-loss-halt" | "drawdown-halt" | "other";
+  kind: "notional-cap" | "qty-cap" | "daily-loss-halt" | "drawdown-halt" | "contract-expired" | "other";
   /** The reason with its numbers taken out, e.g. "order notional exceeds cap". */
   label: string;
   count: number;
@@ -49,6 +49,15 @@ export function summarizeRejections(text: string): RejectionSummary {
   const by = new Map<string, RejectionReason>();
   for (const line of lines.slice(1)) {
     const reason = (cells(line)[ri < 0 ? 1 : ri] ?? "").trim();
+    // an order on a contract after its expiry: the contract's code carries digits, so it cannot take the generic label
+    const exp = /^venue:\s*(\S+) expired at (\d{4}-\d{2}-\d{2})T\S*/.exec(reason);
+    if (exp) {
+      const key = `contract-expired:${exp[1]}`, seen = by.get(key);
+      if (seen) seen.count++;
+      else by.set(key, { kind: "contract-expired", label: `${exp[1]} expired on ${exp[2]}`, count: 1, example: reason,
+        hint: "The strategy sent an order on a contract after its expiry, which the venue refuses. Close or roll before expiry, or follow the root with a continuous stream (ROOT@front)." });
+      continue;
+    }
     const known = KNOWN.find((k) => k.re.test(reason));
     const label = reason.replace(/\s*\(.*\)\s*$/, "").replace(/-?\d+(\.\d+)?/g, "").replace(/\s+/g, " ").trim();
     const key = known?.kind ?? label;
