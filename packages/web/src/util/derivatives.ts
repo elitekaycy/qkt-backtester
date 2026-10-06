@@ -1,11 +1,27 @@
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { calendarOf, contextFromCatalog, fieldAllowed, futuresDayExpected, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
+import { calendarOf, contextFromCatalog, fieldAllowed, futuresDayExpected, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type FutureTerms, type OptionTerms, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
 import type { DerivFetchKind, DerivFetchReq, InstrumentsInfo } from "../api/client.js";
 
 /** What the browser needs of `GET /api/instruments` to tell a future from a CFD: the same context the server's gate uses. */
 export function kindContextFrom(info: InstrumentsInfo | null): KindContext {
   if (!info) return {};
   return contextFromCatalog(info.catalog, { futureRoots: info.futureRoots, perpetuals: info.perpetuals });
+}
+
+/** The terms the next run will use for a root, which file they come from, and where the other file disagrees. */
+export function termsFor(info: InstrumentsInfo | null, key: string): { source: "workspace" | "dataRoot" | "none"; terms: FutureTerms | OptionTerms | null; differs: string[] } {
+  if (!info) return { source: "none", terms: null, differs: [] };
+  const used = info.effective === "workspace" ? info.workspace.catalog : info.catalog;
+  const terms = [...used.futures, ...used.options].find((t) => t.root === key) ?? null;
+  return { source: info.effective, terms, differs: info.differences[key] ?? [] };
+}
+
+/** The sentence for where the two instruments.yaml files disagree about a root (a run reads the workspace's file alone). */
+export function differenceNote(source: "workspace" | "dataRoot" | "none", differs: string[]): string | null {
+  if (!differs.length) return null;
+  if (differs[0] === "only in the data source") return "Only the data source's instruments.yaml declares this root. A run reads the workspace's file alone, so it will not know it.";
+  if (differs[0] === "only in the workspace") return "Only the workspace's instruments.yaml declares this root; the data source's file has no entry for it.";
+  return `The ${source === "workspace" ? "data source's" : "workspace's"} instruments.yaml differs on ${differs.join(", ")}; a run reads ${source === "workspace" ? "the workspace's" : "this"} file alone.`;
 }
 
 /** alias -> what its symbol names, for every stream a strategy declares. A source with no stream gives an empty map. */
@@ -73,6 +89,9 @@ export function effectiveTier(requested: "draft" | "full", streams: ReadonlyArra
   return { tier: requested, note: null };
 }
 
+/** The tier a strategy will actually run on: what the card and the top bar show, whatever tier was saved. */
+export const shownTier = (requested: "draft" | "full", streams: ReadonlyArray<{ broker: string; symbol: string }>): "draft" | "full" => effectiveTier(requested, streams).tier;
+
 /** True when any stream is a future, perpetual or option: those fill on qkt's exchange simulator, whatever the broker model says. */
 export function hasDerivativeStreams(source: string, ctx: KindContext): boolean {
   return [...streamKinds(source, ctx).values()].some((k) => k !== "cfd" && k !== "hub" && k !== "analytic");
@@ -111,6 +130,21 @@ export function marginView(days: readonly MarginDay[]): { points: MarginPoint[];
   return { points, calls: days.filter((d) => d.marginCall).length, tightest: tight };
 }
 
+/** Equity less maintenance, in words: below maintenance is a margin call, never a negative "above". */
+export function headroomText(headroom: number, short = false): string {
+  return `${Math.abs(Math.round(headroom)).toLocaleString("en-US")} ${headroom < 0 ? "below" : "above"}${short ? "" : " maintenance"}`;
+}
+
+/**
+ * Vertical pixel shift for the end labels of the equity and margin lines. Where the two end close together (a day or two before a
+ * margin call or a liquidation, or one day of data) their labels print over each other, so the higher line's goes up and the lower
+ * one's down. `span` is the axis range the lines are drawn on.
+ */
+export function endLabelShift(equityEnd: number, marginEnd: number, span: number): { equity: number; margin: number } {
+  if (!(span > 0) || Math.abs(equityEnd - marginEnd) >= span * 0.06) return { equity: 0, margin: 0 };
+  return equityEnd >= marginEnd ? { equity: -7, margin: 7 } : { equity: 7, margin: -7 };
+}
+
 /**
  * Filters carried to another run: a `contract:` or a venue-close filter names something only a futures run has, so on a run
  * without it the filter would silently match nothing. Returns the same object when nothing needs dropping.
@@ -146,7 +180,13 @@ export function rollSummary(rolls: readonly RollRow[]): Array<{ stream: string; 
   return [...by].map(([stream, a]) => ({ stream, count: a.count, cost: a.cost, fees: a.fees, avgGap: a.count ? a.gap / a.count : 0 }));
 }
 
-export const legText = (l: StructureRow["legs"][number]): string => `${l.side === "BUY" ? "Buy" : "Sell"} ${l.quantity} ${l.symbol.split(":").pop()} @ ${l.entry}`;
+/** An option code as expiry, strike and right (`BTC_USDC_4OCT26_83000_P` -> `4OCT26 83000 P`); any other symbol without its venue. */
+export const optionShort = (symbol: string): string => {
+  const bare = symbol.split(":").pop() ?? symbol;
+  const m = /_(\d{1,2}[A-Z]{3}\d{2})_([\d.]+)_([CP])$/.exec(bare);
+  return m ? `${m[1]} ${m[2]} ${m[3]}` : bare;
+};
+export const legText = (l: StructureRow["legs"][number]): string => `${l.side === "BUY" ? "Buy" : "Sell"} ${l.quantity} · ${optionShort(l.symbol)} @ ${l.entry}`;
 
 // ---- the fix a blocked stream names ----------------------------------------------------------------------------------
 

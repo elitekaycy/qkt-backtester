@@ -6,7 +6,7 @@ import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { addDays, daysBetween } from "../util/format.js";
 import { insideRanges } from "../util/datawindow.js";
-import { hasDerivativeStreams, kindContextFrom, streamsPerpetual, tierRule } from "../util/derivatives.js";
+import { hasDerivativeStreams, kindContextFrom, shownTier, streamsPerpetual, tierRule } from "../util/derivatives.js";
 import { CircleAlert, CircleCheck, Database, Hammer, Zap } from "../ui/icons.js";
 
 const NO_PREFS: SettingsView["symbolPrefs"] = {};   // a stable fallback: a fresh {} per call makes the selector unequal every time
@@ -29,7 +29,7 @@ export function RunSettings() {
   const deriv = useMemo(() => !!file && hasDerivativeStreams(file.content, ctx), [file?.content, ctx]);
   const values = (strategy && cfg.paramsByStrategy[strategy]) || {};
   const o = cfg.options;
-  const ticks = cfg.tier === "full";
+  const ticks = shownTier(cfg.tier, file ? parseStrategyInfo(file.content).streams : []) === "full";
   const span = cfg.from && cfg.to ? daysBetween(cfg.from, cfg.to) : 0;
   const ready = readiness.find((r) => r.strategy === strategy);
   const mode = ticks ? ready?.ticks : ready?.bars;

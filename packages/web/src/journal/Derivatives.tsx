@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { RunDerivatives, StructureRow } from "@qkt-studio/core";
 import { DASH, fmtMoney, fmtNum, fmtTs } from "../util/format.js";
-import { legText, marginView, rollSummary } from "../util/derivatives.js";
+import { endLabelShift, headroomText, legText, marginView, rollSummary } from "../util/derivatives.js";
 import { CircleAlert, OctagonX } from "../ui/icons.js";
 import { Chart, chartBase, compactMoney, Stat, tipHtml, tok, Widget, zoomOptions } from "./widgets.js";
 import { useDerivatives } from "./useDerivatives.js";
@@ -74,14 +74,17 @@ function Margin({ d }: { d: RunDerivatives }) {
       {!table ? (
         <Chart height={250} label="Account equity, margin used and maintenance margin by day" deps={[days, rolls]} build={() => {
           const eq = tok("--s1c"), used = tok("--s3c"), maint = tok("--s2c"), danger = tok("--danger"), ink2 = tok("--ink-2");
+          const lastP = v.points[v.points.length - 1];
+          const top = Math.max(...v.points.flatMap((p) => [p.equity, p.used, p.maintenance]), 0);
+          const shift = lastP ? endLabelShift(lastP.equity, lastP.used, top) : { equity: 0, margin: 0 };
           return chartBase({
             ...zoomOptions(v.points.length, 60),
             grid: { left: 52, right: 70, top: 14, bottom: v.points.length >= 60 ? 48 : 22 },
             xAxis: { ...(chartBase().xAxis as object), type: "time" },
             series: [
-              { name: "Equity", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.equity]), lineStyle: { width: 2, color: eq }, itemStyle: { color: eq }, endLabel: { show: true, formatter: "Equity", color: ink2, fontSize: 11 },
+              { name: "Equity", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.equity]), lineStyle: { width: 2, color: eq }, itemStyle: { color: eq }, endLabel: { show: true, formatter: "Equity", color: ink2, fontSize: 11, offset: [0, shift.equity] },
                 markLine: rolls.length ? { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: tok("--ink-4"), type: "dotted", width: 1 }, data: rolls.slice(0, 80).map((r) => ({ xAxis: r.ts })) } : undefined },
-              { name: "Margin used", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.used]), lineStyle: { width: 2, color: used }, itemStyle: { color: used }, endLabel: { show: true, formatter: "Margin", color: ink2, fontSize: 11 } },
+              { name: "Margin used", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.used]), lineStyle: { width: 2, color: used }, itemStyle: { color: used }, endLabel: { show: true, formatter: "Margin", color: ink2, fontSize: 11, offset: [0, shift.margin] } },
               { name: "Maintenance", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.maintenance]), lineStyle: { width: 2, color: maint, type: "dashed" }, itemStyle: { color: maint }},
               ...(v.calls ? [{ name: "Margin call", type: "line", data: v.points.filter((p) => p.call).map((p) => [at(p), p.equity]), lineStyle: { opacity: 0 }, symbol: "circle", symbolSize: 11, itemStyle: { color: "transparent", borderColor: danger, borderWidth: 2 }, z: 5 }] : []),
             ],
@@ -89,7 +92,7 @@ function Margin({ d }: { d: RunDerivatives }) {
               const p = ps.find((x) => x.seriesName === "Equity"); if (!p) return "";
               const pt = v.points[p.dataIndex]; if (!pt) return "";
               const head = pt.equity - pt.maintenance;
-              return tipHtml(pt.date, { value: head, text: `${fmtMoney(head, 0)} above maintenance` }, [["Equity", fmtNum(pt.equity, 0)], ["Margin used", fmtNum(pt.used, 0)], ["Maintenance", fmtNum(pt.maintenance, 0)]], pt.call ? "Margin call this day" : undefined);
+              return tipHtml(pt.date, { value: head, text: headroomText(head) }, [["Equity", fmtNum(pt.equity, 0)], ["Margin used", fmtNum(pt.used, 0)], ["Maintenance", fmtNum(pt.maintenance, 0)]], pt.call ? "Margin call this day" : undefined);
             } },
             yAxis: { ...(chartBase().yAxis as object), axisLabel: { color: tok("--ink-3"), fontSize: 11, formatter: (x: number) => compactMoney(x) } },
           });
@@ -103,7 +106,7 @@ function Margin({ d }: { d: RunDerivatives }) {
       <div className="grid cols-3" style={{ gap: "var(--s2) var(--s5)" }}>
         <Stat label="Days with a position" value={String(v.points.length)} />
         <Stat label="Margin-call days" value={String(v.calls)} tone={v.calls ? "loss" : undefined} />
-        <Stat label="Tightest day" value={v.tightest ? `${v.tightest.date} · ${fmtMoney(v.tightest.headroom, 0)} above` : DASH} />
+        <Stat label="Tightest day" value={v.tightest ? `${v.tightest.date} · ${headroomText(v.tightest.headroom, true)}` : DASH} tone={v.tightest && v.tightest.headroom < 0 ? "loss" : undefined} />
       </div>
     </Widget>
   );
@@ -153,12 +156,12 @@ function Structures({ d }: { d: RunDerivatives }) {
   const rows = d.structures ?? [];
   return (
     <Widget title="Option structures" className="flush" right={<span className="muted">{rows.length} opened by OPEN … = OPTIONS ON …</span>} style={{ padding: 0 }}>
-      <div className="hint muted" style={note}>Credit and realised are the premium P&L before fees. A structure still open when the run ended has no outcome yet.</div>
+      <div className="hint muted" style={note}>Credit and realised are the premium P&L before fees. A structure still open when the run ended has no outcome yet. Times are UTC.</div>
       <div className="tbl-scroll"><table className="tbl">
-        <thead><tr><th>Opened (UTC)</th><th>Closed (UTC)</th><th>Structure</th><th>Legs</th><th>Outcome</th><th className="r">Credit</th><th className="r">Realised</th></tr></thead>
+        <thead><tr><th>Opened</th><th>Closed</th><th>Structure</th><th>Legs</th><th>Outcome</th><th className="r">Credit</th><th className="r">Realised</th></tr></thead>
         <tbody>{rows.map((r, i) => (
-          <tr key={i}><td className="num">{r.openedAt === null ? DASH : fmtTs(r.openedAt)}</td><td className="num">{r.closedAt === null ? <span className="badge">open</span> : fmtTs(r.closedAt)}</td><td><b>{r.alias}</b> <span className="muted">{r.structure}</span></td>
-            <td>{r.legs.map((l, j) => <div key={j} className="nowrap" style={{ fontSize: "var(--fs-xs)" }}>{legText(l)}</div>)}</td>
+          <tr key={i}><td className="num">{r.openedAt === null ? DASH : fmtTs(r.openedAt)}</td><td className="num">{r.closedAt === null ? <span className="badge">open</span> : fmtTs(r.closedAt)}</td><td><b title={r.structure}>{r.alias}</b></td>
+            <td>{r.legs.map((l, j) => <div key={j} className="nowrap" title={l.symbol} style={{ fontSize: "var(--fs-xs)" }}>{legText(l)}</div>)}</td>
             <td>{r.outcome ? <span className={`badge ${r.outcome === "UNWOUND" ? "warn" : ""}`}>{OUTCOME[r.outcome]}</span> : <span className="muted">{DASH}</span>}</td>
             <td className="r num">{r.credit === null ? DASH : fmtMoney(r.credit)}</td><td className={`r num ${r.realized === null ? "" : r.realized >= 0 ? "gain" : "loss"}`}>{r.realized === null ? DASH : fmtMoney(r.realized)}</td></tr>
         ))}</tbody>

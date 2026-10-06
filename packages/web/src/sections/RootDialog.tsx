@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
+import type { FutureTerms, OptionTerms } from "@qkt-studio/core/instruments";
 import type { ContractReport, FutureRootReport, OptionRootReport, SeriesReport } from "../api/types.js";
 import { useStore } from "../state/store.js";
 import { Modal } from "../ui/Modal.js";
 import { CircleAlert, CircleCheck, FileCog, TriangleAlert } from "../ui/icons.js";
-import { closedDaysFor, commandsIn, readsRoot } from "../util/derivatives.js";
+import { closedDaysFor, commandsIn, differenceNote, readsRoot, termsFor } from "../util/derivatives.js";
 import { fmtNum } from "../util/format.js";
 import { FixCommand } from "./dataParts.js";
 import { Heatmap } from "./SymbolDialog.js";
@@ -80,7 +81,8 @@ function Notes({ notes }: { notes: string[] }) {
 }
 
 function FutureBody({ root }: { root: FutureRootReport }) {
-  const t = root.terms;
+  const { terms, source, differs } = termsFor(useStore((s) => s.instruments), root.key);
+  const t = terms as FutureTerms | null;
   return (
     <>
       <Notes notes={root.notes} />
@@ -98,7 +100,7 @@ function FutureBody({ root }: { root: FutureRootReport }) {
         ]} />
       </section>
       <section className="sd-sec">
-        <h3>Terms <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· from the data source's instruments.yaml</span></h3>
+        <TermsHead source={source} differs={differs} />
         {t ? (
           <Facts rows={[
             ["Multiplier", t.multiplier], ["Tick size", t.tickSize], ["Lot step / min", t.volumeStep !== undefined ? `${t.volumeStep} / ${t.volumeMin ?? "?"}` : undefined], ["Currency", t.currency], ["Calendar", t.calendar],
@@ -117,7 +119,8 @@ function FutureBody({ root }: { root: FutureRootReport }) {
 }
 
 function OptionBody({ root }: { root: OptionRootReport }) {
-  const t = root.terms;
+  const { terms, source, differs } = termsFor(useStore((s) => s.instruments), root.key);
+  const t = terms as OptionTerms | null;
   return (
     <>
       <Notes notes={root.notes} />
@@ -129,7 +132,7 @@ function OptionBody({ root }: { root: OptionRootReport }) {
         ]} />
       </section>
       <section className="sd-sec">
-        <h3>Terms <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· from the data source's instruments.yaml</span></h3>
+        <TermsHead source={source} differs={differs} />
         {t ? (
           <Facts rows={[
             ["Contract size", t.contractSize], ["Tick size", t.tickSize], ["Lot step / min", t.volumeStep !== undefined ? `${t.volumeStep} / ${t.volumeMin ?? "?"}` : undefined], ["Currency", t.currency],
@@ -143,7 +146,19 @@ function OptionBody({ root }: { root: OptionRootReport }) {
   );
 }
 
-/** The terms shown come from the data source; runs use the workspace's instruments.yaml, which is where to change them. */
+/** Which file the terms below come from (the one the next run uses) and, when the other file disagrees, where. */
+function TermsHead({ source, differs }: { source: "workspace" | "dataRoot" | "none"; differs: string[] }) {
+  const from = source === "workspace" ? "the workspace's instruments.yaml" : source === "dataRoot" ? "the data source's instruments.yaml (the workspace has none)" : "no instruments.yaml";
+  const note = differenceNote(source, differs);
+  return (
+    <>
+      <h3>Terms <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· used by the next run, from {from}</span></h3>
+      {note && <div className="banner warn" role="status"><CircleAlert size={14} color="var(--warn)" /><span>{note}</span></div>}
+    </>
+  );
+}
+
+/** The terms shown are the ones a run uses; this is where to change them. */
 function OpenInstruments() {
   const openFile = useStore((s) => s.openFile), close = useStore((s) => s.openRoot);
   return <button className="btn sm" style={{ alignSelf: "flex-start" }} onClick={() => { void openFile("instruments.yaml", true); close(null); }}><FileCog size={13} />Open instruments.yaml</button>;

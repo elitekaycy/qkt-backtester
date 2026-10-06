@@ -186,6 +186,24 @@ export function parseInstruments(text: string): InstrumentCatalog {
   return out;
 }
 
+/**
+ * Where two instruments.yaml files disagree about a futures or options root, by root key: the fields that differ, or which side
+ * alone declares it. `data` is the data source's file and `workspace` the workspace's: a run reads the workspace's entirely, so a
+ * root only the data source declares is one the run will not know.
+ */
+export function termsDifferences(data: InstrumentCatalog, workspace: InstrumentCatalog): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const index = (c: InstrumentCatalog) => new Map<string, Record<string, unknown>>([...c.futures, ...c.options].map((t) => [t.root, t as unknown as Record<string, unknown>]));
+  const d = index(data), w = index(workspace);
+  for (const key of new Set([...d.keys(), ...w.keys()])) {
+    const a = d.get(key), b = w.get(key);
+    if (!a || !b) { out[key] = [a ? "only in the data source" : "only in the workspace"]; continue; }
+    const fields = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((f) => f !== "root" && JSON.stringify(a[f]) !== JSON.stringify(b[f])).sort();
+    if (fields.length) out[key] = fields;
+  }
+  return out;
+}
+
 /** Everything `kindOf` needs from a parsed catalog. */
 export function contextFromCatalog(c: InstrumentCatalog, extra: { perpetuals?: Iterable<string>; futureRoots?: Iterable<string> } = {}): KindContext {
   const futureRoots = new Set([...c.futures.map((f) => f.root), ...(extra.futureRoots ?? [])]);

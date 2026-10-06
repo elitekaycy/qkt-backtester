@@ -248,7 +248,11 @@ export function kindContextOf(d: DerivativesReport | undefined): KindContext {
 /** `VENUE:CONTRACT` of every catalogued contract, so the plain symbol list can leave them under their root. */
 export function contractKeys(d: DerivativesReport): Set<string> {
   const out = new Set<string>();
-  for (const f of d.futures) for (const c of f.contracts) out.add(`${f.venue}:${c.symbol}`);
+  for (const f of d.futures) {
+    for (const c of f.contracts) out.add(`${f.venue}:${c.symbol}`);
+    // a perpetual whose bars the root shows is listed once, there; with no bars to show it stays where it is
+    if (f.perpetual?.bars.length) out.add(`${f.venue}:${f.perpetual.name}`);
+  }
   return out;
 }
 
