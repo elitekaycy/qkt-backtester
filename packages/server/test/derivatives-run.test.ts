@@ -51,6 +51,18 @@ describe("derived files of a futures run", () => {
     expect(d.read("roundtrips.json")[0].venueExit).toBe("liquidation");
     expect(d.read("derivatives.json").liquidations[0].equity).toBeCloseTo(22335.27, 2);
   });
+  it("a margin call (equity under maintenance with a structure still open) is flagged and warned, and the open structure has no outcome", async () => {
+    // a real qkt 0.55 run: a put spread opened with equity just above its worst-case loss, so the fee leaves it under maintenance
+    const d = await derive("margin-call");
+    const dv = d.read("derivatives.json");
+    expect(dv.sections).toEqual(expect.arrayContaining(["margin", "structures"]));
+    expect(dv.margin).toEqual([expect.objectContaining({ date: "2026-10-01", marginCall: true })]);
+    expect(dv.margin[0].equity).toBeLessThan(dv.margin[0].maintenance);
+    expect(dv.structures).toHaveLength(1);
+    expect(dv.structures[0]).toMatchObject({ alias: "ps", closedAt: null, outcome: null });
+    expect(dv.structures[0].legs.map((l: { side: string }) => l.side)).toEqual(["SELL", "BUY"]);
+    expect(d.res.warnings.join(" ")).toMatch(/margin call/i);
+  });
   it("an option held to expiry settles; its structure legs list", async () => {
     const opt = await derive("option-expiry");
     expect(opt.read("derivatives.json").settlements[0].price).toBe(457.17);

@@ -130,6 +130,21 @@ export function marginView(days: readonly MarginDay[]): { points: MarginPoint[];
   return { points, calls: days.filter((d) => d.marginCall).length, tightest: tight };
 }
 
+/** Equity less maintenance, in words: below maintenance is a margin call, never a negative "above". */
+export function headroomText(headroom: number, short = false): string {
+  return `${Math.abs(Math.round(headroom)).toLocaleString("en-US")} ${headroom < 0 ? "below" : "above"}${short ? "" : " maintenance"}`;
+}
+
+/**
+ * Vertical pixel shift for the end labels of the equity and margin lines. Where the two end close together (a day or two before a
+ * margin call or a liquidation, or one day of data) their labels print over each other, so the higher line's goes up and the lower
+ * one's down. `span` is the axis range the lines are drawn on.
+ */
+export function endLabelShift(equityEnd: number, marginEnd: number, span: number): { equity: number; margin: number } {
+  if (!(span > 0) || Math.abs(equityEnd - marginEnd) >= span * 0.06) return { equity: 0, margin: 0 };
+  return equityEnd >= marginEnd ? { equity: -7, margin: 7 } : { equity: 7, margin: -7 };
+}
+
 /**
  * Filters carried to another run: a `contract:` or a venue-close filter names something only a futures run has, so on a run
  * without it the filter would silently match nothing. Returns the same object when nothing needs dropping.
@@ -165,7 +180,13 @@ export function rollSummary(rolls: readonly RollRow[]): Array<{ stream: string; 
   return [...by].map(([stream, a]) => ({ stream, count: a.count, cost: a.cost, fees: a.fees, avgGap: a.count ? a.gap / a.count : 0 }));
 }
 
-export const legText = (l: StructureRow["legs"][number]): string => `${l.side === "BUY" ? "Buy" : "Sell"} ${l.quantity} ${l.symbol.split(":").pop()} @ ${l.entry}`;
+/** An option code as expiry, strike and right (`BTC_USDC_4OCT26_83000_P` -> `4OCT26 83000 P`); any other symbol without its venue. */
+export const optionShort = (symbol: string): string => {
+  const bare = symbol.split(":").pop() ?? symbol;
+  const m = /_(\d{1,2}[A-Z]{3}\d{2})_([\d.]+)_([CP])$/.exec(bare);
+  return m ? `${m[1]} ${m[2]} ${m[3]}` : bare;
+};
+export const legText = (l: StructureRow["legs"][number]): string => `${l.side === "BUY" ? "Buy" : "Sell"} ${l.quantity} · ${optionShort(l.symbol)} @ ${l.entry}`;
 
 // ---- the fix a blocked stream names ----------------------------------------------------------------------------------
 
