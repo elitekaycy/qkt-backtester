@@ -21,6 +21,7 @@ first, then `docs/specs/2026-09-25-qkt-backtester-design.md` (design, probe evid
 ```bash
 pnpm -r build && pnpm -r test          # server tests run the REAL qkt binary against ~/.qkt/data (skipped if absent)
 node scripts/e2e.mjs                   # needs a running studio (default :8099) with WORKSPACE=./workspace (a new empty folder is seeded with config, instruments and samples)
+node scripts/e2e-futures.mjs           # futures/options/CFD flows in a real browser: needs three studios (FUT :8097, OPT :8095, CFD :8096; see the script header)
 pnpm docker:build
 ```
 
