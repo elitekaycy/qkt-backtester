@@ -3,7 +3,7 @@ import type { ContractReport, FutureRootReport, OptionRootReport, SeriesReport }
 import { useStore } from "../state/store.js";
 import { Modal } from "../ui/Modal.js";
 import { CircleAlert, CircleCheck, FileCog, TriangleAlert } from "../ui/icons.js";
-import { commandsIn, readsRoot } from "../util/derivatives.js";
+import { closedDaysFor, commandsIn, readsRoot } from "../util/derivatives.js";
 import { fmtNum } from "../util/format.js";
 import { FixCommand } from "./dataParts.js";
 import { Heatmap } from "./SymbolDialog.js";
@@ -22,6 +22,7 @@ const seriesRow = (s: SeriesReport | null | undefined): React.ReactNode => (s ? 
 /** Contracts newest first, each with the timeframes built for it; a click opens the day-by-day calendar of one of them. */
 function Contracts({ root }: { root: FutureRootReport }) {
   const [open, setOpen] = useState<string | null>(null), [tf, setTf] = useState<string | null>(null), [all, setAll] = useState(false);
+  const closed = useMemo(() => closedDaysFor(root.root, root.terms?.calendar), [root.root, root.terms?.calendar]);
   const list = useMemo(() => [...root.contracts].sort((a, b) => (b.expiry ?? "").localeCompare(a.expiry ?? "")), [root.contracts]);
   const shown = all ? list : list.slice(0, 24);
   const pick = (c: ContractReport) => { const next = open === c.symbol ? null : c.symbol; setOpen(next); setTf(next ? c.bars.find((b) => b.files > 0)?.tf ?? null : null); };
@@ -42,7 +43,7 @@ function Contracts({ root }: { root: FutureRootReport }) {
                       <span className="muted num">{range(built.find((b) => b.tf === tf)?.first, built.find((b) => b.tf === tf)?.last)}</span>
                     </div>
                     <div className="legend" aria-hidden="true"><span><i className="hc s-o" />ok</span><span><i className="hc s-c" />closed</span><span><i className="hc s-t" />thin</span><span><i className="hc s-m" />missing</span></div>
-                    <Heatmap symbol={c.symbol} kind={`${root.venue}:${tf}`} onPick={noop} sel={NO_SEL} />
+                    <Heatmap symbol={c.symbol} kind={`${root.venue}:${tf}`} onPick={noop} sel={NO_SEL} remap={closed} />
                   </td></tr>
                 )}
               </FragmentRow>

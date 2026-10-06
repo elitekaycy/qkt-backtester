@@ -39,7 +39,7 @@ export function ReadinessCard() {
 
   const m: ModeReadiness = onBars ? r.bars : r.ticks, other: ModeReadiness = onBars ? r.ticks : r.bars;
   // continuous futures have no ticks and option chains no bars: say so here, and offer the other tier, instead of a refused run
-  const tierRules = tierRule(r.streams), tierBad = onBars ? tierRules.draft : tierRules.full;
+  const tierRules = tierRule(r.streams), tierBad = onBars ? tierRules.draft : tierRules.full, otherRefused = onBars ? tierRules.full : tierRules.draft;
   const win = { from: cfg.from, to: cfg.to };
   const fits = !!win.from && !!win.to && m.ranges.some((x) => x.from <= win.from && x.to >= win.to);
   const isLongest = !!m.longest && m.longest.from === win.from && m.longest.to === win.to;
@@ -122,9 +122,10 @@ export function ReadinessCard() {
 
         <div className="rc-other">
           <span className="muted">On {onBars ? "ticks" : "bars"}:</span>{" "}
-          {other.runnable && other.longest ? <span className="ink2">runs {fmtRange(other.longest)}</span>
+          {otherRefused ? <span className="ink2">{otherRefused}</span>
+            : other.runnable && other.longest ? <span className="ink2">runs {fmtRange(other.longest)}</span>
             : <span className="ink2">{other.blocked[0] ? `${other.blocked[0].stream.split(" ")[0]!.split(":").pop()}: ${other.blocked[0].reason}${other.blocked.length > 1 ? ` (+${other.blocked.length - 1} more)` : ""}` : "no complete stretch"}</span>}
-          <button className="btn ghost sm" onClick={() => setCfg({ tier: onBars ? "full" : "draft" })}>Switch to {onBars ? "ticks" : "bars"}</button>
+          {!otherRefused && <button className="btn ghost sm" onClick={() => setCfg({ tier: onBars ? "full" : "draft" })}>Switch to {onBars ? "ticks" : "bars"}</button>}
         </div>
       </section>
       <BuildForm open={fix?.kind === "build"} onClose={() => setFix(null)} anchor={fixAnchor} symbol={fix?.symbol} tf={fix?.tf} />

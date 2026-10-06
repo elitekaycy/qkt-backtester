@@ -82,7 +82,7 @@ function Margin({ d }: { d: RunDerivatives }) {
               { name: "Equity", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.equity]), lineStyle: { width: 2, color: eq }, itemStyle: { color: eq }, endLabel: { show: true, formatter: "Equity", color: ink2, fontSize: 11 },
                 markLine: rolls.length ? { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: tok("--ink-4"), type: "dotted", width: 1 }, data: rolls.slice(0, 80).map((r) => ({ xAxis: r.ts })) } : undefined },
               { name: "Margin used", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.used]), lineStyle: { width: 2, color: used }, itemStyle: { color: used }, endLabel: { show: true, formatter: "Margin", color: ink2, fontSize: 11 } },
-              { name: "Maintenance", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.maintenance]), lineStyle: { width: 2, color: maint, type: "dashed" }, itemStyle: { color: maint }, endLabel: { show: true, formatter: "Maint.", color: ink2, fontSize: 11 } },
+              { name: "Maintenance", type: "line", showSymbol: false, data: v.points.map((p) => [at(p), p.maintenance]), lineStyle: { width: 2, color: maint, type: "dashed" }, itemStyle: { color: maint }},
               ...(v.calls ? [{ name: "Margin call", type: "line", data: v.points.filter((p) => p.call).map((p) => [at(p), p.equity]), lineStyle: { opacity: 0 }, symbol: "circle", symbolSize: 11, itemStyle: { color: "transparent", borderColor: danger, borderWidth: 2 }, z: 5 }] : []),
             ],
             tooltip: { ...(chartBase().tooltip as object), formatter: (ps: Array<{ dataIndex: number; seriesName: string }>) => {

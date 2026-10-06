@@ -25,7 +25,7 @@ const seriesOf = (rep: SymbolReport | null): Series[] => !rep ? [] : [
 ];
 
 /** Calendar heat-map of one series: a small month grid per year, missing days in red, click a day to start a range there. */
-export function Heatmap({ symbol, kind, source, onPick, sel }: { symbol: string; kind: string; source?: string; onPick(day: string): void; sel: { from: string; to: string } }) {
+export function Heatmap({ symbol, kind, source, onPick, sel, remap }: { symbol: string; kind: string; source?: string; onPick(day: string): void; sel: { from: string; to: string }; /** Re-judges days for a market whose hours the symbol route does not know (a futures exchange). */ remap?: (first: string, days: string) => string }) {
   const [data, setData] = useState<{ first: string; last: string; days: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
@@ -33,7 +33,7 @@ export function Heatmap({ symbol, kind, source, onPick, sel }: { symbol: string;
     api.symbolDays(symbol, kind, source).then((d) => { if (live) setData(d); }).catch((e) => { if (live) setErr((e as Error).message); });
     return () => { live = false; };
   }, [symbol, kind, source]);
-  const grids = useMemo(() => (data ? monthGrids(data.first, data.days) : []), [data]);
+  const grids = useMemo(() => (data ? monthGrids(data.first, remap ? remap(data.first, data.days) : data.days) : []), [data, remap]);
   if (err) return <div className="muted">No calendar: {err}</div>;
   if (!data) return <div className="empty"><span className="spin" />Reading days…</div>;
   return (
