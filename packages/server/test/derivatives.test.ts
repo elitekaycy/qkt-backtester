@@ -128,10 +128,11 @@ describe("perpetual", () => {
   });
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  it("keeps the perpetual's bars in the symbol list and adds its funding as a requirement", async () => {
+  it("lists the perpetual once, under its root, and adds its funding as a requirement", async () => {
     const scan = await scanStore(tmp);
-    expect(scan.symbols.map((s) => s.symbol)).toEqual(["BTCUSDT"]);
+    expect(scan.symbols.map((s) => s.symbol)).toEqual([]);
     const root = scan.derivatives!.futures[0]!;
+    expect(root.perpetual!.bars.map((b) => b.tf)).toEqual(["1h"]);
     expect(root.perpetual).toMatchObject({ name: "BTCUSDT", funding: { rows: 5, first: "2024-02-01", last: "2024-02-05" } });
     // rates stop for more than a day between 02-03 and 02-05: qkt refuses a run over that
     expect(root.perpetual!.funding!.present).toEqual([{ from: "2024-02-01", to: "2024-02-04" }, { from: "2024-02-05", to: "2024-02-06" }]);
@@ -159,7 +160,8 @@ describe("perpetual", () => {
   it("a CFD on the same symbol name stays a CFD", async () => {
     const r = readinessFor(await scanStore(tmp), "p.qkt", strat("BACKTEST:BTCUSDT EVERY 1h"));
     expect(r.kinds).toBeUndefined();
-    expect(r.bars.blocked[0]!.reason).toMatch(/bars/);
+    // the venue's perpetual is not a BACKTEST symbol: the CFD path says so instead of borrowing its bars
+    expect(r.bars.blocked[0]!.reason).toMatch(/not in the data source/);
   });
 });
 

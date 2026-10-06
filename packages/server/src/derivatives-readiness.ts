@@ -66,6 +66,15 @@ function listedFuture(d: DerivativesReport, s: StreamDecl, finest: string, ctx: 
 
 // ---- perpetual: its bars come from the CFD path; these are the extras --------------------------------------------------
 
+/** A perpetual's bars as its root reports them (null when the root shows none: the plain symbol carries them then). */
+function perpetualBars(d: DerivativesReport, s: StreamDecl, finest: string): DPick | null {
+  const rr = d.futures.find((f) => f.venue === s.broker && f.perpetual?.name === s.symbol);
+  if (!rr?.perpetual?.bars.length) return null;
+  const key = `${s.broker}:${s.symbol}`, base = tfBase(rr.perpetual.bars.map((b) => b.tf), finest);
+  if (!base) return blocked(`no ${finest} bars for ${key}: build ${finest} (or a finer timeframe that divides it)`, "fetch", `qkt fetch ${key} --tf ${finest}`);
+  return { ranges: rr.perpetual.bars.find((b) => b.tf === base)!.present ?? [] };
+}
+
 const TAPE = new Set(["buy_volume", "sell_volume"]);
 const LIQ = new Set(["long_liq_volume", "short_liq_volume"]);
 const DEPTH = new Set(["bid_depth", "ask_depth", "book_imbalance"]);
@@ -182,7 +191,11 @@ export function planFor(d: DerivativesReport | undefined, s: StreamDecl, tier: T
   const kind = kindOf(s, ctx);
   switch (kind) {
     case "future": return { replace: listedFuture(d, s, finest, ctx) };
-    case "perpetual": return { extra: perpetualExtras(d, s, uses.get(s.alias) ?? new Set()) };
+    case "perpetual": {
+      // a bars run reads the perpetual's bars where its root shows them, because the plain symbol list no longer carries them
+      const extras = perpetualExtras(d, s, uses.get(s.alias) ?? new Set()), bars = tier === "bars" ? perpetualBars(d, s, finest) : null;
+      return bars ? { replace: combine(bars, extras) } : { extra: extras };
+    }
     case "continuous": return { replace: continuous(d, s, finest, source), needsAllowIncomplete: true };
     case "option": case "chain": case "analytic": return { replace: options(d, s, kind, ctx, tier) };
     default: return null;
