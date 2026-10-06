@@ -58,7 +58,14 @@ const qs = (o: Record<string, unknown>) => {
 
 export interface TreeEntry { name: string; path: string; type: "file" | "dir"; size: number; mtimeMs: number }
 /** `GET /api/instruments`: what the data source's instruments.yaml declares, and the roots the browser's lint and completions need. */
-export interface InstrumentsInfo { exists: boolean; catalog: InstrumentCatalog; futureRoots: string[]; perpetuals: string[]; optionRoots: string[] }
+export interface InstrumentsInfo {
+  exists: boolean; catalog: InstrumentCatalog; futureRoots: string[]; perpetuals: string[]; optionRoots: string[];
+  /** The workspace's own instruments.yaml: a run uses it entirely when it exists, the data source's file only as the fallback. */
+  workspace: { exists: boolean; catalog: InstrumentCatalog };
+  effective: "workspace" | "dataRoot" | "none";
+  /** By root key: the fields where the two files disagree, or which side alone declares the root. */
+  differences: Record<string, string[]>;
+}
 export type DerivFetchKind = "catalog" | "rolls" | "funding" | "marks" | "open-interest" | "chains" | "tape" | "liquidations" | "depth" | "bars";
 export interface DerivFetchReq { target: string; kind: DerivFetchKind; tf?: string; from?: string; to?: string; live?: boolean; series?: "trade" | "book" }
 

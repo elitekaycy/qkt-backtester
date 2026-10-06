@@ -9,7 +9,7 @@ import { applySettings, dataRootAllowed, loadSettings, savePrefs, updateSettings
 import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
 import { completeConfig, configReferenceFor, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
-import { rangeDays, longest, parseInstruments } from "@qkt-studio/core";
+import { rangeDays, longest, parseInstruments, termsDifferences } from "@qkt-studio/core";
 import { derivativesCached, kindContextOf } from "./derivatives-scan.js";
 import { acceptNoData, readAccepted, undoNoData } from "./no-data.js";
 
@@ -78,9 +78,17 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
     const d = await derivativesCached(cfg.dataRoot);
     const text = await fs.readFile(path.join(cfg.dataRoot, "instruments.yaml"), "utf8").catch(() => null);
     const ctx = kindContextOf(d);
+    // a run passes the workspace's instruments.yaml when there is one, and qkt then reads that file alone (not merged with the data
+    // source's); the data source's is only the fallback. The browser shows the terms the next run will use and where they differ.
+    const wsText = await fs.readFile(path.join(cfg.workspace, "instruments.yaml"), "utf8").then((t) => (t.trim() ? t : null), () => null);
+    const empty = { cfds: [], futures: [], options: [], errors: [] };
+    const data = text === null ? empty : parseInstruments(text), workspace = wsText === null ? empty : parseInstruments(wsText);
     return {
       exists: text !== null,
-      catalog: text === null ? { cfds: [], futures: [], options: [], errors: [] } : parseInstruments(text),
+      catalog: data,
+      workspace: { exists: wsText !== null, catalog: workspace },
+      effective: wsText !== null ? "workspace" : text !== null ? "dataRoot" : "none",
+      differences: wsText !== null && text !== null ? termsDifferences(data, workspace) : {},
       futureRoots: [...(ctx.futureRoots ?? [])].sort(), perpetuals: [...(ctx.perpetuals ?? [])].sort(), optionRoots: [...(ctx.optionRoots ?? [])].sort(),
     };
   });

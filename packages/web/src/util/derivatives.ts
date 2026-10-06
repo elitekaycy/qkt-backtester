@@ -1,11 +1,27 @@
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { calendarOf, contextFromCatalog, fieldAllowed, futuresDayExpected, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
+import { calendarOf, contextFromCatalog, fieldAllowed, futuresDayExpected, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type FutureTerms, type OptionTerms, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
 import type { DerivFetchKind, DerivFetchReq, InstrumentsInfo } from "../api/client.js";
 
 /** What the browser needs of `GET /api/instruments` to tell a future from a CFD: the same context the server's gate uses. */
 export function kindContextFrom(info: InstrumentsInfo | null): KindContext {
   if (!info) return {};
   return contextFromCatalog(info.catalog, { futureRoots: info.futureRoots, perpetuals: info.perpetuals });
+}
+
+/** The terms the next run will use for a root, which file they come from, and where the other file disagrees. */
+export function termsFor(info: InstrumentsInfo | null, key: string): { source: "workspace" | "dataRoot" | "none"; terms: FutureTerms | OptionTerms | null; differs: string[] } {
+  if (!info) return { source: "none", terms: null, differs: [] };
+  const used = info.effective === "workspace" ? info.workspace.catalog : info.catalog;
+  const terms = [...used.futures, ...used.options].find((t) => t.root === key) ?? null;
+  return { source: info.effective, terms, differs: info.differences[key] ?? [] };
+}
+
+/** The sentence for where the two instruments.yaml files disagree about a root (a run reads the workspace's file alone). */
+export function differenceNote(source: "workspace" | "dataRoot" | "none", differs: string[]): string | null {
+  if (!differs.length) return null;
+  if (differs[0] === "only in the data source") return "Only the data source's instruments.yaml declares this root. A run reads the workspace's file alone, so it will not know it.";
+  if (differs[0] === "only in the workspace") return "Only the workspace's instruments.yaml declares this root; the data source's file has no entry for it.";
+  return `The ${source === "workspace" ? "data source's" : "workspace's"} instruments.yaml differs on ${differs.join(", ")}; a run reads ${source === "workspace" ? "the workspace's" : "this"} file alone.`;
 }
 
 /** alias -> what its symbol names, for every stream a strategy declares. A source with no stream gives an empty map. */

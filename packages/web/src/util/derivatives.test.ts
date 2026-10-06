@@ -14,7 +14,7 @@ options:
   - root: DERIBIT:BTC_USDC
 `;
 const catalog = parseInstruments(YAML);
-const info: InstrumentsInfo = { exists: true, catalog, futureRoots: ["BINANCE_UM:BTCUSDT", "CME:ES"], perpetuals: ["BINANCE_UM:BTCUSDT"], optionRoots: ["DERIBIT:BTC_USDC"] };
+const info: InstrumentsInfo = { exists: true, catalog, futureRoots: ["BINANCE_UM:BTCUSDT", "CME:ES"], perpetuals: ["BINANCE_UM:BTCUSDT"], optionRoots: ["DERIBIT:BTC_USDC"], workspace: { exists: false, catalog: parseInstruments("") }, effective: "dataRoot", differences: {} };
 const ctx = kindContextFrom(info);
 
 const SRC = `STRATEGY s VERSION 1
