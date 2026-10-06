@@ -79,6 +79,9 @@ options:
     takerFeeRate: 0.0003
 ```
 
+The workspace file is the one runs read, and it wins entirely over the data source's: a root declared only there is not
+priced. The root dialog shows the terms the next run will use, which file they come from, and where the other file differs.
+
 A new workspace is seeded with an entry for each root the data source holds. Terms the studio cannot know are marked
 `GUESSED` the way CFD specs are, and margin is never invented: without a `margin:` block qkt applies no margin check and never
 liquidates. A store that holds futures also gets raised `risk:` caps in `qkt.config.yaml` (`max_order_notional`,
@@ -91,8 +94,12 @@ liquidates. A store that holds futures also gets raised `risk:` caps in `qkt.con
   hit the refusal.
 - **Exchange simulator.** Futures and options fill on qkt's own exchange simulator whatever the broker model says: market
   orders at the executable price plus slippage, fees from the root on every fill, rolls booked as roll costs.
-- **Coverage on `@front`.** qkt's own bar-coverage check cannot see a continuous stream (it reports 0 of N days), so the studio
-  does the per-contract check itself and passes `--allow-incomplete` for these runs. The run's coverage line says so.
+- **Coverage on futures.** qkt's own bar-coverage check cannot see a continuous stream (it reports 0 of N days), and it
+  applies the FX week to a listed CME contract, so it calls every Sunday and exchange holiday a hole. For both the studio
+  does the check itself, by the root's own calendar and the roll schedule, before the run, and passes `--allow-incomplete`.
+  Real gaps still stop the run, naming the days. The run's coverage line says what judged it.
+- **Cached runs.** A run is reused only when everything it read is unchanged: bars and ticks, and for futures and options the
+  catalog, rolls, each contract's bars, funding, marks, open interest, chain days and `instruments.yaml`.
 - **Funding.** A perpetual with stored rates is charged funding. The run bar has a Funding switch; off passes `--funding off`.
 
 ## Reading the results
