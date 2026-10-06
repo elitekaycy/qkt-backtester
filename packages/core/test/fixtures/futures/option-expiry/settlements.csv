@@ -1,0 +1,2 @@
+timestamp,strategy,contract,side,quantity,price,deliveryPriceKnown
+1790409600000,opt,DERIBIT:BTC_USDC_26SEP26_84500_P,SELL,0.10,457.17000000,true

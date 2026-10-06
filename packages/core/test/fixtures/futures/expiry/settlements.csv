@@ -1,0 +1,2 @@
+timestamp,strategy,contract,side,quantity,price,deliveryPriceKnown
+1552683600000,es_hold,CME:ESH19,SELL,1,2811.89000000,true
