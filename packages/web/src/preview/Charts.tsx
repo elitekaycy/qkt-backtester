@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CandlestickSeries, ColorType, CrosshairMode, createChart, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
 import { X } from "lucide-react";
 import { api, type Coverage, type RunMeta } from "../api/client.js";
-import type { RoundTrip } from "../api/types.js";
+import type { InstrumentKind, RoundTrip } from "../api/types.js";
 import { SplitPrimitive } from "../charts/SplitPrimitive.js";
 import { TradesPrimitive } from "../charts/TradesPrimitive.js";
 import { useAgent } from "../state/agent.js";
 import { ordered, useChartPrefs } from "../state/chartPrefs.js";
 import { useStore } from "../state/store.js";
+import { useUi } from "../state/ui.js";
 import { Maximize2, Minimize2 } from "../ui/icons.js";
 import { Tip } from "../ui/Tip.js";
 import { fmtDur, fmtR, fmtMoney, fmtPrice, fmtTs } from "../util/format.js";
@@ -221,13 +222,32 @@ export function PriceChart({ stream, win, runId, registry, trips, tripsReady, ma
         <div className="trade-tip" role="tooltip" style={{ left: Math.min(tip.x + 14, (plot.current?.clientWidth ?? 600) - 210), top: Math.max(30, tip.y - 8) }}>
           <b>{t.side === "long" ? "▲ Long" : "▼ Short"} {t.symbol.split(":").pop()} · {t.qty} lots{stratColor && <span style={{ color: strategyColor(t.strategy) }}> · {strategyAlias(t.strategy)}</span>}</b>
           <span>{fmtTs(t.entryTs)} → {t.open ? "open" : fmtTs(t.exitTs)}</span>
-          <span>{fmtPrice(t.entryPx)} → {t.exitPx === null ? "—" : fmtPrice(t.exitPx)} · {t.open ? "open" : t.exit}</span>
+          <span>{fmtPrice(t.entryPx)} → {t.exitPx === null ? "—" : fmtPrice(t.exitPx)} · {t.open ? "open" : t.venueExit ?? t.exit}</span>
+          {t.contract && <span className="muted">{t.contract.replace(/^[A-Za-z0-9_]+:/, "")}{t.exitContract && t.exitContract !== t.contract ? ` → ${t.exitContract.replace(/^[A-Za-z0-9_]+:/, "")}` : ""}{t.rolls ? ` · ${t.rolls} roll${t.rolls === 1 ? "" : "s"}` : ""}</span>}
           <span className={t.pnl >= 0 ? "gain" : "loss"}>{fmtMoney(t.pnl)}{t.r !== undefined ? ` · ${fmtR(t.r)}` : ""} · held {fmtDur(t.holdMs)}</span>
           <span className="muted">{t.risk !== undefined ? `risk ${fmtMoney(t.risk).replace("+", "")}` : "no stop set"}{t.sl !== undefined ? ` · SL ${fmtPrice(t.sl)}` : ""}{t.tp !== undefined ? ` · TP ${fmtPrice(t.tp)}` : ""}</span>
           <em>click to inspect</em>
         </div>
       )}
       <CoverageStrip stream={stream} from={win.from} to={win.to} registry={registry} id={id} />
+    </div>
+  );
+}
+
+/** Streams with no single bar series to draw: a continuous future is built from many contracts, a chain or analytic is not price bars at all. */
+const noBarSeries = (k: InstrumentKind | undefined) => k === "continuous" || k === "chain" || k === "analytic" || k === "hub";
+const NO_BAR_WHY: Record<string, string> = {
+  continuous: "is a continuous series built from each contract's bars as the roll schedule moves along them, so there is no single bar series to draw. Its trades are in the Trades tab and the journal; the contract behind each fill and every roll are under Futures & options.",
+  chain: "is an options chain: it is read by OPEN ... = OPTIONS ON ..., and holds quotes for many contracts, not candles.",
+  analytic: "is a read-only chain analytic (implied volatility or skew), not a price series.",
+  hub: "is a HUB record stream, not price bars.",
+};
+function NoBarChart({ stream, kind, hasDerivatives, onOpenJournal }: { stream: Stream; kind: InstrumentKind; hasDerivatives: boolean; onOpenJournal(): void }) {
+  return (
+    <div className="chart-cell empty" role="status" style={{ justifyContent: "center", minHeight: 150 }}>
+      <b>{stream.symbol} · {stream.tf}</b>
+      <span style={{ maxWidth: 520, textAlign: "center" }}><span className="mono">{stream.broker}:{stream.symbol}</span> {NO_BAR_WHY[kind]}</span>
+      {hasDerivatives && <button className="btn sm" onClick={() => { useUi.getState().openJournal("derivatives"); onOpenJournal(); }}>Open Futures &amp; options</button>}
     </div>
   );
 }
@@ -324,15 +344,17 @@ export function ChartsBody({ onOpenJournal }: { onOpenJournal(): void }) {
       {meta.strategies.length > 1 && <StrategyLegend ids={meta.strategies} />}
       <div className="chart-area" data-layout={prefs.layout} style={{ display: inChartTab ? undefined : "none" }}>
         {shown.length === 0 && <div className="empty" style={{ flex: 1 }}><b>All charts are hidden</b>Turn one on from <em>Charts</em> in the toolbar.</div>}
-        {visible.map((s) => (
+        {visible.map((s) => (noBarSeries(meta.streams.find((m) => m.broker === s.broker && m.symbol === s.symbol)?.kind) ? (
+          <NoBarChart key={keyOf(s)} stream={s} kind={meta.streams.find((m) => m.broker === s.broker && m.symbol === s.symbol)!.kind!} hasDerivatives={(meta.derivatives?.length ?? 0) > 0} onOpenJournal={onOpenJournal} />
+        ) : (
           <PriceChart key={keyOf(s)} stream={s} win={win} runId={results.runId} registry={registry} trips={rows} tripsReady={trips.ready}
             maximized={maxed === keyOf(s)} onMax={() => setMaxed(maxed === keyOf(s) ? null : keyOf(s))}
             onHide={() => { if (maxed === keyOf(s)) setMaxed(null); prefs.toggle(keyOf(s)); }} onSelect={(t) => pick(t, true)} />
-        ))}
+        )))}
       </div>
       {!inChartTab && <TradesTab rows={listRows} selectedId={selected?.id ?? null} onSelect={(t) => pick(t, false)}
         all={results.summary.trades + results.summary.openTrades} matched={trips.truncated && !symFilter ? trips.total : null} />}
-      <TradeStrip trip={selected} index={idx} count={rows.length} startBalance={results.equity.equity[0] ?? 0} multi={meta.strategies.length > 1} onPrev={() => step(-1)} onNext={() => step(1)} onClose={() => selectTrip(null)} />
+      <TradeStrip trip={selected} meta={meta} index={idx} count={rows.length} startBalance={results.equity.equity[0] ?? 0} multi={meta.strategies.length > 1} onPrev={() => step(-1)} onNext={() => step(1)} onClose={() => selectTrip(null)} />
       <span hidden>{String(!!onOpenJournal)}</span>
     </div>
   );

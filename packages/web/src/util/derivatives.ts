@@ -50,6 +50,9 @@ const LONG: Record<InstrumentKind, string> = {
 };
 export const kindShort = (k: InstrumentKind) => SHORT[k];
 export const kindTitle = (k: InstrumentKind) => LONG[k];
+/** What a position size is counted in: lots for a CFD, contracts for a future or option, plain units for a perpetual (coins). */
+export const qtyUnit = (k: InstrumentKind | undefined): string => (!k || k === "cfd" ? "lots" : k === "perpetual" ? "units" : "contracts");
+
 /** A CFD is the default and gets no chip: only a stream that is something else is called out. */
 export const showKind = (k: InstrumentKind | undefined): k is InstrumentKind => !!k && k !== "cfd";
 
@@ -106,6 +109,16 @@ export function marginView(days: readonly MarginDay[]): { points: MarginPoint[];
   let tight: { date: string; headroom: number } | null = null;
   for (const d of days) { const h = d.equity - d.maintenance; if (!tight || h < tight.headroom) tight = { date: d.date, headroom: h }; }
   return { points, calls: days.filter((d) => d.marginCall).length, tightest: tight };
+}
+
+/** The contracts a continuous-futures run traded or rolled through, bare codes in the order they were first used (for `contract:`). */
+export function contractNames(d: { contracts?: ReadonlyArray<{ contract: string }>; rolls?: ReadonlyArray<{ from: string; to: string }> } | null): string[] {
+  if (!d) return [];
+  const bare = (c: string) => c.replace(/^[A-Za-z0-9_]+:/, "");
+  const out = new Set<string>();
+  for (const c of d.contracts ?? []) out.add(bare(c.contract));
+  for (const r of d.rolls ?? []) { out.add(bare(r.from)); out.add(bare(r.to)); }
+  return [...out];
 }
 
 /** Rolls summed per stream: how many, what they cost, and the typical price gap between the two contracts. */

@@ -3,7 +3,7 @@ import { create } from "zustand";
 export type Section = "files" | "data" | "runs";
 export type DockTab = "pipeline" | "problems" | "terminal" | "chat";
 export type Pane = "sidebar" | "editor" | "chart" | "dock";
-export type JournalSection = "overview" | "strategies" | "calendar" | "daily" | "monthly" | "trades" | "time" | "lab" | "compare";
+export type JournalSection = "overview" | "strategies" | "calendar" | "daily" | "monthly" | "trades" | "time" | "derivatives" | "lab" | "compare";
 
 interface Persisted {
   section: Section | null; sidebarW: number; previewW: number; dockOpen: boolean; dockH: number; dockTab: DockTab;

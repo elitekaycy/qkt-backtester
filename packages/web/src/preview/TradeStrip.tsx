@@ -1,10 +1,15 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { strategyAlias } from "@qkt-studio/core/strategy";
 import type { RoundTrip } from "../api/types.js";
+import type { RunMeta } from "../api/client.js";
+import { qtyUnit } from "../util/derivatives.js";
 import { fmtDur, fmtR, fmtMoney, fmtNum, fmtPct, fmtPrice, fmtTs } from "../util/format.js";
 import { strategyColor } from "../util/strategyColor.js";
 
 const EXIT_LABEL: Record<string, string> = { target: "◆ Target hit", stop: "✕ Stop hit", signal: "● Rule exit", open: "Still open" };
+// futures and options: the venue closed the trade, not a rule or an order
+const VENUE_LABEL = { expiry: "◷ Expired, settled", liquidation: "✕ Liquidated", roll_failed: "✕ Roll failed" } as const;
+const bareContract = (c: string) => c.replace(/^[A-Za-z0-9_]+:/, "");
 
 const NO_LEVEL = "None was recorded on this trade's entry fill. Strategies without a BRACKET (or with only rule-based exits) have no stop or target.";
 /** One level, or, for a trade that scaled in with different levels on each entry, how many distinct ones. */
@@ -20,9 +25,11 @@ function Field({ l, v, tone, title, wide }: { l: string; v: React.ReactNode; ton
 }
 
 /** The selected trade in plain numbers: everything an analyst needs to explain the entry, the risk and the exit. */
-export function TradeStrip({ trip: t, index, count, startBalance, multi, onPrev, onNext, onClose }: { trip: RoundTrip | null; index: number; count: number; startBalance: number; multi?: boolean; onPrev(): void; onNext(): void; onClose(): void }) {
+export function TradeStrip({ trip: t, meta, index, count, startBalance, multi, onPrev, onNext, onClose }: { trip: RoundTrip | null; meta?: RunMeta | null; index: number; count: number; startBalance: number; multi?: boolean; onPrev(): void; onNext(): void; onClose(): void }) {
   if (!t) return <div className="trade-strip empty-strip"><span className="muted">Click an entry marker or a trade box, or use ◀ ▶ to walk through the trades one by one.</span><span className="legend" aria-label="Legend"><span>▲ long entry</span><span>▼ short entry</span><span>◆ target</span><span>■✕ stop</span><span>● rule exit</span></span></div>;
   const long = t.side === "long";
+  const kind = meta?.streams.find((x) => `${x.broker}:${x.symbol}` === t.symbol || x.symbol === t.symbol)?.kind;
+  const unit = qtyUnit(kind);
   const rr = t.sl !== undefined && t.tp !== undefined && t.entryPx !== t.sl ? Math.abs(t.tp - t.entryPx) / Math.abs(t.entryPx - t.sl) : null;
   const tone = t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : undefined;
   return (
@@ -31,7 +38,9 @@ export function TradeStrip({ trip: t, index, count, startBalance, multi, onPrev,
         <b className="side">{long ? "▲ Long" : "▼ Short"}</b><span className="ink2">{t.symbol.split(":").pop()}</span>
         {multi && <span className="badge" style={{ color: strategyColor(t.strategy) }}>{strategyAlias(t.strategy)}</span>}
         <span className="muted">{index >= 0 ? `trade ${index + 1} of ${count}` : `trade #${t.id}`}</span>
-        <span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{EXIT_LABEL[t.open ? "open" : t.exit] ?? t.exit}</span>
+        {t.venueExit ? <span className={`badge ${t.venueExit === "expiry" ? "" : "bad"}`}>{VENUE_LABEL[t.venueExit]}</span>
+          : <span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{EXIT_LABEL[t.open ? "open" : t.exit] ?? t.exit}</span>}
+        {t.contract && <span className="badge" title="The contract this trade entered on, and the one it left on when a roll carried it across">{bareContract(t.contract)}{t.exitContract && t.exitContract !== t.contract ? ` → ${bareContract(t.exitContract)}` : ""}{t.rolls ? ` · ${t.rolls} roll${t.rolls === 1 ? "" : "s"}` : ""}</span>}
         <span className="grow" />
         <button className="btn ghost icon sm" aria-label="Previous trade" onClick={onPrev}><ChevronLeft size={15} /></button>
         <button className="btn ghost icon sm" aria-label="Next trade" onClick={onNext}><ChevronRight size={15} /></button>
@@ -43,7 +52,7 @@ export function TradeStrip({ trip: t, index, count, startBalance, multi, onPrev,
         <Field l="Held" v={t.open ? "—" : fmtDur(t.holdMs)} />
         <Field l="Stop loss" v={levels(t, "sl")} title={t.sl === undefined ? NO_LEVEL : t.entries ? "This trade scaled in: each entry has its own stop (listed below)" : "Protective stop price set at entry"} />
         <Field l="Take profit" v={levels(t, "tp")} title={t.tp === undefined ? NO_LEVEL : t.entries ? "This trade scaled in: each entry has its own target (listed below)" : "Target price set at entry"} />
-        <Field l="Size" v={<><span className="num">{fmtNum(t.qty, 2)}</span> <span className="muted">lots</span></>} title="Largest position size held during the trade" />
+        <Field l="Size" v={<><span className="num">{fmtNum(t.qty, 2)}</span> <span className="muted">{unit}</span></>} title="Largest position size held during the trade" />
         <Field l="Risk" v={t.risk !== undefined ? <><span className="num">{fmtMoney(t.risk).replace("+", "")}</span>{startBalance > 0 && <span className="muted"> · {fmtPct(t.risk / startBalance)} of start</span>}{rr !== null && <span className="muted"> · R:R {rr.toFixed(1)}</span>}</> : <span className="muted">no stop</span>} title={t.risk !== undefined ? "Money at stake at entry: distance to the stop × size" : "No stop was set on this entry, so risk and R are not measured. Add a BRACKET with STOP_LOSS to see them."} wide />
         <Field l="P&L" tone={tone} v={<span className="num">{fmtMoney(t.pnl)}</span>} />
         <Field l="R" tone={tone} v={t.r !== undefined ? <span className="num">{fmtR(t.r)}</span> : "—"} title="P&L divided by the risk at entry" />

@@ -166,3 +166,34 @@ describe("hold filters agree with the hold buckets (half-open)", () => {
     expect(toChips({ minHoldMs: H, maxHoldMs: 4 * H }).find((c) => c.id === "held")!.text).toBe("held:1h..4h");
   });
 });
+
+describe("futures and options filters", () => {
+  it("exit: reads the venue's own closes apart from a rule's or an order's", () => {
+    expect(parseToken("exit:expiry").patch).toEqual({ venueExit: "expiry", exit: undefined });
+    expect(parseToken("exit:liquidated").patch).toEqual({ venueExit: "liquidation", exit: undefined });
+    expect(parseToken("exit:roll_failed").patch).toEqual({ venueExit: "roll_failed", exit: undefined });
+    // and the other way round, so the two never both apply
+    expect(parseToken("exit:stop").patch).toEqual({ exit: "stop", venueExit: undefined });
+    expect(parseToken("exit:nonsense").error).toContain("expiry");
+  });
+  it("contract: takes a code with or without its venue", () => {
+    expect(parseToken("contract:ESH19").patch).toEqual({ contract: "ESH19" });
+    expect(parseToken("contract:CME:ESH19").patch).toEqual({ contract: "ESH19" });
+    expect(parseToken("contract:").error).toBeDefined();
+  });
+  it("a later exit filter replaces an earlier one of the other kind", () => {
+    expect(parseFilters("exit:stop exit:expiry").patch).toMatchObject({ venueExit: "expiry" });
+    expect(parseFilters("exit:expiry exit:stop").patch).toMatchObject({ exit: "stop", venueExit: undefined });
+  });
+  it("shows them as chips that clear themselves", () => {
+    const c = toChips({ venueExit: "liquidation", contract: "ESH19" });
+    expect(c.map((x) => x.text)).toEqual(["exit:liquidation", "contract:ESH19"]);
+    expect(c[0]!.clear).toEqual({ venueExit: undefined });
+  });
+  it("offers the venue exits and the run's contracts only on a futures/options run", () => {
+    const cfd = suggest("exit:", {}).map((s) => s.text);
+    expect(cfd).not.toContain("exit:expiry");
+    expect(suggest("exit:", { venue: true }).map((s) => s.text)).toEqual(expect.arrayContaining(["exit:expiry", "exit:liquidation"]));
+    expect(suggest("contract:", { venue: true, contracts: ["ESH19", "ESM19"] }).map((s) => s.text)).toEqual(["contract:ESH19", "contract:ESM19"]);
+  });
+});

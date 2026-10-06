@@ -3,6 +3,7 @@ import { useStore } from "../state/store.js";
 import { useAnalytics } from "./useAnalytics.js";
 import { Chart, chartBase, Gauge, Ring, SignedBars, Spark, Stat, tipHtml, Widget, tok, zoomOptions } from "./widgets.js";
 import { DASH, fmtDay, fmtDur, fmtR, fmtMoney, fmtNum, fmtPct, fmtRatio, glyph } from "../util/format.js";
+import { costLines } from "../util/derivatives.js";
 import { Activity, Gauge as GaugeIcon, Percent, Scale, Target, TrendingUp, Layers } from "../ui/icons.js";
 
 export function Overview() {
@@ -87,6 +88,33 @@ export function Overview() {
           <Stat label="Average hold" value={fmtDur(a.avgHoldMs)} />
         </Widget>
       </div>
+
+      {/* Futures and options only: a CFD run has neither a cost bridge nor venue closes, so nothing is added to its Overview. */}
+      {(s.costs || a.venue) && (
+        <div className="grid cols-3">
+          {s.costs && (
+            <Widget title="From P&L to cost" className="span-2" right={<span className="muted" style={{ fontSize: "var(--fs-xs)" }}>whole run · ignores filters</span>}>
+              <div className="tbl-scroll"><table className="tbl">
+                <thead><tr><th>Step</th><th className="r">Amount</th><th>What it is</th></tr></thead>
+                <tbody>{costLines(s.costs).map((r) => (
+                  <tr key={r.key} style={r.key === "pnl" || r.key === "preCost" ? { fontWeight: 600 } : undefined}>
+                    <td>{r.key === "pnl" ? "Net P&L" : r.key === "preCost" ? "= Before costs" : `+ ${r.label}`}</td>
+                    <td className={`r num ${r.key === "pnl" || r.key === "preCost" ? (r.value >= 0 ? "gain" : "loss") : ""}`}>{r.key === "pnl" || r.key === "preCost" ? fmtMoney(r.value) : fmtNum(r.value, 2)}</td>
+                    <td className="muted">{r.key === "pnl" ? "what the account made" : r.key === "preCost" ? "what the same trades make with no costs" : r.note}</td></tr>
+                ))}</tbody>
+              </table></div>
+              <div className="hint muted" style={{ fontSize: "var(--fs-xs)" }}>Costs are added back to net P&L to show what the strategy makes before the market takes its share. Rolls and funding are booked outside the fills, so they appear here and in Futures &amp; options.</div>
+            </Widget>
+          )}
+          {a.venue && (
+            <Widget title="Closed by the venue" right={<span className="muted" style={{ fontSize: "var(--fs-xs)" }}>P&L by cause</span>}>
+              <SignedBars items={a.venue.map((e) => ({ key: e.reason, label: { expiry: "Expiry settlement", liquidation: "Liquidation", roll_failed: "Roll failed" }[e.reason], value: e.pnl, count: e.trades }))} active={filters.venueExit ?? null}
+                onPick={(k) => setFilters({ venueExit: filters.venueExit === k ? undefined : (k as NonNullable<typeof filters.venueExit>), exit: undefined })} />
+              <div className="hint muted" style={{ fontSize: "var(--fs-xs)" }}>These trades also count in How trades ended: the exchange closed them, not a rule or an order.</div>
+            </Widget>
+          )}
+        </div>
+      )}
 
       <Widget title="Engine metrics" right={<span className="muted" style={{ fontSize: "var(--fs-xs)" }}>whole run · ignores filters</span>}>
         <div className="grid cols-4" style={{ gap: "var(--s2) var(--s5)" }}>

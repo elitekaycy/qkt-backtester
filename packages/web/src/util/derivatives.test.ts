@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import type { CostBridge, MarginDay, RollRow } from "@qkt-studio/core";
+import type { CostBridge, DerivativesReport, FutureRootReport, MarginDay, OptionRootReport, RollRow } from "@qkt-studio/core";
 import { parseInstruments } from "@qkt-studio/core";
 import type { InstrumentsInfo } from "../api/client.js";
-import { costLines, effectiveTier, fieldsFor, kindContextFrom, kindMarks, marginView, rollSummary, showKind, streamKinds, streamsPerpetual, tierRule } from "./derivatives.js";
+import { commandsIn, contractNames, costLines, effectiveTier, fetchLabel, fetchRequestFrom, fieldsFor, futureRootLine, kindContextFrom, kindMarks, marginView, optionRootLine, qtyUnit, readsRoot, rollSummary, rootKeyFor, showKind, streamKinds, streamsPerpetual, tierRule } from "./derivatives.js";
 
 const YAML = `
 futures:
@@ -120,5 +120,73 @@ describe("derivatives results", () => {
       { stream: "CME:ES@front", count: 2, cost: 17.84, fees: 8.92, avgGap: 4.625 },
       { stream: "CME:NQ@front", count: 1, cost: 8, fees: 4.46, avgGap: 10 },
     ]);
+  });
+  it("contracts a run traded, bare and in first-use order", () => {
+    expect(contractNames({ contracts: [{ contract: "CME:ESH19" }, { contract: "CME:ESH19" }], rolls: [{ from: "CME:ESH19", to: "CME:ESM19" }] })).toEqual(["ESH19", "ESM19"]);
+    expect(contractNames(null)).toEqual([]);
+  });
+  it("sizes are lots for a CFD, contracts for a future or option, units for a perpetual", () => {
+    expect([undefined, "cfd", "continuous", "option", "perpetual"].map((k) => qtyUnit(k as never))).toEqual(["lots", "lots", "contracts", "contracts", "units"]);
+  });
+});
+
+describe("the fix a blocked stream names", () => {
+  it("a command with everything it needs becomes a job", () => {
+    expect(fetchRequestFrom("qkt fetch CME:ES --catalog")).toEqual({ target: "CME:ES", kind: "catalog" });
+    expect(fetchRequestFrom("qkt fetch CME:ES --rolls --tf 1d")).toEqual({ target: "CME:ES", kind: "rolls", tf: "1d" });
+    expect(fetchRequestFrom("qkt fetch BINANCE_UM:BTCUSDT --funding --from 2024-01-01 --to 2024-03-01")).toEqual({ target: "BINANCE_UM:BTCUSDT", kind: "funding", from: "2024-01-01", to: "2024-03-01" });
+    expect(fetchRequestFrom("qkt fetch BINANCE_UM:BTCUSDT_240927 --tf 15m --from 2024-06-01 --to 2024-09-27")).toEqual({ target: "BINANCE_UM:BTCUSDT_240927", kind: "bars", tf: "15m", from: "2024-06-01", to: "2024-09-27" });
+    expect(fetchRequestFrom("qkt fetch DERIBIT:BTC_USDC --chains --live")).toEqual({ target: "DERIBIT:BTC_USDC", kind: "chains", live: true });
+  });
+  it("a command that still has a placeholder, or no range, is only copied, never run", () => {
+    expect(fetchRequestFrom("qkt fetch CME:ESZ19 --tf 1d --from <from> --to 2019-12-20")).toBeNull();
+    expect(fetchRequestFrom("qkt fetch BINANCE_UM:BTCUSDT --funding")).toBeNull();
+    expect(fetchRequestFrom("qkt fetch DERIBIT:BTC_USDC --marks --from 2024-01-01 --to 2024-02-01")).toBeNull(); // marks need a timeframe
+    expect(fetchRequestFrom("rm -rf /")).toBeNull();
+    expect(fetchRequestFrom("qkt backtest x.qkt")).toBeNull();
+  });
+  it("finds the commands inside a scan note", () => {
+    expect(commandsIn("No contract catalog for CME:ES: `qkt fetch CME:ES --catalog`.")).toEqual(["qkt fetch CME:ES --catalog"]);
+    expect(commandsIn("nothing here")).toEqual([]);
+  });
+  it("labels a job by what it fetches", () => {
+    expect(fetchLabel({ target: "CME:ES", kind: "rolls" })).toBe("Fetch rolls · CME:ES");
+    expect(fetchLabel({ target: "X:Y", kind: "bars", tf: "1h" })).toBe("Fetch 1h bars · X:Y");
+  });
+});
+
+describe("roots in the Data section", () => {
+  const es = { key: "CME:ES", venue: "CME", root: "ES", terms: null, catalog: { contracts: 92, first: "1999-12-17", last: "2022-12-16", delivered: 90 }, rolls: { count: 88, first: null, last: null, policy: "7d@00:00" },
+    contracts: [{ symbol: "ESZ22", expiry: "2022-12-16", deliveryPrice: null, bars: [{ tf: "1d", files: 200, first: "2022-01-03", last: "2022-12-16" }] }, { symbol: "ESH23", expiry: "2023-03-17", deliveryPrice: null, bars: [] }], perpetual: null, notes: [] } as unknown as FutureRootReport;
+  it("summarises a root and flags the first thing that needs doing", () => {
+    const l = futureRootLine(es);
+    expect(l).toMatchObject({ key: "CME:ES", title: "ES", status: "ok", attention: null });
+    expect(l.facts).toEqual(["92 contracts", "1999–22", "88 rolls", "1 with bars"]);
+    expect(futureRootLine({ ...es, notes: ["No `futures:` entry for CME:ES in instruments.yaml"] })).toMatchObject({ status: "warn", attention: expect.stringContaining("futures:") });
+    expect(futureRootLine({ ...es, catalog: null, contracts: [], rolls: null })).toMatchObject({ status: "bad" });
+  });
+  it("a perpetual is described by its funding", () => {
+    const p = { ...es, catalog: null, rolls: null, contracts: [], perpetual: { name: "BTCUSDT", bars: [{ tf: "1h", files: 60, first: null, last: null }], funding: null, openInterest: null, marks: [] } } as unknown as FutureRootReport;
+    expect(futureRootLine(p).facts).toEqual(["perpetual BTCUSDT", "no funding stored"]);
+  });
+  it("options: chains stored or not", () => {
+    const o = { key: "DERIBIT:BTC_USDC", venue: "DERIBIT", root: "BTC_USDC", terms: null, catalog: { contracts: 40, first: null, last: null }, chains: { trade: { files: 5, first: "2026-09-24", last: "2026-09-30" }, book: null }, notes: [] } as unknown as OptionRootReport;
+    expect(optionRootLine(o)).toMatchObject({ status: "ok", facts: ["40 contracts", "trade chains 2026"] });
+    expect(optionRootLine({ ...o, chains: { trade: null, book: null } } as OptionRootReport)).toMatchObject({ status: "warn", attention: "no chain history stored" });
+  });
+  it("which streams read which root", () => {
+    const r = { venue: "CME", root: "ES", contracts: [{ symbol: "ESZ22" }] };
+    expect(readsRoot({ broker: "CME", symbol: "ES@front" }, r)).toBe(true);
+    expect(readsRoot({ broker: "CME", symbol: "ESZ22" }, r)).toBe(true);
+    expect(readsRoot({ broker: "CME", symbol: "NQ@front" }, r)).toBe(false);
+    expect(readsRoot({ broker: "EXNESS", symbol: "ES@front" }, r)).toBe(false);
+    expect(readsRoot({ broker: "OPTIONS", symbol: "DERIBIT.BTC_USDC" }, { venue: "DERIBIT", root: "BTC_USDC" })).toBe(true);
+    expect(readsRoot({ broker: "BINANCE_UM", symbol: "BTCUSDT" }, { venue: "BINANCE_UM", root: "BTCUSDT", perpetual: { name: "BTCUSDT" } })).toBe(true);
+  });
+  it("a stream's root key is found in the scan, and a CFD has none", () => {
+    const d = { futures: [es], options: [], instruments: { path: "", exists: true, errors: [] } } as unknown as DerivativesReport;
+    expect(rootKeyFor({ broker: "CME", symbol: "ES@front" }, d)).toBe("CME:ES");
+    expect(rootKeyFor({ broker: "BACKTEST", symbol: "XAUUSD" }, d)).toBeNull();
+    expect(rootKeyFor({ broker: "CME", symbol: "ES@front" }, undefined)).toBeNull();
   });
 });
