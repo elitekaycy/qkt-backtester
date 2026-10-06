@@ -54,6 +54,20 @@ pnpm docker:build
   run never gets them, and every UI branch on `meta.strategies.length > 1` (or a 404 on those routes), never on run
   metadata alone. Readiness for a portfolio file must resolve its `IMPORT`s (`server/src/portfolio.ts`) to get the
   union of streams; the portfolio file's own `SYMBOLS` block is not enough.
+- **Futures and options** (probed on qkt 0.55.0; `server/src/derivatives-{scan,readiness}.ts`). The DSL is one language
+  (`alias = VENUE:SYMBOL EVERY tf`), but **qkt does not enforce which fields a kind has**: `fx.dte` on a CFD parses and runs
+  with zero trades, so `kind-gate.ts` refuses it in the editor check and as a failed parse step. A continuous stream
+  (`CME:ES@front`)'s own coverage check is meaningless (it looks for `bars/<V>/<ROOT>@front` and reports 0/N days, in bars
+  and ticks runs alike) and the run only starts with `--allow-incomplete`, so the studio checks every contract the roll
+  schedule follows itself (`Readiness.needsAllowIncomplete`). A root without `roll:` fails with "has no roll policy"; trading
+  a continuous stream needs `adjust: panama`. A series starts at its first measured roll. An option contract is read from the
+  stored chain, never from bars (a bars run looks for `bars/<V>/<CONTRACT>` and reports 0/N): Full runs print "chain coverage"
+  and refuse a missing day with the exact `qkt fetch ... --chains` line; no `chains:` fails with "declares no chain series".
+  A perpetual's funding rates must leave no gap over a day (`--funding off` runs without). Contract bars read as `.bin` in a
+  bars run, so a `.csv` store is not "built". The scan reads directory listings only, so a store with hundreds of contract
+  folders scans in seconds; the plain symbol list leaves contracts under their root. A per-run data view (`data-view.ts`) must
+  link `contracts/ funding/ marks/ open_interest/ tape/ liquidations/ depth/ chains/` as well as bars, or a run on a
+  per-symbol source cannot see its catalog.
 
 ## Conventions and traps
 

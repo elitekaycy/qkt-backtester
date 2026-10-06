@@ -6,6 +6,8 @@ import { rootFor } from "./settings.js";
 import { seriesDays } from "./data-scan.js";
 import { canonicalTf } from "@qkt-studio/core";
 import { knownParsed, rememberParsed } from "./parse-cache.js";
+import { fieldKindErrors, kindContextFor } from "./kind-gate.js";
+import { qktLanguage } from "./qkt-lang.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
 import {
@@ -639,6 +641,9 @@ export class Runner {
       throw new StepFailure("parse", err);
     }
     if (!already) rememberParsed(a.stratSource);
+    // qkt accepts a derivatives field on a CFD stream and then never trades: refuse it like an unknown alias (kind-gate.ts)
+    const misused = fieldKindErrors(a.stratSource, await kindContextFor(this.cfg.dataRoot), (await qktLanguage(this.cfg.qktBin)).vocabulary)[0];
+    if (misused) throw new StepFailure("parse", { kind: "field_not_for_kind", message: misused.message, file: a.run.strategy, line: misused.line, col: misused.col });
     await this.endStep(a, "parse", "ok", already ? "syntax OK (checked while editing)" : "syntax OK");
   }
 

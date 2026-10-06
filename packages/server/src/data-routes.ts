@@ -9,7 +9,8 @@ import { applySettings, dataRootAllowed, loadSettings, savePrefs, updateSettings
 import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
 import { completeConfig, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
-import { rangeDays, longest } from "@qkt-studio/core";
+import { rangeDays, longest, parseInstruments } from "@qkt-studio/core";
+import { derivativesCached, kindContextOf } from "./derivatives-scan.js";
 import { acceptNoData, readAccepted, undoNoData } from "./no-data.js";
 
 const looksLikeStore = async (dir: string) =>
@@ -65,6 +66,24 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
 
   /** Full completeness scan of the data source: per symbol, timeframe and year, with green/amber/red status. */
   app.get<{ Querystring: { refresh?: string } }>("/api/data/scan", async (req) => scanCached(cfg.dataRoot, req.query.refresh === "1"));
+
+  /** Futures and options roots: catalogs, rolls, contract bars, funding, open interest, marks, chains, and the terms instruments.yaml gives them. */
+  app.get<{ Querystring: { refresh?: string } }>("/api/data/derivatives", async (req) => derivativesCached(cfg.dataRoot, req.query.refresh === "1" ? 0 : 10_000));
+
+  /**
+   * What the browser's lint needs to tell a CFD stream from a futures or options one: instruments.yaml's three sections and the
+   * roots and perpetuals the store knows (a contract's kind cannot be read from its name alone).
+   */
+  app.get("/api/instruments", async () => {
+    const d = await derivativesCached(cfg.dataRoot);
+    const text = await fs.readFile(path.join(cfg.dataRoot, "instruments.yaml"), "utf8").catch(() => null);
+    const ctx = kindContextOf(d);
+    return {
+      exists: text !== null,
+      catalog: text === null ? { cfds: [], futures: [], options: [], errors: [] } : parseInstruments(text),
+      futureRoots: [...(ctx.futureRoots ?? [])].sort(), perpetuals: [...(ctx.perpetuals ?? [])].sort(), optionRoots: [...(ctx.optionRoots ?? [])].sort(),
+    };
+  });
 
   /** For every strategy in the workspace: can it run on bars and on ticks, and over which windows. */
   app.get<{ Querystring: { refresh?: string } }>("/api/data/readiness", async (req) => {

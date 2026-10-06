@@ -10,7 +10,7 @@ import { acceptedFor, readAccepted } from "./no-data.js";
 import { gunzipSync } from "node:zlib";
 import { barsPicker, canonicalTf, isTradingDay, kindOf, qktCalendarFor, tfMs, tickDayComplete, type QktCalendar } from "@qkt-studio/core";
 import type { ResolvedStrategy } from "./portfolio.js";
-import { contractKeys, kindContextOf, scanDerivatives } from "./derivatives-scan.js";
+import { contractKeys, invalidateDerivatives, kindContextOf, scanDerivatives } from "./derivatives-scan.js";
 import { combine, fieldUses, planFor, type DPick } from "./derivatives-readiness.js";
 export type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfReport, TickReport } from "@qkt-studio/core";
 
@@ -320,7 +320,7 @@ export async function scanCached(dataRoot: string, refresh = false): Promise<Sca
   if (!refresh && age < Math.max(10 * 60_000, 3 * fresh)) { void rescan(dataRoot).catch(() => undefined); return cache!.report; }
   return rescan(dataRoot);
 }
-export const invalidateScan = () => { cache = null; inflight = null; generation++; };
+export const invalidateScan = () => { cache = null; inflight = null; generation++; invalidateDerivatives(); };
 
 /** One symbol's report from one source folder (null when the source has nothing for it). */
 export async function scanSymbolIn(dataRoot: string, symbol: string): Promise<SymbolReport | null> {

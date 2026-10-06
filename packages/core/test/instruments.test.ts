@@ -56,6 +56,8 @@ describe("kindOf", () => {
     expect(kindOf({ broker: "BINANCE_UM", symbol: "BTCUSDT_241227" }, ctx)).toBe("future");
     expect(kindOf({ broker: "BINANCE_UM", symbol: "BTCUSDT" }, ctx)).toBe("perpetual");
     expect(kindOf({ broker: "DERIBIT", symbol: "BTC_USDC-26SEP26-80000-C" }, ctx)).toBe("option");
+    // a strategy names the contract by its qkt code: the venue's name with each `-` written `_`
+    expect(kindOf({ broker: "DERIBIT", symbol: "BTC_USDC_26SEP26_80000_C" }, ctx)).toBe("option");
     expect(kindOf({ broker: "EXNESS", symbol: "XAUUSD" }, ctx)).toBe("cfd");
   });
   it("finds a contract's root", () => {
