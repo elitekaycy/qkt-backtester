@@ -52,7 +52,8 @@ export function kindOf(s: StreamLike, ctx: KindContext = {}): InstrumentKind {
   if (ctx.futureRoots && rootOfContract(venue, s.symbol, ctx.futureRoots)) return "future";
   if (ctx.futureRoots?.has(key)) return "future"; // a bare root is read as its nearest/only contract
   if (/^[A-Z0-9_]+-\d{1,2}[A-Z]{3}\d{2}-[\d.]+-[CP]$/.test(s.symbol)) return "option"; // Deribit-style contract name
-  if (ctx.optionRoots && [...ctx.optionRoots].some((r) => key.startsWith(r + "-"))) return "option";
+  // a qkt option code is the venue's name with each `-` written `_` (DERIBIT:BTC_USDC_26SEP26_84000_C)
+  if (ctx.optionRoots && [...ctx.optionRoots].some((r) => key.startsWith(r + "-") || new RegExp(`^${r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}_\\d`).test(key))) return "option";
   return "cfd";
 }
 

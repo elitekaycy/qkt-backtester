@@ -40,10 +40,18 @@ export interface SymbolReport {
 }
 
 /** A stored per-day or single-file series (funding rates, open interest, marks, option chains): what is on disk, not a verdict. */
-export interface SeriesReport { files: number; first: string | null; last: string | null; rows?: number }
+export interface SeriesReport {
+  files: number; first: string | null; last: string | null; rows?: number;
+  /** Windows (exclusive end) the series covers by the engine's own rule: a stored day, or no gap over the series' tolerance. */
+  present?: DayRange[];
+}
 
 /** One built timeframe of one contract's bars. */
-export interface ContractBars { tf: string; files: number; first: string | null; last: string | null }
+export interface ContractBars {
+  tf: string; files: number; first: string | null; last: string | null;
+  /** Runs of consecutive days that have a bar file (an empty file counts: qkt writes one for a closed day). */
+  present?: DayRange[];
+}
 
 export interface ContractReport {
   /** The qkt symbol: `ESZ24`, `BTCUSDT_241227`. */
@@ -53,6 +61,8 @@ export interface ContractReport {
 export interface PerpetualReport {
   /** The venue's name for it (`BTCUSDT`), the key funding/marks/open interest are stored under. */
   name: string; bars: ContractBars[]; funding: SeriesReport | null; openInterest: SeriesReport | null; marks: Array<{ tf: string } & SeriesReport>;
+  /** Per-day trade tape, liquidation prints and order-book snapshots (the fields buy_volume, *_liq_volume, bid_depth read). */
+  tape: SeriesReport | null; liquidations: SeriesReport | null; depth: SeriesReport | null;
 }
 
 /** A futures root (`CME:ES`): its catalog, measured rolls, contracts with bars, and the terms instruments.yaml gives it. */
@@ -60,7 +70,7 @@ export interface FutureRootReport {
   key: string; venue: string; root: string;
   terms: FutureTerms | null;
   catalog: { contracts: number; first: string | null; last: string | null; delivered: number } | null;
-  rolls: { count: number; first: string | null; last: string | null; policy: string | null } | null;
+  rolls: { count: number; first: string | null; last: string | null; policy: string | null; schedule: Array<{ atMs: number; from: string; to: string }> } | null;
   contracts: ContractReport[];
   perpetual: PerpetualReport | null;
   notes: string[];
@@ -110,4 +120,9 @@ export interface Readiness {
   strategy: string; kind: string; streams: StreamDecl[]; bars: ModeReadiness; ticks: ModeReadiness; members?: MemberReadiness[];
   /** What each declared stream is (by alias), so the UI says "continuous future" without parsing symbols itself. */
   kinds?: Record<string, InstrumentKind>;
+  /**
+   * qkt's own coverage check is meaningless for a continuous stream (it looks for bars/<V>/<ROOT>@front and reports 0/N days), so
+   * a run of this strategy must pass --allow-incomplete; the studio's per-contract check here is the real one.
+   */
+  needsAllowIncomplete?: boolean;
 }

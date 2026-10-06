@@ -8,8 +8,10 @@ import type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfR
 import { barCountOf } from "./barfile.js";
 import { acceptedFor, readAccepted } from "./no-data.js";
 import { gunzipSync } from "node:zlib";
-import { barsPicker, canonicalTf, isTradingDay, qktCalendarFor, tickDayComplete, type QktCalendar } from "@qkt-studio/core";
+import { barsPicker, canonicalTf, isTradingDay, kindOf, qktCalendarFor, tfMs, tickDayComplete, type QktCalendar } from "@qkt-studio/core";
 import type { ResolvedStrategy } from "./portfolio.js";
+import { contractKeys, kindContextOf, scanDerivatives } from "./derivatives-scan.js";
+import { combine, fieldUses, planFor, type DPick } from "./derivatives-readiness.js";
 export type { DayStatus, ModeReadiness, Readiness, ScanReport, SymbolReport, TfReport, TickReport } from "@qkt-studio/core";
 
 const DAY = 86_400_000;
@@ -152,10 +154,14 @@ const RANK: Record<Completeness, number> = { complete: 3, mostly: 2, incomplete:
 
 export async function scanStore(dataRoot: string, only?: string): Promise<ScanReport> {
   const t0 = Date.now();
+  // futures contracts live under their root in `derivatives`; listing each as a symbol would bury the CFDs (92 ES rows)
+  const derivatives = only ? undefined : await scanDerivatives(dataRoot).catch(() => undefined);
+  const inRoots = derivatives ? contractKeys(derivatives) : new Set<string>();
   const barNames = new Map<string, Array<{ broker: string; tfs: string[] }>>();
   const brokers = (await fs.readdir(path.join(dataRoot, "bars")).catch(() => [] as string[])).filter((b) => NAME.test(b));
   for (const broker of brokers) {
     for (const symbol of (await fs.readdir(path.join(dataRoot, "bars", broker)).catch(() => [] as string[])).filter((s) => NAME.test(s))) {
+      if (inRoots.has(`${broker}:${symbol}`)) continue;
       const tfs = (await fs.readdir(path.join(dataRoot, "bars", broker, symbol), { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name);
       barNames.set(symbol, [...(barNames.get(symbol) ?? []), { broker, tfs }]);
     }
@@ -194,7 +200,8 @@ export async function scanStore(dataRoot: string, only?: string): Promise<ScanRe
 
   const count = (s: SymbolReport["status"]) => symbols.filter((x) => x.status === s).length;
   return {
-    dataRoot, scannedAt: new Date().toISOString(), ms: Date.now() - t0, looksLikeStore: barNames.size > 0 || tickSymbols.length > 0, symbols,
+    dataRoot, scannedAt: new Date().toISOString(), ms: Date.now() - t0, looksLikeStore: barNames.size > 0 || tickSymbols.length > 0 || inRoots.size > 0, symbols,
+    ...(derivatives && (derivatives.futures.length || derivatives.options.length || derivatives.instruments.errors.length) ? { derivatives } : {}),
     totals: {
       symbols: symbols.length, complete: count("complete"), mostly: count("mostly"), incomplete: count("incomplete"), ticksOnly: count("ticks-only"), empty: count("empty"),
       barFiles: symbols.reduce((n, s) => n + s.bars.reduce((m, b) => m + b.files, 0), 0), tickFiles: symbols.reduce((n, s) => n + (s.ticks?.files ?? 0), 0),
@@ -219,11 +226,11 @@ export async function seriesDays(dataRoot: string, symbol: string, kind: "ticks"
 
 
 
-function mode(streams: StreamDecl[], pick: (s: StreamDecl) => { ranges: DayRange[] } | { blocked: string; fix?: "build-bars" | "fetch" }): ModeReadiness {
+function mode(streams: StreamDecl[], pick: (s: StreamDecl) => DPick): ModeReadiness {
   const sets: DayRange[][] = [], blocked: ModeReadiness["blocked"] = [];
   for (const s of streams) {
     const r = pick(s);
-    if ("blocked" in r) blocked.push({ stream: `${s.broker}:${s.symbol} ${s.tf}`, reason: r.blocked, fix: r.fix });
+    if ("blocked" in r) blocked.push({ stream: `${s.broker}:${s.symbol} ${s.tf}`, reason: r.blocked, fix: r.fix, ...("command" in r && r.command ? { command: r.command } : {}) });
     else sets.push(r.ranges);
   }
   const ranges = blocked.length || !sets.length ? [] : intersectAll(sets);
@@ -241,16 +248,28 @@ export function readinessFor(report: ScanReport, strategy: string, source: strin
     if (!sym?.ticks) return { blocked: sym ? "no tick files for this symbol" : "symbol is not in the data source", fix: "fetch" as const };
     return { ranges: sym.ticks.usable };
   };
-  const bars = mode(streams, barsPickFor(streams)), ticks = mode(streams, ticksPick);
-  const out: Readiness = { strategy, kind: info.kind, streams, bars, ticks };
+  // futures and options: each kind asks its own question (derivatives-readiness.ts); CFD and HUB streams keep the rules above
+  const ctx = kindContextOf(report.derivatives), uses = fieldUses(source);
+  const finestTf = new Map<string, string>();
+  for (const x of streams) { const k = `${x.broker}:${x.symbol}`, cur = finestTf.get(k); if (!cur || (tfMs(x.tf) ?? Infinity) < (tfMs(cur) ?? Infinity)) finestTf.set(k, x.tf); }
+  let needsAllowIncomplete = false;
+  const withDerivatives = (tier: "bars" | "ticks", base: (s: StreamDecl) => DPick) => (s: StreamDecl): DPick => {
+    const plan = planFor(report.derivatives, s, tier, ctx, finestTf.get(`${s.broker}:${s.symbol}`) ?? s.tf, source, uses);
+    if (!plan) return base(s);
+    if (plan.needsAllowIncomplete) needsAllowIncomplete = true;
+    return plan.replace ?? combine(base(s), plan.extra ?? []);
+  };
+  const bars = mode(streams, withDerivatives("bars", barsPickFor(streams))), ticks = mode(streams, withDerivatives("ticks", ticksPick));
+  const kinds = Object.fromEntries(info.streams.map((x) => [x.alias, kindOf(x, ctx)]));
+  const out: Readiness = { strategy, kind: info.kind, streams, bars, ticks, ...(Object.values(kinds).some((k) => k !== "cfd") ? { kinds } : {}), ...(needsAllowIncomplete ? { needsAllowIncomplete } : {}) };
   if (resolved && resolved.members.length) {
     // which children need each blocked stream, and whether each child could run alone
     const key = (s: StreamDecl) => `${s.broker}:${s.symbol} ${s.tf}`;
     for (const m of [bars, ticks]) for (const b of m.blocked) b.members = resolved.members.filter((x) => x.streams.some((s) => key(s) === b.stream)).map((x) => x.alias);
     out.members = resolved.members.map((x) => ({
       alias: x.alias, rel: x.rel, exists: x.exists, hold: x.hold, streams: uniqueStreams(x.streams),
-      bars: x.exists && x.streams.length > 0 && mode(uniqueStreams(x.streams), barsPickFor(uniqueStreams(x.streams))).runnable,
-      ticks: x.exists && x.streams.length > 0 && mode(uniqueStreams(x.streams), ticksPick).runnable,
+      bars: x.exists && x.streams.length > 0 && mode(uniqueStreams(x.streams), withDerivatives("bars", barsPickFor(uniqueStreams(x.streams)))).runnable,
+      ticks: x.exists && x.streams.length > 0 && mode(uniqueStreams(x.streams), withDerivatives("ticks", ticksPick)).runnable,
     }));
   }
   return out;
