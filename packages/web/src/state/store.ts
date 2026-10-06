@@ -6,7 +6,7 @@ import { api, ApiError, openRunEvents, type Equity, type DerivFetchReq, type Inf
 import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJson, RunOptions, ScanReport, Summary, Tier, TripQuery } from "../api/types.js";
 import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
-import { effectiveTier, fetchLabel } from "../util/derivatives.js";
+import { effectiveTier, fetchLabel, pruneRunFilters } from "../util/derivatives.js";
 import type { SymbolReport } from "../api/types.js";
 import { runCfgPatch } from "./runCfg.js";
 import { notify } from "../ui/notify.js";
@@ -532,7 +532,7 @@ export const useStore = create<State>((set, get) => ({
       if (get().runId !== id) return;
       const prev = get().results;
       const previous = prev && prev.runId !== id && prev.strategy === run.strategy ? prev : prev?.runId === id ? get().previous : null;
-      set({ results: { runId: id, summary, integrity, monthly, equity, meta, strategy: run.strategy }, previous, resultsStale: false, selectedTrip: null });
+      set((st) => ({ results: { runId: id, summary, integrity, monthly, equity, meta, strategy: run.strategy }, previous, resultsStale: false, selectedTrip: null, filters: pruneRunFilters(st.filters, meta.derivatives) }));
     } catch (e) {
       set({ resultsStale: false });
       get().toast("error", `Cannot load results: ${(e as Error).message}`);

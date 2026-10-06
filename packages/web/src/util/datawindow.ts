@@ -89,20 +89,34 @@ const addIso = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:
  */
 export function recomputeReadiness(r: Readiness, scan: ScanReport, prefs: Record<string, SymbolPref>, bySource: Record<string, SymbolReport | undefined>): Readiness {
   const symOf = (sym: string) => bySource[sym] ?? scan.symbols.find((s) => s.symbol === sym);
-  const symbols = r.streams.map((s) => s.symbol);
-  const pickBars = barsPicker(r.streams, symOf);
+  // A futures or options stream is judged by the server with its own rules (catalogs, rolls, funding, chains): the CFD
+  // rules below would call `ES@front` "not in the data source". Those streams keep the server's verdict, and only the CFD
+  // streams of the strategy are re-judged against the source and window each symbol is pointed at.
+  const isDeriv = (alias: string) => { const k = r.kinds?.[alias]; return !!k && k !== "cfd"; };
+  const derivStreams = r.streams.filter((s) => isDeriv(s.alias));
+  const cfdStreams = r.streams.filter((s) => !isDeriv(s.alias));
+  if (derivStreams.length && !cfdStreams.length) return r;
+  const symbols = cfdStreams.map((s) => s.symbol);
+  const pickBars = barsPicker(cfdStreams, symOf);
+  const label = (s: { broker: string; symbol: string; tf: string }) => `${s.broker}:${s.symbol} ${s.tf}`;
   const mode = (kind: "bars" | "ticks"): ModeReadiness => {
     const sets: DayRange[][] = [], blocked: ModeReadiness["blocked"] = [];
-    for (const s of r.streams) {
+    if (derivStreams.length) {
+      const server = r[kind], mine = new Set(derivStreams.map(label));
+      blocked.push(...server.blocked.filter((b) => mine.has(b.stream)));
+      // the server's windows already hold for every stream; the CFD ones below can only narrow them
+      if (!blocked.length) sets.push(server.ranges);
+    }
+    for (const s of cfdStreams) {
       const sym = symOf(s.symbol);
-      const label = `${s.broker}:${s.symbol} ${s.tf}`;
-      if (!sym) { blocked.push({ stream: label, reason: "symbol is not in the data source", fix: "fetch" }); continue; }
+      const lab = label(s);
+      if (!sym) { blocked.push({ stream: lab, reason: "symbol is not in the data source", fix: "fetch" }); continue; }
       if (kind === "bars") {
         const pick = pickBars(s);
         if ("ranges" in pick) sets.push(pick.ranges);
-        else blocked.push({ stream: label, reason: pick.blocked, fix: pick.fix });
+        else blocked.push({ stream: lab, reason: pick.blocked, fix: pick.fix });
       } else if (sym.ticks) sets.push(sym.ticks.usable);
-      else blocked.push({ stream: label, reason: "no tick files for this symbol", fix: "fetch" });
+      else blocked.push({ stream: lab, reason: "no tick files for this symbol", fix: "fetch" });
     }
     const raw = blocked.length || !sets.length ? [] : intersectAll(sets);
     const ranges = clipRanges(raw, prefs, symbols);

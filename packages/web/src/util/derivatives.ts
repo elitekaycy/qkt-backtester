@@ -1,5 +1,5 @@
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { contextFromCatalog, fieldAllowed, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
+import { calendarOf, contextFromCatalog, fieldAllowed, futuresDayExpected, kindOf, tierProblem, type CostBridge, type DerivativesReport, type FutureRootReport, type InstrumentKind, type KindContext, type MarginDay, type OptionRootReport, type RollRow, type StructureRow } from "@qkt-studio/core";
 import type { DerivFetchKind, DerivFetchReq, InstrumentsInfo } from "../api/client.js";
 
 /** What the browser needs of `GET /api/instruments` to tell a future from a CFD: the same context the server's gate uses. */
@@ -111,6 +111,21 @@ export function marginView(days: readonly MarginDay[]): { points: MarginPoint[];
   return { points, calls: days.filter((d) => d.marginCall).length, tightest: tight };
 }
 
+/**
+ * Filters carried to another run: a `contract:` or a venue-close filter names something only a futures run has, so on a run
+ * without it the filter would silently match nothing. Returns the same object when nothing needs dropping.
+ */
+export function pruneRunFilters<T extends object>(filters: T, sections: readonly string[] | undefined): T {
+  const f = filters as { contract?: string; venueExit?: string };
+  const has = (x: string) => !!sections?.includes(x);
+  const dropContract = f.contract !== undefined && !has("contracts"), dropVenue = f.venueExit !== undefined && (sections?.length ?? 0) === 0;
+  if (!dropContract && !dropVenue) return filters;
+  const out = { ...f };
+  if (dropContract) delete out.contract;
+  if (dropVenue) delete out.venueExit;
+  return out as T;
+}
+
 /** The contracts a continuous-futures run traded or rolled through, bare codes in the order they were first used (for `contract:`). */
 export function contractNames(d: { contracts?: ReadonlyArray<{ contract: string }>; rolls?: ReadonlyArray<{ from: string; to: string }> } | null): string[] {
   if (!d) return [];
@@ -176,6 +191,24 @@ const yr = (iso: string | null | undefined) => iso?.slice(0, 4) ?? "";
 const span = (a: string | null | undefined, b: string | null | undefined) => (!a ? "" : yr(a) === yr(b) ? yr(a) : `${yr(a)}–${yr(b).slice(2)}`);
 
 export interface RootLine { key: string; title: string; facts: string[]; attention: string | null; status: "ok" | "warn" | "bad" }
+
+/**
+ * A contract's day calendar comes from the symbol route, which judges days by the FX/crypto rule for the contract's name. A futures
+ * exchange has its own hours (CME Globex folds Sunday evening into Monday), so a day it is closed on is shown as closed, not as a
+ * hole. Only `m` (missing) days change; a day with data keeps its colour.
+ */
+export function closedDaysFor(root: string, declared: string | undefined): (first: string, days: string) => string {
+  const cal = calendarOf(root, declared);
+  return (first, days) => {
+    const t0 = Date.parse(`${first}T00:00:00Z`);
+    let out = "";
+    for (let i = 0; i < days.length; i++) {
+      const c = days[i]!;
+      out += c === "m" && !futuresDayExpected(cal, new Date(t0 + i * 86_400_000).toISOString().slice(0, 10)) ? "c" : c;
+    }
+    return out;
+  };
+}
 
 /** One line per futures root, the way a symbol gets one: what is there at a glance, and the first thing that needs doing. */
 export function futureRootLine(r: FutureRootReport): RootLine {

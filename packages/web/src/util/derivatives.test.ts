@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { CostBridge, DerivativesReport, FutureRootReport, MarginDay, OptionRootReport, RollRow } from "@qkt-studio/core";
 import { parseInstruments } from "@qkt-studio/core";
 import type { InstrumentsInfo } from "../api/client.js";
-import { commandsIn, contractNames, costLines, effectiveTier, fetchLabel, fetchRequestFrom, fieldsFor, futureRootLine, kindContextFrom, kindMarks, marginView, optionRootLine, qtyUnit, readsRoot, rollSummary, rootKeyFor, showKind, streamKinds, streamsPerpetual, tierRule } from "./derivatives.js";
+import { closedDaysFor, commandsIn, contractNames, costLines, effectiveTier, fetchLabel, fetchRequestFrom, fieldsFor, futureRootLine, kindContextFrom, kindMarks, marginView, optionRootLine, pruneRunFilters, qtyUnit, readsRoot, rollSummary, rootKeyFor, showKind, streamKinds, streamsPerpetual, tierRule } from "./derivatives.js";
 
 const YAML = `
 futures:
@@ -121,6 +121,14 @@ describe("derivatives results", () => {
       { stream: "CME:NQ@front", count: 1, cost: 8, fees: 4.46, avgGap: 10 },
     ]);
   });
+  it("filters that name something only a futures run has are dropped on a run without it", () => {
+    const f = { contract: "ESH19", venueExit: "expiry", side: "long" } as const;
+    expect(pruneRunFilters(f, ["rolls", "contracts"])).toBe(f);                       // same run kind: untouched, same object
+    expect(pruneRunFilters(f, ["financing"])).toEqual({ venueExit: "expiry", side: "long" }); // a perpetual run: no contracts
+    expect(pruneRunFilters(f, undefined)).toEqual({ side: "long" });                  // a CFD run: neither
+    const plain = { side: "long" };
+    expect(pruneRunFilters(plain, undefined)).toBe(plain);
+  });
   it("contracts a run traded, bare and in first-use order", () => {
     expect(contractNames({ contracts: [{ contract: "CME:ESH19" }, { contract: "CME:ESH19" }], rolls: [{ from: "CME:ESH19", to: "CME:ESM19" }] })).toEqual(["ESH19", "ESM19"]);
     expect(contractNames(null)).toEqual([]);
@@ -152,6 +160,19 @@ describe("the fix a blocked stream names", () => {
   it("labels a job by what it fetches", () => {
     expect(fetchLabel({ target: "CME:ES", kind: "rolls" })).toBe("Fetch rolls · CME:ES");
     expect(fetchLabel({ target: "X:Y", kind: "bars", tf: "1h" })).toBe("Fetch 1h bars · X:Y");
+  });
+});
+
+describe("a contract's day calendar", () => {
+  it("shows a day the exchange is closed on as closed, not missing; a day with data keeps its colour", () => {
+    const f = closedDaysFor("ES", "cme_globex");
+    // 2022-12-23 Fri, 24 Sat, 25 Sun, 26 Mon (Christmas observed is Monday 26th: closed on NYSE), 27 Tue
+    expect(f("2022-12-23", "ommmo")).toBe("occco");
+    expect(f("2022-12-23", "ommmm")).toBe("occcm");   // Tuesday the 27th is a trading day: still a hole
+    expect(f("2022-12-23", "ooooo")).toBe("ooooo");
+  });
+  it("a 24/7 root has no closed days: a missing one stays missing", () => {
+    expect(closedDaysFor("BTCUSDT", "crypto")("2022-12-24", "mm")).toBe("mm");
   });
 });
 

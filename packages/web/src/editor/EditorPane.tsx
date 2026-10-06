@@ -181,7 +181,7 @@ export function EditorPane() {
       if (!path.endsWith(".qkt")) continue;
       const next = kindMarks(model.getValue(), ctx).filter((k) => showKind(k.kind)).map((k) => ({
         range: new s.m.Range(k.line, model.getLineMaxColumn(k.line), k.line, model.getLineMaxColumn(k.line)),
-        options: { after: { content: kindShort(k.kind), inlineClassName: "kind-chip" }, stickiness: s.m.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
+        options: { showIfCollapsed: true, after: { content: kindShort(k.kind), inlineClassName: "kind-chip" }, stickiness: s.m.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
       }));
       decos.current.set(path, model.deltaDecorations(decos.current.get(path) ?? [], next));
     }
