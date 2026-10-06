@@ -6,6 +6,7 @@ import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { addDays, daysBetween } from "../util/format.js";
 import { insideRanges } from "../util/datawindow.js";
+import { hasDerivativeStreams, kindContextFrom, streamsPerpetual, tierRule } from "../util/derivatives.js";
 import { CircleAlert, CircleCheck, Database, Hammer, Zap } from "../ui/icons.js";
 
 const NO_PREFS: SettingsView["symbolPrefs"] = {};   // a stable fallback: a fresh {} per call makes the selector unequal every time
@@ -20,6 +21,12 @@ export function RunSettings() {
   const file = useStore((s) => s.openFiles.find((f) => f.path === s.strategyPath()));
   const readiness = useStore((s) => s.readiness), scan = useStore((s) => s.scan), trackJob = useStore((s) => s.trackJob);
   const params = useMemo(() => (file ? parseStrategyInfo(file.content).params : []), [file?.content]);
+  // what the streams are decides which tier can run them, whether funding applies, and who fills the orders
+  const instruments = useStore((s) => s.instruments);
+  const rule = useMemo(() => tierRule(file ? parseStrategyInfo(file.content).streams : []), [file?.content]);
+  const ctx = useMemo(() => kindContextFrom(instruments), [instruments]);
+  const perp = useMemo(() => !!file && streamsPerpetual(file.content, ctx), [file?.content, ctx]);
+  const deriv = useMemo(() => !!file && hasDerivativeStreams(file.content, ctx), [file?.content, ctx]);
   const values = (strategy && cfg.paramsByStrategy[strategy]) || {};
   const o = cfg.options;
   const ticks = cfg.tier === "full";
@@ -48,9 +55,10 @@ export function RunSettings() {
       <section className="settings-sec">
         <h4>Run on</h4>
         <div className="seg" role="group" aria-label="Data used to run" style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
-          <button aria-pressed={!ticks} onClick={() => setCfg({ tier: "draft" })}><Zap size={14} />Bars <span className="badge accent">default</span></button>
-          <button aria-pressed={ticks} onClick={() => setCfg({ tier: "full" })}><Database size={14} />Ticks</button>
+          <button aria-pressed={!ticks} disabled={!!rule.draft} title={rule.draft ?? undefined} onClick={() => setCfg({ tier: "draft" })}><Zap size={14} />Bars <span className="badge accent">default</span></button>
+          <button aria-pressed={ticks} disabled={!!rule.full} title={rule.full ?? undefined} onClick={() => setCfg({ tier: "full" })}><Database size={14} />Ticks</button>
         </div>
+        {(rule.draft || rule.full) && <div className="hint ink2" style={{ fontSize: "var(--fs-sm)", lineHeight: 1.5 }}>{rule.draft ?? rule.full}</div>}
         <div className="hint ink2" style={{ fontSize: "var(--fs-sm)", lineHeight: 1.5 }}>
           {ticks ? "Replays every tick from your tick store. Slow (tens of seconds per month), and the reference result. Needed for the MT5 simulator and realistic stop/target fills."
             : "Uses the candles built from your ticks. Seconds per month, identical to ticks for market orders. Stop and target fills are approximated from bars."}
@@ -130,6 +138,11 @@ export function RunSettings() {
             <select id="rs-fx" className="select" value={o.fxMissingPolicy ?? ""} onChange={(e) => setOption("fxMissingPolicy", (e.target.value || undefined) as "warn" | "fail" | undefined)}>
               <option value="">qkt default (fail)</option><option value="warn">Warn and continue</option><option value="fail">Fail the run</option></select></div>
         </div>
+        {perp && (
+          <label className="switch" title="A perpetual pays or earns funding every few hours. Off backtests it without that cost.">
+            <input type="checkbox" checked={o.funding !== "off"} onChange={(e) => setOption("funding", e.target.checked ? undefined : "off")} /><span className="track" /><span>Charge funding on perpetuals</span></label>
+        )}
+        {perp && o.funding === "off" && <div className="hint">Funding is off: the result leaves out what the perpetual's funding would have cost or paid. Stored rates are not needed.</div>}
         <div className="hint">Contract size, lot step, commission, swap and slippage points per symbol live in <button className="link" onClick={() => void useStore.getState().openFile("instruments.yaml")}>instruments.yaml</button>. Everything else is in <button className="link" onClick={() => void useStore.getState().openFile("qkt.config.yaml")}>qkt.config.yaml</button>.</div>
       </section>
 
@@ -158,6 +171,7 @@ export function RunSettings() {
           <div className="field"><label htmlFor="rs-pf">Partial fills (0–1)</label>
             <input id="rs-pf" className="input" type="number" min={0.05} max={0.95} step={0.05} disabled={!ticks} placeholder="off" value={o.partialFill ?? ""} onChange={(e) => setOption("partialFill", e.target.value === "" ? undefined : Number(e.target.value))} /></div>
         </div>
+        {deriv && <div className="hint">Futures and options fill on qkt's exchange simulator (executable price plus the run's slippage, the root's fees on every fill), so the broker model and preset above do not change their fills.</div>}
         {!ticks && <div className="hint">qkt refuses the MT5 simulator with bars (synthetic bar extremes do not preserve trigger prices). Switch to Ticks to use it.</div>}
       </section>
 

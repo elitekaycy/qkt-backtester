@@ -10,6 +10,7 @@ import { DataExplainer } from "./DataExplainer.js";
 import { DataSourceDialog } from "./DataSourceDialog.js";
 import { SymbolDialog } from "./SymbolDialog.js";
 import { ReadinessCard } from "./ReadinessCard.js";
+import { RootLines } from "./RootLines.js";
 import { BuildForm, FetchForm, LABEL, MiniYears, StatusIcon } from "./dataParts.js";
 import { attentionOf, mainSeries } from "../util/dataStatus.js";
 
@@ -71,6 +72,7 @@ export function DataSection() {
     return new Set(f && activePath?.endsWith(".qkt") ? parseStrategyInfo(f.content).streams.map((s) => s.symbol) : []);
   }, [openFiles, activePath, readiness]);
   const all = scan?.symbols ?? [];
+  const hasRoots = (scan?.derivatives?.futures.length ?? 0) + (scan?.derivatives?.options.length ?? 0) > 0;
   const needs = all.filter((s) => attentionOf(s) !== null);
   const ordered = useMemo(() => [...(filter === "attention" ? needs : all)].sort((a, b) =>
     Number(used.has(b.symbol)) - Number(used.has(a.symbol)) || Number(attentionOf(b) !== null) - Number(attentionOf(a) !== null) || a.symbol.localeCompare(b.symbol)), [scan, filter, used]);
@@ -115,7 +117,8 @@ export function DataSection() {
           <BuildForm open={buildOpen} onClose={() => setBuildOpen(false)} anchor={buildBtn} />
           <FetchForm open={fetchOpen} onClose={() => setFetchOpen(false)} anchor={fetchBtn} />
           {!scan && <div className="empty"><span className="spin" />Scanning…</div>}
-          {scan && all.length === 0 && (
+          {scan && all.length === 0 && hasRoots && <div className="muted rc-note">No CFD symbols in this source: only the futures and options roots below.</div>}
+          {scan && all.length === 0 && !hasRoots && (
             <div className="empty"><Database className="ico-big" /><b>No market data here yet.</b>
               <span>Choose a folder that contains <span className="mono">symbols/</span> or <span className="mono">bars/</span>, or fetch data from a broker.</span>
               <button className="btn primary" onClick={() => setDialog(true)}>Choose data source</button></div>
@@ -132,6 +135,8 @@ export function DataSection() {
           </div>
           {filter === "attention" && needs.length === 0 && <div className="muted rc-note">Every symbol is complete.</div>}
         </div>
+
+        <RootLines />
 
         {jobs.length > 0 && (
           <div className="side-group">

@@ -126,3 +126,16 @@ button.hc:hover { outline: 2px solid var(--ink); outline-offset: 0; position: re
 .rc-cmd { color: var(--ink-2); }
 .rc-cmd .mono { font-size: var(--fs-xs); background: var(--card-2); padding: 0 3px; border-radius: 3px; word-break: break-all; }
 .rc-fit.warn { color: var(--warn); }
+
+/* Futures and options roots: the root dialog's facts, a contract's calendar, and the fix command a blocked stream names. */
+.rd-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--s4); margin: 0; font-size: var(--fs-sm); }
+.rd-facts > div { display: contents; }
+.rd-facts dt { color: var(--ink-3); }
+.rd-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.rd-cal { background: var(--card-2); padding: var(--s3) !important; }
+.fixcmd { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; }
+.fixcmd-text { display: block; width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: var(--r-sm); background: var(--card-2); border: 1px solid var(--line); color: var(--ink); font-size: var(--fs-xs); line-height: 1.45; overflow-wrap: anywhere; user-select: all; }
+.fixcmd-btns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rc-kind { margin-left: 2px; }
+
+.rc-tier { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 6px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warn) 9.rc-tier { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 6px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--warn) 9%, transparent); font-size: var(--fs-xs); line-height: 1.4; }

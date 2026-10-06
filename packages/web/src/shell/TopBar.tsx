@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { usesIntrabarOrders } from "@qkt-studio/core/strategy";
+import { useMemo, useRef, useState } from "react";
+import { parseStrategyInfo, usesIntrabarOrders } from "@qkt-studio/core/strategy";
+import { tierRule } from "../util/derivatives.js";
 import { useStore } from "../state/store.js";
 import { useUi } from "../state/ui.js";
 import { Menu, Popover, type MenuEntry } from "../ui/Popover.js";
@@ -86,6 +87,8 @@ export function TopBar() {
   const chipRef = useRef<HTMLButtonElement>(null);
   const span = cfg.from && cfg.to ? daysBetween(cfg.from, cfg.to) : 0;
   const approx = cfg.tier === "draft" && !!file && usesIntrabarOrders(file.content);
+  // continuous futures have no ticks and option chains no bars: the control says which tier the open strategy can use
+  const rule = useMemo(() => tierRule(file ? parseStrategyInfo(file.content).streams : []), [file?.content]);
   const ready = readiness.find((r) => r.strategy === strategy);
   const mode = cfg.tier === "draft" ? ready?.bars : ready?.ticks;
   const inside = !!mode?.ranges.some((r) => cfg.from >= r.from && cfg.to <= r.to);
@@ -105,11 +108,11 @@ export function TopBar() {
       </div>
 
       <div className="seg" role="group" aria-label="Data used to run">
-        <Tip label="Uses the bars built from your ticks. Seconds per month. Stops and targets are approximated." side="bottom">
-          <button aria-pressed={cfg.tier === "draft"} onClick={() => setCfg({ tier: "draft" })}><Zap size={14} />Bars</button>
+        <Tip label={rule.draft ?? "Uses the bars built from your ticks. Seconds per month. Stops and targets are approximated."} side="bottom">
+          <button aria-pressed={cfg.tier === "draft"} aria-disabled={rule.draft ? true : undefined} onClick={() => { if (!rule.draft) setCfg({ tier: "draft" }); }}><Zap size={14} />Bars</button>
         </Tip>
-        <Tip label="Replays every tick. Slower (tens of seconds per month) and the reference result." side="bottom">
-          <button aria-pressed={cfg.tier === "full"} onClick={() => setCfg({ tier: "full" })}><Database size={14} />Ticks</button>
+        <Tip label={rule.full ?? "Replays every tick. Slower (tens of seconds per month) and the reference result."} side="bottom">
+          <button aria-pressed={cfg.tier === "full"} aria-disabled={rule.full ? true : undefined} onClick={() => { if (!rule.full) setCfg({ tier: "full" }); }}><Database size={14} />Ticks</button>
         </Tip>
       </div>
 

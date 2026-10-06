@@ -1,4 +1,4 @@
-import type { BarCols, StrategyRow, BookInfo } from "@qkt-studio/core";
+import type { BarCols, StrategyRow, BookInfo, DerivativesSection, InstrumentCatalog, InstrumentKind, RunDerivatives } from "@qkt-studio/core";
 import type { QktVocabulary } from "@qkt-studio/core/vocabulary";
 import type { RunJson, Summary, RoundTrip, IntegrityReport, McResult, MonthRow, Diagnostic, TripQuery, RunRequest, Analytics, ScanReport, Readiness , SymbolReport } from "./types.js";
 
@@ -57,6 +57,11 @@ const qs = (o: Record<string, unknown>) => {
 };
 
 export interface TreeEntry { name: string; path: string; type: "file" | "dir"; size: number; mtimeMs: number }
+/** `GET /api/instruments`: what the data source's instruments.yaml declares, and the roots the browser's lint and completions need. */
+export interface InstrumentsInfo { exists: boolean; catalog: InstrumentCatalog; futureRoots: string[]; perpetuals: string[]; optionRoots: string[] }
+export type DerivFetchKind = "catalog" | "rolls" | "funding" | "marks" | "open-interest" | "chains" | "tape" | "liquidations" | "depth" | "bars";
+export interface DerivFetchReq { target: string; kind: DerivFetchKind; tf?: string; from?: string; to?: string; live?: boolean; series?: "trade" | "book" }
+
 export interface Info { workspace: string; dataRoot: string; terminal: "shell" | "restricted"; tokenRequired: boolean; hasConfig: boolean; maxParallel: number }
 export interface RunRow { id: string; hash: string; strategy: string; status: string; tier: string; from_d: string; to_d: string; created_at: string; seq: number; total_pnl: number | null; sharpe: number | null; trades: number | null; win_rate: number | null; duration_ms: number | null; kind: "strategy" | "portfolio"; members: number }
 export interface PortfolioMember { alias: string; path: string; rel: string | null; hold: boolean; exists: boolean; error?: string }
@@ -67,7 +72,7 @@ export interface SettingsView { sources: string[]; symbolPrefs: Record<string, S
 export interface DirList { path: string; parent: string | null; store: boolean; dirs: Array<{ name: string; store: boolean }> }
 export interface Overlay { total: number; truncated: boolean; rows: RoundTrip[] }
 export interface Equity { ts: number[]; equity: number[]; drawdown: number[] }
-export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string; base?: string | null }>; strategies: string[]; fills: number; trips: number; qktVersion: string; /** Account currency every money figure is in; null on runs from before it was recorded. */ currency?: string | null;
+export interface RunMeta { runId: string; tier: string; from: string; to: string; streams: Array<{ key: string; broker: string; symbol: string; tf: string; base?: string | null; /** Set only for non-CFD streams. */ kind?: InstrumentKind; /** Why a stream without bars (continuous, chain, analytic, hub) has no chart series. */ note?: string }>; /** The derivatives sections this run wrote, present only on futures and options runs. */ derivatives?: DerivativesSection[]; strategies: string[]; fills: number; trips: number; qktVersion: string; /** Account currency every money figure is in; null on runs from before it was recorded. */ currency?: string | null;
   /** Orders qkt refused (risk caps, halts), by reason; absent on runs from before it was recorded. */
   rejections?: { count: number; reasons: Array<{ kind: string; label: string; count: number; example: string; hint?: string }> } }
 export interface DayCoverage { day: string; bars: number; status: "ok" | "thin" | "closed" | "missing" }
@@ -101,6 +106,10 @@ export const api = {
   dirs: (path?: string) => req<DirList>(`/api/fs/dirs${qs({ path })}`),
   scan: (refresh = false) => req<ScanReport>(`/api/data/scan${refresh ? "?refresh=1" : ""}`),
   readiness: (refresh = false) => req<{ scannedAt: string; strategies: Readiness[] }>(`/api/data/readiness${refresh ? "?refresh=1" : ""}`),
+  instruments: () => req<InstrumentsInfo>("/api/instruments"),
+  fetchDerivatives: (b: DerivFetchReq) => req<{ jobId: string }>("/api/data/fetch-derivatives", { method: "POST", body: JSON.stringify(b) }),
+  /** 404 when the run has no futures/options files: callers check `meta.derivatives` first. */
+  derivatives: (id: string) => req<RunDerivatives>(`/api/runs/${id}/derived/derivatives`),
   scaffoldMissing: () => req<{ missing: string[] }>("/api/workspace/missing"),
   completeConfig: (content: string) => req<{ content: string }>("/api/workspace/config-complete", { method: "POST", body: JSON.stringify({ content }) }),
   scaffold: (files?: string[]) => req<{ created: string[]; skipped: string[]; missing: string[] }>("/api/workspace/scaffold", { method: "POST", body: JSON.stringify({ files }) }),
@@ -180,7 +189,7 @@ export interface PartStats { from: string; to: string; trades: number; net: numb
 function tripParams(q: TripQuery): Record<string, unknown> {
   return {
     side: q.side, outcome: q.outcome, symbol: q.symbol, strategy: q.strategy, from: q.fromTs, to: q.toTs, strategies: q.strategies === undefined ? undefined : q.strategies.join(","), minHold: q.minHoldMs, maxHold: q.maxHoldMs,
-    exitFrom: q.exitFromTs, exitTo: q.exitToTs, minQty: q.minQty, maxQty: q.maxQty, id: q.id, minPnl: q.minPnl, maxPnl: q.maxPnl, exit: q.exit, minR: q.minR, maxR: q.maxR, weekday: q.weekday, hour: q.hour, day: q.day, sort: q.sort, dir: q.dir, offset: q.offset, limit: q.limit,
+    exitFrom: q.exitFromTs, exitTo: q.exitToTs, minQty: q.minQty, maxQty: q.maxQty, id: q.id, minPnl: q.minPnl, maxPnl: q.maxPnl, exit: q.exit ?? q.venueExit, contract: q.contract, minR: q.minR, maxR: q.maxR, weekday: q.weekday, hour: q.hour, day: q.day, sort: q.sort, dir: q.dir, offset: q.offset, limit: q.limit,
   };
 }
 

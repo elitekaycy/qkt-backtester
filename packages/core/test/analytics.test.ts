@@ -193,3 +193,17 @@ describe("histogram bars and their click filters agree", () => {
     expect(binOf([0, 1, 2, 3], 0.999)).toBe(0);
   });
 });
+
+describe("trades the venue closed", () => {
+  it("a CFD run has no venue breakdown at all, so its analytics are unchanged", () => {
+    expect(analyze(both).venue).toBeUndefined();
+  });
+  it("counts expiry, liquidation and failed-roll closes with their P&L, in a fixed order", () => {
+    const mk = (i: number, pnl: number, venueExit?: RoundTrip["venueExit"]): RoundTrip => ({ ...both.find((t) => !t.open)!, id: i, pnl, ...(venueExit ? { venueExit } : {}) });
+    const a = analyze([mk(1, 100), mk(2, -50, "liquidation"), mk(3, 30, "expiry"), mk(4, -20, "expiry")]);
+    expect(a.venue).toEqual([
+      { reason: "expiry", pnl: 10, trades: 2, wins: 1 },
+      { reason: "liquidation", pnl: -50, trades: 1, wins: 0 },
+    ]);
+  });
+});

@@ -117,3 +117,22 @@ describe("the studio's own context rules and snippets", () => {
     }
   });
 });
+
+describe("completions that know a stream's kind", () => {
+  const deriv = { futures: [{ key: "CME:ES", venue: "CME", root: "ES", terms: null, catalog: { contracts: 92, first: "1999-12-17", last: "2022-12-16", delivered: 90 }, rolls: { count: 88, first: null, last: null, policy: "7d@00:00" },
+    contracts: [{ symbol: "ESZ22", expiry: "2022-12-16", deliveryPrice: null, bars: [] }], perpetual: null, notes: [] }], options: [], instruments: { path: "", exists: true, errors: [] } };
+  const withDeriv = { ...scan, derivatives: deriv } as unknown as ScanReport;
+  it("keeps `.dte` off a CFD alias and offers it on a continuous one", () => {
+    const t = `${SRC}    WHEN gold.`, lines = t.split("\n");
+    const ask = (kinds: Map<string, "cfd" | "continuous">) => localCompletions(t, lines.length, lines[lines.length - 1]!.length + 1, scan, [], undefined, kinds).items.map((i) => i.label);
+    expect(ask(new Map([["gold", "cfd"]]))).not.toContain("dte");
+    expect(ask(new Map([["gold", "continuous"]]))).toContain("dte");
+    expect(ask(new Map())).toContain("dte"); // kind not known yet: nothing is hidden
+  });
+  it("offers a futures root's continuous streams and contracts after the venue, and the venue itself", () => {
+    const r = localCompletions("SYMBOLS\n    x = CME:", 2, "    x = CME:".length + 1, withDeriv);
+    expect(r.items.map((i) => i.label)).toEqual(expect.arrayContaining(["ES@front", "ES@next", "ESZ22"]));
+    const v = localCompletions("SYMBOLS\n    x = ", 2, "    x = ".length + 1, withDeriv);
+    expect(v.items.map((i) => i.label)).toContain("CME:");
+  });
+});

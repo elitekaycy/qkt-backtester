@@ -3,11 +3,12 @@ import { useStore } from "../state/store.js";
 import { useUi, type JournalSection } from "../state/ui.js";
 import { Tip } from "../ui/Tip.js";
 import { fmtNum } from "../util/format.js";
-import { Calendar, CalendarDays, ChartColumn, Clock, Dices, GitCompare, LayoutGrid, Layers, ListChecks, Maximize2, Minimize2, Play, X } from "../ui/icons.js";
+import { Calendar, CalendarDays, ChartColumn, Clock, Dices, GitCompare, LayoutGrid, Layers, ListChecks, Maximize2, Scale, Minimize2, Play, X } from "../ui/icons.js";
 import { CalendarView, DailyView, MonthlyView } from "./Calendar.js";
 import { Compare } from "./Compare.js";
 import { FilterBar } from "./FilterBar.js";
 import { Lab } from "./Lab.js";
+import { Derivatives } from "./Derivatives.js";
 import { Overview } from "./Overview.js";
 import { Strategies } from "./Strategies.js";
 import { TimeRisk } from "./TimeRisk.js";
@@ -22,11 +23,12 @@ const NAV: Array<{ id: JournalSection; label: string; icon: typeof ChartColumn; 
   { id: "monthly", label: "Monthly", icon: ChartColumn, filters: true, hint: "P&L, trades and win rate per month" },
   { id: "trades", label: "Trades", icon: ListChecks, filters: true, hint: "Every round trip, filtered and analysed" },
   { id: "time", label: "Time & risk", icon: Clock, filters: true, hint: "When you win, and how much you risk" },
+  { id: "derivatives", label: "Futures & options", icon: Scale, filters: false, hint: "Rolls, margin, settlements, liquidations, funding and option structures" },
   { id: "lab", label: "Optimize", icon: Dices, filters: false, hint: "Parameter grid, walk-forward and Monte Carlo: which settings work, and whether it holds up" },
   { id: "compare", label: "Compare", icon: GitCompare, filters: false, hint: "Runs side by side" },
 ];
 
-const Body = ({ id }: { id: JournalSection }) => id === "overview" ? <Overview /> : id === "strategies" ? <Strategies /> : id === "calendar" ? <CalendarView /> : id === "daily" ? <DailyView /> : id === "monthly" ? <MonthlyView /> : id === "trades" ? <TradesView /> : id === "time" ? <TimeRisk /> : id === "lab" ? <Lab /> : <Compare />;
+const Body = ({ id }: { id: JournalSection }) => id === "overview" ? <Overview /> : id === "strategies" ? <Strategies /> : id === "calendar" ? <CalendarView /> : id === "daily" ? <DailyView /> : id === "monthly" ? <MonthlyView /> : id === "trades" ? <TradesView /> : id === "time" ? <TimeRisk /> : id === "derivatives" ? <Derivatives /> : id === "lab" ? <Lab /> : <Compare />;
 
 /** The trading journal: a resizable slide-over with its own menu. Everything inside reacts to the shared filters. */
 export function Journal({ containerWidth }: { containerWidth: number }) {
@@ -36,7 +38,9 @@ export function Journal({ containerWidth }: { containerWidth: number }) {
   const opener = useRef<HTMLElement | null>(null);
   const navRef = useRef<HTMLDivElement>(null);
   const multi = (results?.meta.strategies.length ?? 0) > 1;
-  const nav = NAV.filter((n) => n.id !== "strategies" || multi);
+  // a futures/options section appears only on a run that wrote one: a CFD run has the same menu as before
+  const hasDeriv = (results?.meta.derivatives?.length ?? 0) > 0;
+  const nav = NAV.filter((n) => (n.id !== "strategies" || multi) && (n.id !== "derivatives" || hasDeriv));
   const sec = nav.find((n) => n.id === ui.journalSection) ?? nav[0]!;
   const width = ui.journalMax ? containerWidth : Math.min(containerWidth, Math.max(720, ui.journalW || Math.round(containerWidth * 0.74)));
 

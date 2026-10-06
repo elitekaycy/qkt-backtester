@@ -4,6 +4,7 @@ import { wsUrl } from "../api/client.js";
 import type { Diagnostic } from "../api/types.js";
 import { useStore } from "../state/store.js";
 import { localCompletions } from "./completions.js";
+import { kindContextFrom, kindMarks, kindShort, kindTitle, showKind, streamKinds } from "../util/derivatives.js";
 
 interface LspDiag { range: { start: { line: number; character: number }; end: { line: number; character: number } }; severity?: number; message: string; code?: string | number }
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
@@ -136,7 +137,7 @@ export class LspClient {
         // context-specific items first (fields after `gold.`, symbols and timeframes from the data source, actions after THEN...);
         // they come from the studio itself, so they still work while the language server is starting or reconnecting
         const qktFiles = Object.values(useStore.getState().tree).flat().filter((e) => e.type === "file" && e.name.endsWith(".qkt")).map((e) => e.path);
-        const loc = path.endsWith(".qkt") ? localCompletions(cur, position.lineNumber, position.column, useStore.getState().scan, qktFiles, path) : { items: [], exclusive: false };
+        const loc = path.endsWith(".qkt") ? localCompletions(cur, position.lineNumber, position.column, useStore.getState().scan, qktFiles, path, streamKinds(cur, kindContextFrom(useStore.getState().instruments))) : { items: [], exclusive: false };
         const kindOf = (k: string) => m.languages.CompletionItemKind[(k === "field" ? "Field" : k === "alias" ? "Variable" : k === "symbol" ? "Constant" : k === "timeframe" ? "Unit" : k === "snippet" ? "Snippet" : "Keyword") as keyof typeof m.languages.CompletionItemKind];
         const mine: languages.CompletionItem[] = loc.items.map((i) => ({
           label: { label: i.label, detail: i.detail ? `  ${i.detail}` : undefined }, kind: kindOf(i.kind), documentation: i.doc, insertText: i.insert,
@@ -180,7 +181,18 @@ export class LspClient {
         } catch { return null; }
       },
     });
-    return { dispose: () => { completion.dispose(); hover.dispose(); } };
+    // what a stream is (a continuous future, an option...): a CFD is the default and says nothing
+    const kindHover = m.languages.registerHoverProvider("qkt", {
+      provideHover: (model, position) => {
+        if (!pathOf(model).endsWith(".qkt")) return null;
+        const word = model.getWordAtPosition(position);
+        if (!word) return null;
+        const mark = kindMarks(model.getValue(), kindContextFrom(useStore.getState().instruments)).find((k) => k.alias === word.word);
+        if (!mark || !showKind(mark.kind)) return null;
+        return { range: new m.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn), contents: [{ value: `**${mark.alias}** · ${kindShort(mark.kind)}  \n${mark.broker}:${mark.symbol}  \n${kindTitle(mark.kind)}` }] };
+      },
+    });
+    return { dispose: () => { completion.dispose(); hover.dispose(); kindHover.dispose(); } };
   }
 }
 

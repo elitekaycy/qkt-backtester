@@ -66,7 +66,7 @@ export function TradesTab({ rows, selectedId, onSelect, all, matched }: { rows: 
                   <span className="r num">{fmtPrice(t.entryPx)}</span>
                   <span className="r num">{t.exitPx === null ? "—" : fmtPrice(t.exitPx)}</span>
                   <span className="r num">{t.open ? "open" : fmtDur(t.holdMs)}</span>
-                  <span title={t.exit}><span aria-hidden="true">{EXIT_GLYPH[t.exit]}</span> {t.exit}</span>
+                  <span title={t.venueExit ? `Closed by the venue: ${t.venueExit.replace("_", " ")}` : t.exit}><span aria-hidden="true">{EXIT_GLYPH[t.exit]}</span> {t.venueExit ? t.venueExit.replace("_", " ") : t.exit}</span>
                   <span className={`r num ${t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : ""}`}>{fmtMoney(t.pnl)}</span>
                   <span className={`r num ${t.pnl > 0 ? "gain" : t.pnl < 0 ? "loss" : ""}`}>{fmtR(t.r, 2, false)}</span>
                 </div>

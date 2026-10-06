@@ -1,5 +1,5 @@
 import { maxOf, minOf } from "./stats.js";
-import type { ExitReason, RoundTrip } from "./roundtrips.js";
+import type { ExitReason, RoundTrip, VenueExit } from "./roundtrips.js";
 
 export interface Bucket { pnl: number; trades: number; wins: number }
 export interface Histogram { edges: number[]; counts: number[] }
@@ -24,6 +24,8 @@ export interface Analytics {
   hour: Bucket[];
   side: { long: Bucket; short: Bucket };
   exit: Array<{ reason: ExitReason } & Bucket>;
+  /** Futures and options only: trades the venue closed itself (expiry settlement, liquidation, failed roll). Absent when none were, so a CFD run's analytics are unchanged. */
+  venue?: Array<{ reason: VenueExit } & Bucket>;
   hold: Array<{ label: string; minMs: number; maxMs: number } & Bucket>;
   pnlHistogram: Histogram;
   /**
@@ -121,11 +123,13 @@ export function analyze(trips: RoundTrip[]): Analytics {
   const weekday = Array.from({ length: 7 }, bucket), hour = Array.from({ length: 24 }, bucket);
   const side = { long: bucket(), short: bucket() };
   const exit = new Map<ExitReason, Bucket>();
+  const venue = new Map<VenueExit, Bucket>();
   const hold = HOLD.map((h) => ({ ...h, ...bucket() }));
   for (const t of closed) {
     const d = new Date(t.entryTs);
     add(weekday[d.getUTCDay()]!, t); add(hour[d.getUTCHours()]!, t); add(side[t.side], t);
     const e = exit.get(t.exit) ?? bucket(); add(e, t); exit.set(t.exit, e);
+    if (t.venueExit) { const v = venue.get(t.venueExit) ?? bucket(); add(v, t); venue.set(t.venueExit, v); }
     if (t.holdMs !== null) add(hold.find((h) => t.holdMs! >= h.minMs && t.holdMs! < h.maxMs) ?? hold[hold.length - 1]!, t);
   }
 
@@ -159,6 +163,7 @@ export function analyze(trips: RoundTrip[]): Analytics {
     monthly: [...monthly].sort(([a], [b]) => a.localeCompare(b)).map(([month, b]) => ({ month, ...b })),
     weekday, hour, side,
     exit: (["target", "stop", "signal"] as ExitReason[]).filter((r) => exit.has(r)).map((reason) => ({ reason, ...exit.get(reason)! })),
+    ...(venue.size ? { venue: (["expiry", "liquidation", "roll_failed"] as VenueExit[]).filter((r) => venue.has(r)).map((reason) => ({ reason, ...venue.get(reason)! })) } : {}),
     hold,
     byStrategy, dailyByStrategy, monthlyByStrategy,
     sizes: [...new Set(trips.map((t) => t.qty))].sort((a, b) => a - b).slice(0, 30),

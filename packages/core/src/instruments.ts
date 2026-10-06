@@ -1,4 +1,5 @@
 import { parseDocument } from "yaml";
+import { isTradingDay, qktCalendarFor } from "./calendars.js";
 
 /**
  * What a stream's symbol names. The DSL is the same for every kind (`alias = VENUE:SYMBOL EVERY tf`); only the symbol and the
@@ -192,3 +193,18 @@ export function contextFromCatalog(c: InstrumentCatalog, extra: { perpetuals?: I
   for (const f of c.futures) if (f.perpetual) perpetuals.add(`${f.root.split(":")[0]}:${f.perpetual}`);
   return { futureRoots, perpetuals, optionRoots: new Set(c.options.map((o) => o.root)), cfdBrokers: CFD_BROKERS };
 }
+
+/**
+ * Whether a futures root's exchange is expected to have data on a UTC day. `crypto` every day; `fx` and `nyse` as qkt's own
+ * calendars; `cme_globex` (and any other name) Monday to Friday less NYSE holidays: its Sunday-evening session is folded into
+ * Monday's bar by the archives the studio has met, so a missing Sunday file is not a hole, and a present one is simply kept.
+ */
+export function futuresDayExpected(calendar: string | undefined, day: string): boolean {
+  if (calendar === "crypto") return true;
+  if (calendar === "fx") return isTradingDay("fx", day);
+  return isTradingDay("nyse", day);
+}
+
+/** The calendar a root trades on: its declared `calendar:`, else what its name says (crypto names are 24/7, the rest CME-like). */
+export const calendarOf = (root: string, declared?: string): string => declared ?? (qktCalendarFor(root) === "crypto" ? "crypto" : "cme_globex");
+

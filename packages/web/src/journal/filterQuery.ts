@@ -18,6 +18,7 @@ const KEY_ALIAS: Record<string, string> = {
   side: "side", direction: "side", dir: "side",
   outcome: "outcome", result: "outcome", is: "outcome",
   exit: "exit", ended: "exit", end: "exit",
+  contract: "contract", contr: "contract",
   r: "r", risk: "r", rr: "r",
   held: "held", hold: "held", duration: "held",
   pnl: "pnl", profit: "pnl",
@@ -34,6 +35,8 @@ const VALUES = {
   side: { long: "long", buy: "long", short: "short", sell: "short" } as Record<string, "long" | "short">,
   outcome: { win: "win", wins: "win", winner: "win", winners: "win", loss: "loss", losses: "loss", loser: "loss", losers: "loss", breakeven: "breakeven", even: "breakeven", open: "open", closed: "closed" } as Record<string, NonNullable<TripQuery["outcome"]>>,
   exit: { target: "target", tp: "target", stop: "stop", sl: "stop", signal: "signal", rule: "signal", open: "open" } as Record<string, NonNullable<TripQuery["exit"]>>,
+  // futures and options: the venue ended the trade (the API reads them as `exit=`; the query keeps them apart from the rule/order exits)
+  venue: { expiry: "expiry", expired: "expiry", settled: "expiry", liquidation: "liquidation", liquidated: "liquidation", roll_failed: "roll_failed", rollfailed: "roll_failed" } as Record<string, NonNullable<TripQuery["venueExit"]>>,
 };
 
 const UNIT: Record<string, number> = { ms: 1, s: 1000, m: M, min: M, h: H, hr: H, d: D };
@@ -134,12 +137,18 @@ export function parseToken(raw: string, symbols: string[] = []): ParsedToken {
   }
   const keyRaw = raw.slice(0, i).toLowerCase(), v = raw.slice(i + 1), lv = v.toLowerCase();
   const key = KEY_ALIAS[keyRaw];
-  if (!key) return { raw, error: `Unknown filter “${keyRaw}”. Known: side, outcome, exit, r, held, pnl, size, entry, exited, trade, day, weekday, hour, symbol` };
+  if (!key) return { raw, error: `Unknown filter “${keyRaw}”. Known: side, outcome, exit, contract, r, held, pnl, size, entry, exited, trade, day, weekday, hour, symbol` };
   if (!v) return { raw, key, error: `${key}: needs a value` };
   switch (key) {
     case "side": { const x = VALUES.side[lv]; return x ? { raw, key, patch: { side: x } } : { raw, key, error: "side: long or short" }; }
     case "outcome": { const x = VALUES.outcome[lv]; return x ? { raw, key, patch: { outcome: x } } : { raw, key, error: "outcome: win, loss, breakeven, open or closed" }; }
-    case "exit": { const x = VALUES.exit[lv]; return x ? { raw, key, patch: { exit: x } } : { raw, key, error: "exit: target, stop or signal" }; }
+    case "exit": {
+      const venue = VALUES.venue[lv];
+      if (venue) return { raw, key, patch: { venueExit: venue, exit: undefined } };
+      const x = VALUES.exit[lv];
+      return x ? { raw, key, patch: { exit: x, venueExit: undefined } } : { raw, key, error: "exit: target, stop, signal, expiry, liquidation or roll_failed" };
+    }
+    case "contract": { const c = v.replace(/^[A-Za-z0-9_]+:/, ""); return /^[A-Za-z0-9_.\-]{1,60}$/.test(c) ? { raw, key, patch: { contract: c } } : { raw, key, error: "contract: a contract code like ESH19 (continuous futures)" }; }
     case "r": {
       const r = parseRange(lv, parseR);
       if (!r) return { raw, key, error: "r: like >=1, <0, -1..2 (multiples of the entry risk)" };
@@ -239,6 +248,8 @@ export function toChips(f: TripQuery): Chip[] {
   if (f.side) add("side", `side:${f.side}`, f.side === "long" ? "Long" : "Short", { side: undefined });
   if (f.outcome) add("outcome", `outcome:${f.outcome}`, { win: "Winners", loss: "Losers", breakeven: "Breakeven", open: "Open", closed: "Closed" }[f.outcome], { outcome: undefined });
   if (f.exit) add("exit", `exit:${f.exit}`, { target: "Target hit", stop: "Stop hit", signal: "Signal exit", open: "Open" }[f.exit] ?? f.exit, { exit: undefined });
+  if (f.venueExit) add("venue", `exit:${f.venueExit}`, { expiry: "Closed at expiry", liquidation: "Liquidated", roll_failed: "Roll failed" }[f.venueExit], { venueExit: undefined });
+  if (f.contract) add("contract", `contract:${f.contract}`, `Contract ${f.contract}`, { contract: undefined });
   add("r", rText(f.minR, f.maxR), "Risk", { minR: undefined, maxR: undefined });
   add("held", heldText(f.minHoldMs, f.maxHoldMs), "Held", { minHoldMs: undefined, maxHoldMs: undefined });
   add("pnl", pnlText(f.minPnl, f.maxPnl), "P&L", { minPnl: undefined, maxPnl: undefined });
@@ -261,7 +272,7 @@ export function toChips(f: TripQuery): Chip[] {
   return c;
 }
 
-interface Cand { text: string; label: string; group: string; words: string }
+interface Cand { text: string; label: string; group: string; words: string; /** Only offered on a futures/options run. */ venue?: boolean }
 const CANDS: Cand[] = [
   { text: "side:long", label: "Long trades", group: "Side", words: "buy long up" },
   { text: "side:short", label: "Short trades", group: "Side", words: "sell short down" },
@@ -272,6 +283,9 @@ const CANDS: Cand[] = [
   { text: "exit:target", label: "Hit the target", group: "Exit", words: "tp take profit target hit" },
   { text: "exit:stop", label: "Hit the stop", group: "Exit", words: "sl stop loss stopped hit" },
   { text: "exit:signal", label: "Closed by a rule", group: "Exit", words: "signal rule manual close" },
+  { text: "exit:expiry", label: "Settled at the contract's expiry", group: "Exit", words: "expiry expired settled settlement delivery futures options", venue: true },
+  { text: "exit:liquidation", label: "Liquidated by the venue", group: "Exit", words: "liquidation liquidated margin forced futures", venue: true },
+  { text: "exit:roll_failed", label: "Closed because a roll failed", group: "Exit", words: "roll failed rollover futures", venue: true },
   { text: "r:>=1", label: "Made at least 1R", group: "Risk", words: "risk r multiple 1r" },
   { text: "r:>=2", label: "Made at least 2R", group: "Risk", words: "risk r multiple 2r" },
   { text: "r:<0", label: "Lost money vs risk (below 0R)", group: "Risk", words: "risk r multiple negative" },
@@ -301,7 +315,7 @@ const score = (q: string, c: Cand): number => {
 
 const valueMatches = (val: string, c: Cand): boolean => c.text.slice(c.text.indexOf(":") + 1).toLowerCase().startsWith(val) || c.words.split(" ").some((w) => w.startsWith(val));
 
-export interface SuggestCtx { symbols?: string[]; days?: string[]; active?: TripQuery; sizes?: number[]; /** the run window, YYYY-MM-DD, `to` exclusive: entry/exit-time suggestions come from it even before any analytics load */ window?: { from: string; to: string } }
+export interface SuggestCtx { symbols?: string[]; /** Contracts a continuous-futures run traded, for `contract:`. */ contracts?: string[]; /** The run closed trades at the venue (expiry, liquidation): offer those exits. */ venue?: boolean; days?: string[]; active?: TripQuery; sizes?: number[]; /** the run window, YYYY-MM-DD, `to` exclusive: entry/exit-time suggestions come from it even before any analytics load */ window?: { from: string; to: string } }
 
 /**
  * Suggestions for the word being typed (the last token of `input`). Nothing typed: the common filters.
@@ -329,7 +343,8 @@ export function suggest(input: string, ctx: SuggestCtx = {}, limit = 9): Suggest
     ...timeDays.slice(0, 40).map((d) => ({ text: `exited:${d}`, label: `Exited on ${d}`, group: "Exit time", words: `exited closed ${d}` })),
   ];
   const sizeCands: Cand[] = [...new Set(ctx.sizes ?? [])].sort((a, b) => a - b).slice(0, 8).map((q) => ({ text: `size:${q}`, label: `Traded ${q}`, group: "Size", words: "size lots qty volume" }));
-  const all = [...CANDS, ...symCands, ...hours, ...dayCands, ...entryCands, ...exitedCands, ...sizeCands];
+  const contractCands: Cand[] = [...new Set(ctx.contracts ?? [])].slice(0, 60).map((c) => ({ text: `contract:${c}`, label: `Traded on ${c}`, group: "Contract", words: `contract ${c} futures roll` }));
+  const all = [...CANDS.filter((c) => !c.venue || ctx.venue), ...contractCands, ...symCands, ...hours, ...dayCands, ...entryCands, ...exitedCands, ...sizeCands];
 
   const colon = word.indexOf(":");
   if (colon >= 0) {

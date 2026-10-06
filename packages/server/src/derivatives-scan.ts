@@ -36,19 +36,9 @@ export async function listDayFiles(dir: string): Promise<string[]> {
   return [...days].sort();
 }
 
-/**
- * Whether a futures root's exchange is expected to have data on a UTC day. `crypto` every day; `fx` and `nyse` as qkt's own
- * calendars; `cme_globex` (and any other name) Monday to Friday less NYSE holidays: its Sunday-evening session is folded into
- * Monday's bar by the archives the studio has met, so a missing Sunday file is not a hole, and a present one is simply kept.
- */
-export function futuresDayExpected(calendar: string | undefined, day: string): boolean {
-  if (calendar === "crypto") return true;
-  if (calendar === "fx") return isTradingDay("fx", day);
-  return isTradingDay("nyse", day);
-}
-
-/** The calendar a root trades on: its declared `calendar:`, else what its name says (crypto names are 24/7, the rest CME-like). */
-export const calendarOf = (root: string, declared?: string): string => declared ?? (qktCalendarFor(root) === "crypto" ? "crypto" : "cme_globex");
+// The calendar rules live in core: the Data section's contract calendars read the same ones.
+export { calendarOf, futuresDayExpected } from "@qkt-studio/core";
+import { calendarOf, futuresDayExpected } from "@qkt-studio/core";
 
 /**
  * Runs of days that are covered (exclusive end): a day with a file, or a day the calendar says is closed. Runs start and end on

@@ -4,6 +4,8 @@ import { useStore } from "../state/store.js";
 import { Popover } from "../ui/Popover.js";
 import { Filter, Search, X } from "../ui/icons.js";
 import { parseFilters, suggest, toChips } from "./filterQuery.js";
+import { contractNames } from "../util/derivatives.js";
+import { useDerivatives } from "./useDerivatives.js";
 import { useAnalytics } from "./useAnalytics.js";
 
 const H = 3_600_000;
@@ -62,7 +64,10 @@ export function FilterBar({ compact = false, count }: { compact?: boolean; count
   const days = useMemo(() => (base ?? a)?.daily.map((d) => d.day) ?? [], [base, a]);
   const chips = toChips(filters);
   const sizes = useMemo(() => [...new Set((base ?? a)?.sizes ?? [])], [base, a]);
-  const sugg = useMemo(() => suggest(text, { symbols, days, active: filters, sizes, window: meta ? { from: meta.from, to: meta.to } : undefined }), [text, symbols, days, filters, sizes, meta]);
+  const deriv = useDerivatives().data;
+  const contracts = useMemo(() => contractNames(deriv), [deriv]);
+  const venue = (meta?.derivatives?.length ?? 0) > 0;
+  const sugg = useMemo(() => suggest(text, { symbols, days, active: filters, sizes, contracts, venue, window: meta ? { from: meta.from, to: meta.to } : undefined }), [text, symbols, days, filters, sizes, contracts, venue, meta]);
   const open = focus && sugg.length > 0;
 
   const apply = (line: string): boolean => {

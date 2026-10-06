@@ -6,7 +6,8 @@ import { Popover } from "../ui/Popover.js";
 import { addDays } from "../util/format.js";
 import { tfMs } from "@qkt-studio/core/strategy";
 import { yearChip } from "../util/datawindow.js";
-import { CircleAlert, CircleCheck, CircleX, CloudDownload, Hammer } from "../ui/icons.js";
+import { CircleAlert, CircleCheck, CircleX, CloudDownload, Copy, Hammer } from "../ui/icons.js";
+import { fetchLabel, fetchRequestFrom } from "../util/derivatives.js";
 
 /** Pieces shared by the Data section, its readiness card and the symbol dialog. */
 
@@ -112,5 +113,29 @@ export function FetchForm({ open, onClose, anchor, symbol, tf }: { open: boolean
         <button className="btn primary" disabled={!f.symbol || !f.from || !f.to} onClick={() => void go()}><CloudDownload size={15} />Fetch</button>
       </div>
     </Popover>
+  );
+}
+
+/**
+ * The exact `qkt fetch ...` a blocked futures/options stream needs. Copy always; Run only when the command has no placeholder left, and
+ * only on a click: a fetch uses the network, so the studio never starts one on its own.
+ */
+export function FixCommand({ command }: { command: string }) {
+  const runFetch = useStore((s) => s.runFetch), jobs = useStore((s) => s.jobs);
+  const req = fetchRequestFrom(command);
+  const label = req ? fetchLabel(req) : "";
+  const running = !!req && jobs.some((j) => j.status === "running" && j.label === label);
+  const [copied, setCopied] = useState(false);
+  const copy = () => { void navigator.clipboard?.writeText(command); setCopied(true); setTimeout(() => setCopied(false), 1400); };
+  return (
+    <span className="fixcmd">
+      <code className="mono fixcmd-text" title={command}>{command}</code>
+      <span className="fixcmd-btns">
+        <button className="btn ghost sm" onClick={copy} aria-label={`Copy: ${command}`}><Copy size={12} />{copied ? "Copied" : "Copy"}</button>
+        {req ? <button className="btn sm" disabled={running} onClick={() => void runFetch(req)} title={`${label}. Uses the network; progress shows under Jobs.`}>
+          {running ? <span className="spin" /> : <CloudDownload size={13} />}{running ? "Running…" : "Run it"}</button>
+          : <span className="muted" title="Fill in the dates it asks for, then run it in a terminal">edit dates first</span>}
+      </span>
+    </span>
   );
 }
