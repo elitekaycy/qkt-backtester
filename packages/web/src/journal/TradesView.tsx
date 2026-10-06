@@ -27,19 +27,27 @@ const BASE_COLS: Array<{ key: string; label: string; w: string; sort?: SortKey; 
 ];
 /** A portfolio run (more than one strategy) inserts a Strategy column right after Symbol; a plain run's columns are untouched. */
 const STRAT_COL: (typeof BASE_COLS)[number] = { key: "strategy", label: "Strategy", w: "96px" };
-const colsFor = (strat: boolean) => (strat ? [BASE_COLS[0]!, BASE_COLS[1]!, STRAT_COL, ...BASE_COLS.slice(2)] : BASE_COLS);
+/** A continuous-futures run adds the contract(s) each trade really traded and the rolls it carried, right after Symbol. */
+const CONTRACT_COL: (typeof BASE_COLS)[number] = { key: "contract", label: "Contract", w: "150px" };
+const colsFor = (strat: boolean, contract = false) => {
+  const head = [BASE_COLS[0]!, BASE_COLS[1]!, ...(contract ? [CONTRACT_COL] : []), ...(strat ? [STRAT_COL] : [])];
+  return strat || contract ? [...head, ...BASE_COLS.slice(2)] : BASE_COLS;
+};
 const H = 3_600_000;
+const VENUE_LABEL = { expiry: "expiry", liquidation: "liquidated", roll_failed: "roll failed" } as const;
+const VENUE_TITLE = { expiry: "The contract expired and the venue settled the position", liquidation: "Equity fell below maintenance margin and the venue closed the position", roll_failed: "The next contract refused the roll, so the position was closed" } as const;
 
-function TradeCells({ t, strat }: { t: RoundTrip; strat: boolean }) {
+function TradeCells({ t, strat, contract }: { t: RoundTrip; strat: boolean; contract: boolean }) {
   const c = (v: React.ReactNode, right?: boolean, cls = "") => <div role="cell" className={`${cls}${right ? " num" : ""} nowrap`} style={{ padding: "0 var(--s3)", overflow: "hidden", textOverflow: "ellipsis", textAlign: right ? "right" : "left" }}>{v}</div>;
   return (
     <>
       {c(t.id, true, "muted")}{c(t.symbol.split(":").pop())}
+      {contract && c(t.contract ? <span title={`Entered on ${t.contract}${t.exitContract && t.exitContract !== t.contract ? `, exited on ${t.exitContract}` : ""}${t.rolls ? `; carried across ${t.rolls} roll${t.rolls === 1 ? "" : "s"}` : ""}`}>{t.contract.replace(/^[A-Za-z0-9_]+:/, "")}{t.exitContract && t.exitContract !== t.contract ? ` → ${t.exitContract.replace(/^[A-Za-z0-9_]+:/, "")}` : ""}{t.rolls ? <span className="muted"> · {t.rolls}×</span> : null}</span> : <span className="muted">{DASH}</span>)}
       {strat && c(<span style={{ color: strategyColor(t.strategy), fontWeight: 600 }}>{strategyAlias(t.strategy)}</span>)}
       {c(t.side === "long" ? "▲ Long" : "▼ Short")}
       {c(fmtTs(t.entryTs), false, "mono")}{c(fmtPrice(t.entryPx), true)}{c(t.open ? <span className="badge">open</span> : fmtTs(t.exitTs), false, "mono")}{c(t.open ? DASH : fmtPrice(t.exitPx), true)}
       {c(fmtNum(t.qty, 2), true)}{c(t.risk === undefined ? <span title="No stop was set on this entry, so its risk is not measured">no stop</span> : fmtMoney(t.risk).replace("+", ""), true, t.risk === undefined ? "muted" : "")}
-      {c(<span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{t.exit === "signal" ? "signal" : t.exit}</span>)}
+      {c(t.venueExit ? <span className={`badge ${t.venueExit === "expiry" ? "" : "bad"}`} title={VENUE_TITLE[t.venueExit]}>{VENUE_LABEL[t.venueExit]}</span> : <span className={`badge ${t.exit === "target" ? "ok" : t.exit === "stop" ? "bad" : ""}`}>{t.exit === "signal" ? "signal" : t.exit}</span>)}
       {c(fmtR(t.r, 2, false), true, t.r === undefined ? "muted" : t.r >= 0 ? "gain" : "loss")}
       {c(<>{t.open ? "" : glyph(t.pnl) + " "}{fmtMoney(t.pnl)}</>, true, t.pnl >= 0 ? "gain" : "loss")}{c(t.open ? DASH : fmtDur(t.holdMs), true)}
     </>
@@ -50,7 +58,8 @@ function TradeCells({ t, strat }: { t: RoundTrip; strat: boolean }) {
 export function TradesTable() {
   const runId = useStore((s) => s.results?.runId ?? null), filters = useStore((s) => s.filters), selected = useStore((s) => s.selectedTrip), selectTrip = useStore((s) => s.selectTrip);
   const strat = useStore((s) => (s.results?.meta.strategies.length ?? 0) > 1);
-  const cols = useMemo(() => colsFor(strat), [strat]);
+  const contract = useStore((s) => !!s.results?.meta.derivatives?.includes("contracts"));
+  const cols = useMemo(() => colsFor(strat, contract), [strat, contract]);
   const template = useMemo(() => cols.map((c) => c.w).join(" "), [cols]);
   const ui = useUi();
   const [sort, setSort] = useState<SortKey>("entryTs"), [dir, setDir] = useState<"asc" | "desc">("desc");
@@ -81,7 +90,7 @@ export function TradesTable() {
     <Widget title="Trades" className="flush" right={<>
       {selected && <button className="btn sm primary" onClick={() => { selectTrip(selected, true); ui.set({ journalOpen: false }); }}><ArrowUpRight size={14} />Show #{selected.id} on the chart</button>}
       <span className="muted">{total.toLocaleString()} round trips · one row per entry-to-exit</span></>} style={{ padding: 0 }}>
-      <div style={{ overflowX: "auto" }}><div style={{ minWidth: strat ? 1316 : 1220 }}>
+      <div style={{ overflowX: "auto" }}><div style={{ minWidth: (strat ? 1316 : 1220) + (contract ? 150 : 0) }}>
       <div role="table" aria-label="Round trips" aria-rowcount={total}>
       <div style={{ display: "grid", gridTemplateColumns: template, borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)", background: "var(--card)", paddingRight: 10 }} role="row">
         {cols.map((c) => (
@@ -109,7 +118,7 @@ export function TradesTable() {
                   requestAnimationFrame(() => el?.querySelector<HTMLElement>(`[data-row="${n}"]`)?.focus({ preventScroll: true }));
                 }
               }}>
-              {t ? <TradeCells t={t} strat={strat} /> : <div role="cell" style={{ gridColumn: "1 / -1", padding: "0 var(--s3)" }} className="muted">…</div>}
+              {t ? <TradeCells t={t} strat={strat} contract={contract} /> : <div role="cell" style={{ gridColumn: "1 / -1", padding: "0 var(--s3)" }} className="muted">…</div>}
             </div>
           ))}
         </div>

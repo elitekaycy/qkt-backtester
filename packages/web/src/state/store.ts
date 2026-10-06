@@ -2,10 +2,11 @@ import { anchorParseError, locateImport } from "@qkt-studio/core/lint";
 import { create } from "zustand";
 import { useUi } from "./ui.js";
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
-import { api, ApiError, openRunEvents, type Equity, type Info, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
+import { api, ApiError, openRunEvents, type Equity, type DerivFetchReq, type Info, type InstrumentsInfo, type RunMeta, type RunRow, type SettingsView, type TreeEntry } from "../api/client.js";
 import type { Diagnostic, IntegrityReport, MonthRow, Readiness, RoundTrip, RunJson, RunOptions, ScanReport, Summary, Tier, TripQuery } from "../api/types.js";
 import { addDays, fmtMoney } from "../util/format.js";
 import { defaultWindow, recomputeReadiness } from "../util/datawindow.js";
+import { effectiveTier, fetchLabel, pruneRunFilters } from "../util/derivatives.js";
 import type { SymbolReport } from "../api/types.js";
 import { runCfgPatch } from "./runCfg.js";
 import { notify } from "../ui/notify.js";
@@ -51,12 +52,19 @@ interface State {
 
   settings: SettingsView | null;
   scan: ScanReport | null;
+  /** instruments.yaml of the data source and the futures/option roots in it: what tells a future from a CFD. Null until first loaded. */
+  instruments: InstrumentsInfo | null;
   readiness: Readiness[];
   /** Reports of symbols read from a source other than the default (their own source's view). */
   overrideReports: Record<string, SymbolReport | undefined>;
   /** Symbol whose detail dialog is open. */
   symbolDialog: string | null;
   openSymbol(symbol: string | null): void;
+  /** The futures or options root whose dialog is open, as `VENUE:ROOT`. */
+  rootDialog: string | null;
+  openRoot(key: string | null): void;
+  /** Run a derivatives fetch the user asked for; progress shows in the Jobs list. */
+  runFetch(req: DerivFetchReq): Promise<boolean>;
   /** The server's last message when a run was refused (e.g. window outside a symbol's range); shown in Run settings. */
   submitError: string | null;
   /** One sentence for screen readers when a run starts, finishes or fails (read by a polite live region). */
@@ -149,7 +157,7 @@ export const useStore = create<State>((set, get) => ({
   theme: prefs.theme === "light" ? "light" : "dark",
   tree: {}, expanded: { "": true, strategies: true }, openFiles: [], activePath: null, lastStrategy: null,
   cfg: { tier: prefs.tier === "full" ? "full" : "draft", from: prefs.from ?? "", to: prefs.to ?? "", autoRun: prefs.autoRun !== false, paramsByStrategy: prefs.paramsByStrategy ?? {}, options: prefs.options ?? {}, allowIncomplete: prefs.allowIncomplete === true },
-  settings: null, scan: null, readiness: [], overrideReports: {}, symbolDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
+  settings: null, scan: null, instruments: null, readiness: [], overrideReports: {}, symbolDialog: null, rootDialog: null, submitError: null, announce: "", scanning: false, jobs: [], compare: [],
   runId: null, run: null, progress: null, logs: [], running: false, runs: [],
   results: null, previous: null, autoSkipped: null, resultsStale: false,
   filters: {}, selectedTrip: null, focus: null,
@@ -229,6 +237,8 @@ export const useStore = create<State>((set, get) => ({
     try {
       const r = await api.writeFile(path, f.content, f.etag);
       set((s) => ({ openFiles: s.openFiles.map((x) => (x.path === path ? { ...x, saved: f.content, etag: r.etag, conflict: false } : x)) }));
+      // the kinds the editor and the readiness card judge streams by come from instruments.yaml
+      if (path === "instruments.yaml" || path.endsWith("/instruments.yaml")) void get().refreshData(true);
       if (get().cfg.autoRun && (isStrategy(path) || path === CONFIG)) {
         if (autoTimer) clearTimeout(autoTimer);
         // a file with a syntax error would only produce a failed run: keep the last good result and say why instead
@@ -344,7 +354,10 @@ export const useStore = create<State>((set, get) => ({
     launching = me;
     set((s) => ({ running: true, run: null, progress: null, logs: [], resultsStale: s.results !== null, submitError: null, announce: `Running ${strategy.split("/").pop()}…` }));
     try {
-      const tier = opts.tier ?? cfg.tier;
+      // a stream that has no bars (option chains) or no ticks (continuous futures) fixes the tier: say so instead of being refused
+      const forced = effectiveTier(opts.tier ?? cfg.tier, f ? parseStrategyInfo(f.content).streams : []);
+      const tier = forced.tier;
+      if (forced.note) get().toast("info", forced.note);
       const { broker, execution, slippage, ...common } = cfg.options;
       const options: RunOptions = tier === "full" ? { ...common, broker, execution, slippage } : common;
       const clean = Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined && v !== "")) as RunOptions;
@@ -420,7 +433,7 @@ export const useStore = create<State>((set, get) => ({
   async refreshData(force = false) {
     set({ scanning: true });
     try {
-      const [settings, scan, ready] = await Promise.all([api.settings(), api.scan(force), api.readiness(force)]);
+      const [settings, scan, ready, instruments] = await Promise.all([api.settings(), api.scan(force), api.readiness(force), api.instruments().catch(() => null)]);
       // symbols pointed at another source are judged by THAT source's report, and every strategy is re-evaluated with the
       // per-symbol windows applied (the server's readiness only knows the default source)
       const overrideReports: Record<string, SymbolReport | undefined> = {};
@@ -428,10 +441,15 @@ export const useStore = create<State>((set, get) => ({
         try { overrideReports[sym] = (await api.symbolDetail(sym)).sources.find((x) => x.root === p.source)?.report ?? undefined; } catch { /* keep the default report */ }
       }));
       const readiness = ready.strategies.map((r) => recomputeReadiness(r, scan, settings.symbolPrefs, overrideReports));
-      set({ settings, scan, readiness, overrideReports, scanning: false });
+      set({ settings, scan, readiness, overrideReports, scanning: false, ...(instruments ? { instruments } : {}) });
     } catch (e) { set({ scanning: false }); if (!(e instanceof ApiError && e.status === 401)) get().toast("error", `Data scan failed: ${(e as Error).message}`); }
   },
   openSymbol(symbol) { set({ symbolDialog: symbol }); },
+  openRoot(key) { set({ rootDialog: key }); },
+  async runFetch(req) {
+    try { const { jobId } = await api.fetchDerivatives(req); get().trackJob(jobId, fetchLabel(req)); return true; }
+    catch (e) { get().toast("error", (e as Error).message); return false; }
+  },
   async setSymbolPref(symbol, pref) {
     const r = await api.setSymbolPref(symbol, pref);
     set({ settings: r });
@@ -514,7 +532,7 @@ export const useStore = create<State>((set, get) => ({
       if (get().runId !== id) return;
       const prev = get().results;
       const previous = prev && prev.runId !== id && prev.strategy === run.strategy ? prev : prev?.runId === id ? get().previous : null;
-      set({ results: { runId: id, summary, integrity, monthly, equity, meta, strategy: run.strategy }, previous, resultsStale: false, selectedTrip: null });
+      set((st) => ({ results: { runId: id, summary, integrity, monthly, equity, meta, strategy: run.strategy }, previous, resultsStale: false, selectedTrip: null, filters: pruneRunFilters(st.filters, meta.derivatives) }));
     } catch (e) {
       set({ resultsStale: false });
       get().toast("error", `Cannot load results: ${(e as Error).message}`);

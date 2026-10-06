@@ -1,5 +1,6 @@
 import { LineCounter, parseDocument, isMap, isScalar } from "yaml";
 import { priceScaleIndicators, streamFieldSet, type QktVocabulary } from "./vocabulary.js";
+import { fieldAllowed, fieldNotForKind, kindOf, STREAM_FIELD_NAMES, type KindContext } from "./instruments.js";
 
 export interface Diagnostic {
   severity: "error" | "warning" | "info";
@@ -65,7 +66,7 @@ export function lintAliases(source: string, vocab: QktVocabulary): Diagnostic[] 
   const aliases = declaredAliases(lines);
   // alias -> bare symbol, from "alias = BROKER:SYMBOL EVERY tf"
   const symbols = new Map<string, string>();
-  for (const raw of lines) { const m = /^\s+([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_.\-]+)\s+EVERY\b/.exec(scrub(raw)); if (m) symbols.set(m[1]!, m[2]!); }
+  for (const raw of lines) { const m = /^\s+([A-Za-z_]\w*)\s*=\s*(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_.@\-]+)\s+EVERY\b/.exec(scrub(raw)); if (m) symbols.set(m[1]!, m[2]!); }
   const out: Diagnostic[] = [];
   lines.forEach((raw, idx) => {
     const l = scrub(raw);
@@ -98,6 +99,39 @@ export function lintAliases(source: string, vocab: QktVocabulary): Diagnostic[] 
       if (aliases.has(m[1]!)) continue;
       const col = m.index + "POSITION.".length + 1;
       out.push({ severity: "warning", code: "unknown_alias", line: idx + 1, col, endCol: col + m[1]!.length, message: `POSITION.${m[1]}: '${m[1]}' is not a declared stream alias` });
+    }
+  });
+  return out;
+}
+
+/**
+ * qkt parses `fx.dte` on a CFD (or `es.iv` on a future) and then runs without error: the field is undefined there, so the
+ * rule never fires. The DSL is one language for every instrument, so the studio refuses a field the stream's kind does not
+ * have. `ctx` says which symbols are futures or options (the server knows from the store and instruments.yaml); without it
+ * only certain kinds are judged (BACKTEST/MT5 brokers are CFDs, `@front` is continuous, OPTIONS/CHAIN/HUB are what they say).
+ */
+export function lintFieldKinds(source: string, ctx: KindContext = {}, vocab?: QktVocabulary): Diagnostic[] {
+  const known = vocab ? streamFieldSet(vocab) : STREAM_FIELD_NAMES;
+  const lines = source.split(/\r?\n/);
+  const kinds = new Map<string, ReturnType<typeof kindOf>>();
+  for (const raw of lines) {
+    const m = /^\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z0-9_]+):([A-Za-z0-9_.@\-]+)\s+EVERY\b/.exec(scrub(raw));
+    if (!m) continue;
+    const k = kindOf({ broker: m[2]!, symbol: m[3]! }, ctx);
+    // Without a catalog a bare symbol on an unknown broker could be a future: only judge what the prefix settles.
+    const settled = k !== "cfd" || ctx.futureRoots !== undefined || ["BACKTEST", "EXNESS", "ICMARKETS", "FTMO", "PEPPERSTONE", "THE5ERS", "MT5"].includes(m[2]!.toUpperCase());
+    if (settled) kinds.set(m[1]!, k);
+  }
+  const out: Diagnostic[] = [];
+  lines.forEach((raw, idx) => {
+    const l = scrub(raw);
+    if (/^\s+[A-Za-z_]\w*\s*=\s*[A-Za-z0-9_]+:/.test(l) && /\bEVERY\b/.test(l)) return;
+    const use = /(?<![\w.])([A-Za-z_]\w*)\.([a-z_]\w*)/g;
+    for (let m = use.exec(l); m; m = use.exec(l)) {
+      const kind = kinds.get(m[1]!);
+      if (!kind || !known.has(m[2]!) || fieldAllowed(kind, m[2]!)) continue;
+      const col = m.index + m[1]!.length + 2;
+      out.push({ severity: "error", code: "field_not_for_kind", line: idx + 1, col, endCol: col + m[2]!.length, message: fieldNotForKind(m[1]!, kind, m[2]!) });
     }
   });
   return out;

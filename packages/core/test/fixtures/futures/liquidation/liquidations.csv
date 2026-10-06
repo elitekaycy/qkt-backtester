@@ -1,0 +1,2 @@
+timestamp,strategy,symbol,side,quantity,price,fee,equity,maintenance
+1582696800000,es_hold,CME:ESH20,SELL,1,3091.00000000,2.23000000,22335.27000000,23375.00000000

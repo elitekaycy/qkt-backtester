@@ -1,0 +1,3 @@
+timestamp,reason,strategy,symbol
+1552705200000,venue: CME:ESH19 expired at 2019-03-15T21:00:00Z,es_hold,CME:ESH19
+1552780800000,venue: CME:ESH19 expired at 2019-03-15T21:00:00Z,es_hold,CME:ESH19

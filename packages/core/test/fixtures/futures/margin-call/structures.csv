@@ -1,0 +1,2 @@
+openedAt,closedAt,strategy,structure,alias,outcome,legs,credit,realized
+1790835377133,,spread,ps-dsl-spread--0,ps,,SELL 0.10 DERIBIT:BTC_USDC_4OCT26_83000_P @ 400.00000000;BUY 0.10 DERIBIT:BTC_USDC_4OCT26_81000_P @ 150.00000000,25.0000000000,

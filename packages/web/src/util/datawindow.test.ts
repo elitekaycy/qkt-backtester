@@ -64,6 +64,25 @@ describe("recomputeReadiness", () => {
     expect(out.ticks.runnable).toBe(false);
     expect(out.ticks.blocked[0]!.reason).toMatch(/no tick files/);
   });
+  it("keeps the server's verdict for a futures stream: the CFD rules would call ES@front missing from the data source", () => {
+    const es = { alias: "es", broker: "CME", symbol: "ES@front", tf: "1d" };
+    const server = { ...r, streams: [es], kinds: { es: "continuous" }, bars: { runnable: true, ranges: [{ from: "2019-01-01", to: "2021-01-01" }], longest: { from: "2019-01-01", to: "2021-01-01" }, blocked: [] },
+      ticks: { runnable: false, ranges: [], longest: null, blocked: [{ stream: "CME:ES@front 1d", reason: "continuous", fix: "fetch" }] } } as unknown as Readiness;
+    const out = recomputeReadiness(server, scan, {}, {});
+    expect(out).toEqual(server);
+    const blockedByServer = { ...server, bars: { runnable: false, ranges: [], longest: null, blocked: [{ stream: "CME:ES@front 1d", reason: "no catalog", fix: "catalog", command: "qkt fetch CME:ES --catalog" }] } } as unknown as Readiness;
+    expect(recomputeReadiness(blockedByServer, scan, {}, {}).bars.blocked[0]).toMatchObject({ command: "qkt fetch CME:ES --catalog" });
+  });
+  it("a strategy mixing a CFD and a future re-judges the CFD and keeps the future's blocks and window", () => {
+    const es = { alias: "es", broker: "CME", symbol: "ES@front", tf: "1d" }, a = { alias: "a", broker: "BACKTEST", symbol: "A", tf: "15m" };
+    const mixed = { ...r, streams: [a, es], kinds: { es: "continuous" }, bars: { runnable: true, ranges: [{ from: "2020-06-01", to: "2021-06-01" }], longest: { from: "2020-06-01", to: "2021-06-01" }, blocked: [] },
+      ticks: { runnable: false, ranges: [], longest: null, blocked: [] } } as unknown as Readiness;
+    const out = recomputeReadiness(mixed, scan, {}, {});
+    expect(out.bars.ranges).toEqual([{ from: "2020-06-01", to: "2021-06-01" }]); // A covers 2020-2022, the future 2020-06..2021-06
+    const noFuture = recomputeReadiness({ ...mixed, bars: { ...mixed.bars, runnable: false, ranges: [], longest: null, blocked: [{ stream: "CME:ES@front 1d", reason: "no rolls", fix: "rolls" }] } } as Readiness, scan, {}, {});
+    expect(noFuture.bars.runnable).toBe(false);
+    expect(noFuture.bars.blocked.map((b) => b.fix)).toEqual(["rolls"]);
+  });
   it("a symbol missing from the store blocks with a fetch fix", () => {
     const out = recomputeReadiness({ ...r, streams: [{ alias: "z", broker: "BACKTEST", symbol: "Z", tf: "15m" }] } as Readiness, scan, {}, {});
     expect(out.bars.blocked[0]).toMatchObject({ fix: "fetch" });

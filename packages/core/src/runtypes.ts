@@ -21,6 +21,12 @@ export interface RunOptions {
   tpFill?: "print" | "level";
   rejectEvery?: number;
   partialFill?: number;
+  /**
+   * `--funding off` (both tiers): backtest a perpetual without charging its funding. By default a perpetual's stored funding
+   * is charged and a run whose stored rates do not cover it is refused (qkt names the `qkt fetch ... --funding`). Only
+   * `"off"` is ever passed; `"on"` is the default and adds no flag.
+   */
+  funding?: "on" | "off";
 }
 
 export const EXECUTIONS = ["paper-fast", "mt5-basic", "mt5-realistic", "stress"] as const;

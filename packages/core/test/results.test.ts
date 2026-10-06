@@ -165,4 +165,15 @@ describe("summarizeRejections", () => {
     expect(summarizeRejections("timestamp,reason,strategy,symbol\n")).toEqual({ count: 0, reasons: [] });
     expect(summarizeRejections("")).toEqual({ count: 0, reasons: [] });
   });
+
+  it("names an expired contract instead of stripping its digits (real qkt text, futures and an option code)", () => {
+    const real = readFileSync(new URL("./fixtures/futures/expiry/rejections.csv", import.meta.url), "utf8");
+    const r = summarizeRejections(real);
+    expect(r.reasons).toHaveLength(1);
+    expect(r.reasons[0]).toMatchObject({ kind: "contract-expired", count: 2, label: "CME:ESH19 expired on 2019-03-15" });
+    expect(r.reasons[0]!.hint).toContain("expiry");
+    const opt = summarizeRejections(["timestamp,reason,strategy,symbol", "1,venue: DERIBIT:BTC_USDC_26SEP26_84000_C expired at 2026-09-26T08:00:00Z,s,DERIBIT:BTC_USDC_26SEP26_84000_C"].join("\n"));
+    expect(opt.reasons[0]!.label).toBe("DERIBIT:BTC_USDC_26SEP26_84000_C expired on 2026-09-26");
+    expect(opt.reasons[0]!.example).toContain("expired at 2026-09-26T08:00:00Z");
+  });
 });

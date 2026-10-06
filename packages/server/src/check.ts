@@ -8,6 +8,7 @@ import { execQkt } from "./proc.js";
 import { rememberParsed } from "./parse-cache.js";
 import { resolveInJail } from "./jail.js";
 import { qktLanguage } from "./qkt-lang.js";
+import { fieldKindErrors, kindContextFor } from "./kind-gate.js";
 
 /** The identifier under `col` on `line` (1-based), so a position from qkt becomes a range the editor can underline. */
 function wordEnd(content: string, line: number, col: number): number {
@@ -48,6 +49,8 @@ export async function checkQktSource(cfg: ServerConfig, content: string, rel?: s
     if (r.code === 0) rememberParsed(content);
     // qkt stops at its first error; the lint reports every undeclared alias, but not the one qkt already named on that line
     diagnostics.push(...lintAliases(content, vocabulary).filter((d) => !(d.code === "unknown_alias" && d.line === flaggedLine)));
+    // qkt accepts a derivatives field on a CFD stream and then never trades (kind-gate.ts)
+    diagnostics.push(...fieldKindErrors(content, await kindContextFor(cfg.dataRoot), vocabulary));
     return { ok: !diagnostics.some((d) => d.severity === "error"), diagnostics };
   } finally {
     await fs.rm(tmp, { force: true }).catch(() => undefined);

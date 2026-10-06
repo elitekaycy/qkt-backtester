@@ -4,7 +4,7 @@
 # Both bases are pinned by digest, so the image built today and next month runs the same engine and Node. The studio is
 # verified against this qkt; to try another one:  --build-arg QKT_IMAGE=ghcr.io/elitekaycy/qkt:<tag>
 # The qkt image is published for linux/amd64 only: on an arm64 host (Apple silicon, Graviton) add --platform linux/amd64.
-ARG QKT_IMAGE=ghcr.io/elitekaycy/qkt:edge@sha256:f5e75312e72ee7216cf4a85620492a653ea1630996a1e83ffc1d071dcca999e3
+ARG QKT_IMAGE=ghcr.io/elitekaycy/qkt:v0.55.0@sha256:bd74fa6e623aa6f9a16ddde5b0e0af04dca65a33f4fbf40bb07938f6937e43cd
 ARG NODE_IMAGE=node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c
 
 FROM ${NODE_IMAGE} AS node

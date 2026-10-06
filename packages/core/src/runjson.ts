@@ -35,7 +35,7 @@ export interface StepRecord {
 }
 
 export type ErrorKind =
-  | "parse" | "unknown_indicator" | "unknown_alias" | "missing_config" | "bad_config_yaml" | "bad_config_key" | "bad_bracket"
+  | "parse" | "unknown_indicator" | "unknown_alias" | "field_not_for_kind" | "missing_config" | "bad_config_yaml" | "bad_config_key" | "bad_bracket"
   | "missing_data" | "incomplete_data" | "file_not_found" | "engine_crash" | "unsupported_result" | "cancelled" | "internal";
 
 export interface RunError { kind: ErrorKind; message: string; file?: string; line?: number; col?: number }
@@ -65,7 +65,7 @@ export interface RunJson {
   /** True when a newer save of the same strategy may cancel this run (auto-run on save). */
   auto?: boolean;
   /** Engine coverage lines and the per-day holes qkt reported (empty when data was complete). */
-  coverage?: Array<{ source: "tick" | "bar"; symbol: string; covered: number; requested: number; tf?: string }>;
+  coverage?: Array<{ source: "tick" | "bar" | "chain"; symbol: string; covered: number; requested: number; tf?: string; /** A continuous futures stream: qkt's own bar check cannot judge it (it reports 0 days), so the run waived it and the contracts' bars are checked by Data readiness. */ continuous?: boolean }>;
   holes?: HoleDay[];
   /** qkt's own remedy for missing bars, e.g. `qkt data build-bars XAUUSD --tf 15m --from ... --to ...`. */
   buildBarsHint?: string;

@@ -5,7 +5,8 @@ import type { ModeReadiness, Readiness } from "../api/types.js";
 import { useStore } from "../state/store.js";
 import { addDays } from "../util/format.js";
 import { ChevronRight, CircleAlert, CircleCheck, CircleX, CloudDownload, Hammer } from "../ui/icons.js";
-import { BuildForm, FetchForm } from "./dataParts.js";
+import { BuildForm, FetchForm, FixCommand } from "./dataParts.js";
+import { kindShort, kindTitle, rootKeyFor, shownTier, showKind, tierRule } from "../util/derivatives.js";
 
 const fmtDay = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 /** A day range with an exclusive end, as the inclusive dates it covers. */
@@ -20,11 +21,12 @@ type Fix = { kind: "build" | "fetch"; symbol: string; tf: string } | null;
  */
 export function ReadinessCard() {
   const activePath = useStore((s) => s.activePath), readiness = useStore((s) => s.readiness), scan = useStore((s) => s.scan);
-  const cfg = useStore((s) => s.cfg), setCfg = useStore((s) => s.setCfg), openSymbol = useStore((s) => s.openSymbol);
+  const cfg = useStore((s) => s.cfg), setCfg = useStore((s) => s.setCfg), openSymbol = useStore((s) => s.openSymbol), openRoot = useStore((s) => s.openRoot);
   const [fix, setFix] = useState<Fix>(null);
   const fixAnchor = useRef<HTMLElement | null>(null);
   const r = readiness.find((x) => x.strategy === activePath);
-  const onBars = cfg.tier !== "full";
+  // the tier the run will use: an option strategy runs on ticks and a continuous future on bars, whatever was saved
+  const onBars = (r ? shownTier(cfg.tier, r.streams) : cfg.tier) !== "full";
 
   // which bar folder each stream is read from (qkt aggregates a coarser stream from a finer built one)
   const bases = useMemo(() => {
@@ -37,6 +39,8 @@ export function ReadinessCard() {
   if (!r) return <div className="ready-card"><span className="spin" /> Checking {activePath.split("/").pop()} against the data…</div>;
 
   const m: ModeReadiness = onBars ? r.bars : r.ticks, other: ModeReadiness = onBars ? r.ticks : r.bars;
+  // continuous futures have no ticks and option chains no bars: say so here, and offer the other tier, instead of a refused run
+  const tierRules = tierRule(r.streams), tierBad = onBars ? tierRules.draft : tierRules.full, otherRefused = onBars ? tierRules.full : tierRules.draft;
   const win = { from: cfg.from, to: cfg.to };
   const fits = !!win.from && !!win.to && m.ranges.some((x) => x.from <= win.from && x.to >= win.to);
   const isLongest = !!m.longest && m.longest.from === win.from && m.longest.to === win.to;
@@ -70,15 +74,26 @@ export function ReadinessCard() {
             <span>{m.blocked.length ? `Can't run on ${onBars ? "bars" : "ticks"} yet` : `No stretch where every symbol it reads is complete on ${onBars ? "bars" : "ticks"}`}</span></div>
         )}
 
+        {tierBad && (
+          <div className="rc-tier" role="status">
+            <CircleAlert size={13} color="var(--warn)" aria-hidden="true" />
+            <span className="ink2">{tierBad}</span>
+            {!tierRules[onBars ? "full" : "draft"] && <button className="btn sm" onClick={() => setCfg({ tier: onBars ? "full" : "draft" })}>Use {onBars ? "ticks" : "bars"}</button>}
+          </div>
+        )}
+        {r.needsAllowIncomplete && <div className="rc-note muted">Continuous streams are checked contract by contract here: qkt's own coverage check cannot see them, so the run passes <span className="mono">--allow-incomplete</span>.</div>}
+
         <ul className="rc-streams" aria-label="Streams it reads">
           {r.streams.map((s) => {
             const label = `${s.broker}:${s.symbol} ${s.tf}`, b = blockedBy(label);
+            const kind = r.kinds?.[s.alias], rootKey = showKind(kind) ? rootKeyFor(s, scan?.derivatives) : null;
             const base = onBars ? bases.get(`${s.broker}:${s.symbol}`) : null;
             return (
               <li key={label} className={b ? "bad" : ""}>
-                <button className="rc-stream" onClick={() => openSymbol(s.symbol)} aria-label={`${s.symbol} ${s.tf}: ${b ? b.reason : "ready"}. Open ${s.symbol} data`}>
+                <button className="rc-stream" onClick={() => (rootKey ? openRoot(rootKey) : openSymbol(s.symbol))} aria-label={`${s.symbol} ${s.tf}: ${b ? b.reason : "ready"}. Open ${rootKey ?? s.symbol} data`}>
                   {b ? <CircleX size={13} color="var(--danger)" aria-hidden="true" /> : <CircleCheck size={13} color="var(--ok)" aria-hidden="true" />}
                   <b>{s.symbol}</b><span className="ink2">{s.tf}</span>
+                  {showKind(kind) && <span className="badge rc-kind" title={kindTitle(kind)}>{kindShort(kind)}</span>}
                   {base && base !== s.tf && <span className="muted" title={`No ${s.tf} folder is built: qkt aggregates ${s.tf} from the ${base} bars, and so does the chart`}>from {base}</span>}
                   <span className="grow" /><ChevronRight size={13} className="muted" aria-hidden="true" />
                 </button>
@@ -86,9 +101,10 @@ export function ReadinessCard() {
                   <div className="rc-fix">
                     {!unread(s) && <span className="ink2">{b.reason}</span>}
                     {b.members?.length ? <span className="muted">used by {b.members.join(", ")}</span> : null}
-                    {unread(s) ? <span className="rc-cmd">qkt looks for a folder named <span className="mono">{unread(s)!.qktReads}</span>. Rename <span className="mono">bars/{s.broker}/{s.symbol}/{unread(s)!.tf}</span> to <span className="mono">{unread(s)!.qktReads}</span> in the data folder, then rescan.</span>
-                      : b.fix === "build-bars" && hasTicks(s.symbol) && <button className="btn sm" onClick={(e) => openFix(e, { kind: "build", symbol: s.symbol, tf: s.tf })}><Hammer size={13} />Build {s.tf} bars</button>}
-                    {b.fix === "fetch" && <button className="btn sm" onClick={(e) => openFix(e, { kind: "fetch", symbol: s.symbol, tf: s.tf })}><CloudDownload size={13} />Fetch {s.symbol}</button>}
+                    {b.command && <FixCommand command={b.command} />}
+                    {!b.command && unread(s) ? <span className="rc-cmd">qkt looks for a folder named <span className="mono">{unread(s)!.qktReads}</span>. Rename <span className="mono">bars/{s.broker}/{s.symbol}/{unread(s)!.tf}</span> to <span className="mono">{unread(s)!.qktReads}</span> in the data folder, then rescan.</span>
+                      : !b.command && b.fix === "build-bars" && hasTicks(s.symbol) && <button className="btn sm" onClick={(e) => openFix(e, { kind: "build", symbol: s.symbol, tf: s.tf })}><Hammer size={13} />Build {s.tf} bars</button>}
+                    {!b.command && b.fix === "fetch" && <button className="btn sm" onClick={(e) => openFix(e, { kind: "fetch", symbol: s.symbol, tf: s.tf })}><CloudDownload size={13} />Fetch {s.symbol}</button>}
                   </div>
                 )}
               </li>
@@ -107,9 +123,10 @@ export function ReadinessCard() {
 
         <div className="rc-other">
           <span className="muted">On {onBars ? "ticks" : "bars"}:</span>{" "}
-          {other.runnable && other.longest ? <span className="ink2">runs {fmtRange(other.longest)}</span>
+          {otherRefused ? <span className="ink2">{otherRefused}</span>
+            : other.runnable && other.longest ? <span className="ink2">runs {fmtRange(other.longest)}</span>
             : <span className="ink2">{other.blocked[0] ? `${other.blocked[0].stream.split(" ")[0]!.split(":").pop()}: ${other.blocked[0].reason}${other.blocked.length > 1 ? ` (+${other.blocked.length - 1} more)` : ""}` : "no complete stretch"}</span>}
-          <button className="btn ghost sm" onClick={() => setCfg({ tier: onBars ? "full" : "draft" })}>Switch to {onBars ? "ticks" : "bars"}</button>
+          {!otherRefused && <button className="btn ghost sm" onClick={() => setCfg({ tier: onBars ? "full" : "draft" })}>Switch to {onBars ? "ticks" : "bars"}</button>}
         </div>
       </section>
       <BuildForm open={fix?.kind === "build"} onClose={() => setFix(null)} anchor={fixAnchor} symbol={fix?.symbol} tf={fix?.tf} />
@@ -126,7 +143,7 @@ function OtherStrategies({ open: open0 = false, heading }: { open?: boolean; hea
   const others = readiness.filter((x) => x.strategy !== activePath);
   if (!others.length) return heading ? <div className="ready-card muted">{heading}.</div> : null;
   const pick = (x: Readiness) => {
-    const m = cfg.tier === "full" ? x.ticks : x.bars;
+    const m = shownTier(cfg.tier, x.streams) === "full" ? x.ticks : x.bars;
     void useStore.getState().openFile(x.strategy);
     if (m.longest) setCfg({ from: m.longest.from, to: m.longest.to });
   };

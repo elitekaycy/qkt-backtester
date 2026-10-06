@@ -1,5 +1,7 @@
 import { parseStrategyInfo } from "@qkt-studio/core/strategy";
+import type { InstrumentKind } from "@qkt-studio/core";
 import type { ScanReport } from "../api/types.js";
+import { fieldsFor } from "../util/derivatives.js";
 import { declSnippets, fileSnippets, orderSnippets, ruleSnippets, streamSnippet, type Snippet } from "./snippets.js";
 import { actionKeywords, membersOf, streamFields } from "./vocabulary.js";
 
@@ -16,6 +18,12 @@ const FIELD_DOC: Record<string, string> = {
   volume: "Volume of the latest completed bar", price: "Last price", bid: "Bid", ask: "Ask", spread: "Ask minus bid", value: "Value of the stream", timestamp: "Timestamp of the bar",
   tick_size: "Smallest price increment", contract_size: "Units per lot (from instruments.yaml)", volume_step: "Lot step", volume_min: "Smallest lot",
   swap_long_points: "Swap for a long position, in points", swap_short_points: "Swap for a short position, in points",
+  multiplier: "Contract multiplier (futures, from instruments.yaml)", tick_value: "Value of one tick per contract",
+  contract: "The contract a continuous stream is following", dte: "Days to the contract's expiry", days_to_roll: "Days until the continuous stream rolls to the next contract",
+  mark: "The venue's mark price (listed contracts, perpetuals and options)", index: "The spot index the contract tracks", open_interest: "Contracts outstanding, as the venue publishes them",
+  buy_volume: "Volume bought at the ask (needs a stored tape)", sell_volume: "Volume sold at the bid (needs a stored tape)", long_liq_volume: "Longs liquidated in the bar", short_liq_volume: "Shorts liquidated in the bar",
+  bid_depth: "Quantity resting on the ten best bids", ask_depth: "Quantity resting on the ten best offers", book_imbalance: "(bid depth - ask depth) / (bid depth + ask depth)",
+  iv: "Mark implied volatility, in volatility points", delta: "Option delta per contract", gamma: "Option gamma per contract", vega: "Option vega per contract", theta: "Option theta per calendar day",
 };
 // The studio's one-line descriptions for names the vocabulary lists; a name the vocabulary lacks is never offered,
 // and a name it has without a line here is offered without one.
@@ -43,7 +51,7 @@ function context(text: string, line: number, col: number): { before: string; sec
   return { before, section, block };
 }
 
-function rawCompletions(text: string, line: number, col: number, scan: ScanReport | null, qktFiles: string[] = [], selfPath?: string): LocalItem[] {
+function rawCompletions(text: string, line: number, col: number, scan: ScanReport | null, qktFiles: string[] = [], selfPath?: string, kinds?: ReadonlyMap<string, InstrumentKind>): LocalItem[] {
   const { before, section, block } = context(text, line, col);
   const info = parseStrategyInfo(text);
   const aliases = [...new Set(info.streams.map((s) => s.alias))];
@@ -84,7 +92,8 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
   // alias.<field>
   const dot = /(?<![\w.])([A-Za-z_]\w*)\.(\w*)$/.exec(before);
   if (dot && dot[1] !== "POSITION" && aliases.includes(dot[1]!)) {
-    const known = streamFields();
+    // a CFD alias is offered no `.dte`, a future no `.iv`: qkt would accept them and the rule would never fire
+    const known = fieldsFor(kinds?.get(dot[1]!), streamFields());
     const fields = [...FIELD_ORDER.filter((f) => known.includes(f)), ...known.filter((f) => !FIELD_ORDER.includes(f))];
     fields.forEach((f, i) => add({ label: f, insert: f, detail: `${dot[1]}.${f}`, doc: FIELD_DOC[f], kind: "field", sort: `0${String(i).padStart(2, "0")}` }));
     return out;
@@ -105,8 +114,17 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
       tfs.forEach((t, i) => add({ label: t, insert: t, detail: have.includes(t) ? "bars built in your data source" : "not built in your data source", kind: "timeframe", sort: `0${String(i).padStart(2, "0")}` }));
       return out;
     }
-    const sy = /=\s*([A-Za-z0-9_]+):(\w*)$/.exec(before);
+    const sy = /=\s*([A-Za-z0-9_]+):([\w.@]*)$/.exec(before);
     if (sy) {
+      const d = scan?.derivatives;
+      for (const r of d?.futures.filter((x) => x.venue === sy[1]) ?? []) {
+        const span = r.catalog ? `${r.catalog.contracts} contracts` : "no catalog";
+        add({ label: `${r.root}@front`, insert: `${r.root}@front`, detail: `continuous · rolls on schedule · ${span}${r.rolls ? ` · ${r.rolls.count} rolls` : " · rolls not measured"}`, kind: "symbol", sort: "0" });
+        add({ label: `${r.root}@next`, insert: `${r.root}@next`, detail: "continuous · the contract after the front", kind: "symbol", sort: "1" });
+        if (r.perpetual) add({ label: r.perpetual.name, insert: r.perpetual.name, detail: `perpetual · funding ${r.perpetual.funding ? `${r.perpetual.funding.first ?? ""} → ${r.perpetual.funding.last ?? ""}` : "not stored"}`, kind: "symbol", sort: "0" });
+        for (const c of r.contracts.slice(-12)) add({ label: c.symbol, insert: c.symbol, detail: `listed contract · expires ${c.expiry ?? "?"}`, kind: "symbol", sort: "2" });
+      }
+      for (const o of d?.options.filter((x) => x.venue === sy[1]) ?? []) add({ label: o.root, insert: o.root, detail: "option root", kind: "symbol", sort: "0" });
       for (const s of scan?.symbols ?? []) {
         const brokers = [...new Set(s.bars.filter((b) => b.files > 0).map((b) => b.broker))];
         if (!brokers.includes(sy[1]!) && !(brokers.length === 0 && sy[1] === "BACKTEST")) continue;
@@ -118,6 +136,7 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
     if (/=\s*(\w*)$/.test(before)) {
       const brokers = new Set<string>(["BACKTEST"]);
       for (const s of scan?.symbols ?? []) for (const b of s.bars) if (b.files > 0) brokers.add(b.broker);
+      for (const r of [...(scan?.derivatives?.futures ?? []), ...(scan?.derivatives?.options ?? [])]) brokers.add(r.venue);
       [...brokers].forEach((b, i) => add({ label: `${b}:`, insert: `${b}:`, detail: "data source / venue", kind: "keyword", sort: `0${i}` }));
       return out;
     }
@@ -181,7 +200,7 @@ function rawCompletions(text: string, line: number, col: number, scan: ScanRepor
 }
 
 /** `exclusive`: the position calls for exactly these (a field, a symbol, an action...), so qkt's generic keyword dump is left out. */
-export function localCompletions(text: string, line: number, col: number, scan: ScanReport | null, qktFiles: string[] = [], selfPath?: string): { items: LocalItem[]; exclusive: boolean } {
-  const items = rawCompletions(text, line, col, scan, qktFiles, selfPath);
+export function localCompletions(text: string, line: number, col: number, scan: ScanReport | null, qktFiles: string[] = [], selfPath?: string, kinds?: ReadonlyMap<string, InstrumentKind>): { items: LocalItem[]; exclusive: boolean } {
+  const items = rawCompletions(text, line, col, scan, qktFiles, selfPath, kinds);
   return { items, exclusive: items.length > 0 && !items.some((i) => i.label === "POSITION") };
 }

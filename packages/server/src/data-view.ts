@@ -42,7 +42,17 @@ export async function prepareDataView(cfg: ServerConfig, symbols: string[]): Pro
     const from = path.join(srcOf(s), "symbols", s);
     if (await fs.stat(from).then((x) => x.isDirectory(), () => false)) await link(from, path.join(root, "symbols", s));
   }
+  // futures and options read more than bars: catalogs and measured rolls, funding, marks, open interest, tape, option chains
+  for (const d of ["contracts", "funding", "marks", "open_interest", "tape", "liquidations", "depth", "chains"]) {
+    if (await fs.stat(path.join(cfg.dataRoot, d)).then((x) => x.isDirectory(), () => false)) await link(path.join(cfg.dataRoot, d), path.join(root, d));
+  }
   for (const f of ["instruments.yaml"]) if (await fs.stat(path.join(cfg.dataRoot, f)).then(() => true, () => false)) await link(path.join(cfg.dataRoot, f), path.join(root, f));
+  // Futures and options read more than bars and ticks: contracts/ (catalogs, rolls), funding/, marks/, open_interest/, tape/,
+  // liquidations/, depth/, chains/. They are not per-symbol sources, so the view keeps the default source's.
+  for (const d of await ls(cfg.dataRoot)) {
+    if (d === "bars" || d === "symbols" || d.startsWith(".") || !SAFE.test(d)) continue;
+    if (await fs.stat(path.join(cfg.dataRoot, d)).then((x) => x.isDirectory(), () => false)) await link(path.join(cfg.dataRoot, d), path.join(root, d));
+  }
   return { root, overridden };
 }
 

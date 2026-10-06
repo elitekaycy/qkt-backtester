@@ -15,7 +15,7 @@ export function validateOptions(tier: Tier, raw: unknown): RunOptions {
   if (raw === undefined || raw === null) return {};
   if (typeof raw !== "object" || Array.isArray(raw)) throw new OptionsError("options must be an object");
   const o = raw as Record<string, unknown>;
-  const known = new Set(["startingBalance", "positionMode", "seed", "broker", "execution", "slippage", "accountCurrency", "fxMissingPolicy", "latency", "stopLatency", "tpFill", "rejectEvery", "partialFill"]);
+  const known = new Set(["startingBalance", "positionMode", "seed", "broker", "execution", "slippage", "accountCurrency", "fxMissingPolicy", "latency", "stopLatency", "tpFill", "rejectEvery", "partialFill", "funding"]);
   for (const k of Object.keys(o)) if (!known.has(k)) throw new OptionsError(`unknown option '${k}'`);
   const out: RunOptions = {};
   if (o.startingBalance !== undefined) {
@@ -71,6 +71,10 @@ export function validateOptions(tier: Tier, raw: unknown): RunOptions {
     if (!(n > 0 && n < 1)) throw new OptionsError("partialFill must be a fraction between 0 and 1 (exclusive)");
     out.partialFill = n;
   }
+  if (o.funding !== undefined) {
+    if (o.funding !== "on" && o.funding !== "off") throw new OptionsError("funding must be 'on' or 'off'");
+    if (o.funding === "off") out.funding = "off"; // "on" is qkt's default: no option, so a run is not given a second identity
+  }
   if (tier === "draft") for (const k of FULL_ONLY) if (out[k] !== undefined) throw new OptionsError(`'${k}' is only available in Full (tick) runs: qkt refuses the MT5 simulator with --bars`);
   return out;
 }
@@ -91,5 +95,6 @@ export function optionArgs(o: RunOptions): string[] {
   if (o.tpFill) a.push("--tp-fill", o.tpFill);
   if (o.rejectEvery !== undefined) a.push("--reject-every", String(o.rejectEvery));
   if (o.partialFill !== undefined) a.push("--partial-fill", String(o.partialFill));
+  if (o.funding === "off") a.push("--funding", "off");
   return a;
 }

@@ -8,8 +8,9 @@ import type { Runner } from "./runner.js";
 import { applySettings, dataRootAllowed, loadSettings, savePrefs, updateSettings } from "./settings.js";
 import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
-import { completeConfig, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
-import { rangeDays, longest } from "@qkt-studio/core";
+import { completeConfig, configReferenceFor, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
+import { rangeDays, longest, parseInstruments, termsDifferences } from "@qkt-studio/core";
+import { derivativesCached, kindContextOf } from "./derivatives-scan.js";
 import { acceptNoData, readAccepted, undoNoData } from "./no-data.js";
 
 const looksLikeStore = async (dir: string) =>
@@ -66,6 +67,32 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
   /** Full completeness scan of the data source: per symbol, timeframe and year, with green/amber/red status. */
   app.get<{ Querystring: { refresh?: string } }>("/api/data/scan", async (req) => scanCached(cfg.dataRoot, req.query.refresh === "1"));
 
+  /** Futures and options roots: catalogs, rolls, contract bars, funding, open interest, marks, chains, and the terms instruments.yaml gives them. */
+  app.get<{ Querystring: { refresh?: string } }>("/api/data/derivatives", async (req) => derivativesCached(cfg.dataRoot, req.query.refresh === "1" ? 0 : 10_000));
+
+  /**
+   * What the browser's lint needs to tell a CFD stream from a futures or options one: instruments.yaml's three sections and the
+   * roots and perpetuals the store knows (a contract's kind cannot be read from its name alone).
+   */
+  app.get("/api/instruments", async () => {
+    const d = await derivativesCached(cfg.dataRoot);
+    const text = await fs.readFile(path.join(cfg.dataRoot, "instruments.yaml"), "utf8").catch(() => null);
+    const ctx = kindContextOf(d);
+    // a run passes the workspace's instruments.yaml when there is one, and qkt then reads that file alone (not merged with the data
+    // source's); the data source's is only the fallback. The browser shows the terms the next run will use and where they differ.
+    const wsText = await fs.readFile(path.join(cfg.workspace, "instruments.yaml"), "utf8").then((t) => (t.trim() ? t : null), () => null);
+    const empty = { cfds: [], futures: [], options: [], errors: [] };
+    const data = text === null ? empty : parseInstruments(text), workspace = wsText === null ? empty : parseInstruments(wsText);
+    return {
+      exists: text !== null,
+      catalog: data,
+      workspace: { exists: wsText !== null, catalog: workspace },
+      effective: wsText !== null ? "workspace" : text !== null ? "dataRoot" : "none",
+      differences: wsText !== null && text !== null ? termsDifferences(data, workspace) : {},
+      futureRoots: [...(ctx.futureRoots ?? [])].sort(), perpetuals: [...(ctx.perpetuals ?? [])].sort(), optionRoots: [...(ctx.optionRoots ?? [])].sort(),
+    };
+  });
+
   /** For every strategy in the workspace: can it run on bars and on ticks, and over which windows. */
   app.get<{ Querystring: { refresh?: string } }>("/api/data/readiness", async (req) => {
     const report = await scanCached(cfg.dataRoot, req.query.refresh === "1");
@@ -82,7 +109,7 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
   app.post<{ Body: { content?: string } }>("/api/workspace/config-complete", async (req, reply) => {
     const content = req.body?.content;
     if (typeof content !== "string" || content.length > 1_000_000) return reply.code(400).send({ error: "content must be the config text" });
-    return { content: completeConfig(content) };
+    return { content: completeConfig(content, await configReferenceFor(cfg.dataRoot)) };
   });
   /** Create the standard project files that are missing (never overwrites). `files` limits which. */
   app.post<{ Body: { files?: ScaffoldFile[] } }>("/api/workspace/scaffold", async (req) => {

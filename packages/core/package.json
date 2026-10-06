@@ -1,6 +1,6 @@
 {
   "name": "@qkt-studio/core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "files": ["dist"],
@@ -46,6 +46,10 @@
     "./vocabulary": {
       "types": "./dist/vocabulary.d.ts",
       "default": "./dist/vocabulary.js"
+    },
+    "./instruments": {
+      "types": "./dist/instruments.d.ts",
+      "default": "./dist/instruments.js"
     }
   },
   "scripts": {

@@ -42,6 +42,19 @@ const LOG_KEEP = 200;
 
 const need = (cond: unknown, msg: string) => { if (!cond) throw new RunRequestError(msg); };
 
+const TARGET = /^[A-Za-z0-9_]{1,40}:[A-Za-z0-9_.\-]{1,60}$/;
+export const DERIV_KINDS = ["catalog", "rolls", "funding", "marks", "open-interest", "chains", "tape", "liquidations", "depth", "bars"] as const;
+export interface DerivativesFetch {
+  /** `VENUE:NAME`: a root (`CME:ES`) for catalog/rolls/chains, a contract or perpetual for the rest. */
+  target: string;
+  kind: (typeof DERIV_KINDS)[number];
+  tf?: string; from?: string; to?: string;
+  /** chains: snapshot the live book now instead of building a day range. */
+  live?: boolean;
+  /** chains: which stored series the job writes (for cleanup of partial files). */
+  series?: "trade" | "book";
+}
+
 /** Symbol/tf/date validation shared by data-job submission (Jobs.validateRange) and tool-side proposal checks. */
 export function validateBuildRange(r: { symbol?: string; tf?: string; from?: string; to?: string }): void {
   need(r.symbol && NAME.test(r.symbol), "symbol must be a plain identifier");
@@ -189,6 +202,42 @@ export class Jobs {
     return job;
   }
 
+  /**
+   * Fetch one derivatives dataset with `qkt fetch`: a catalog, measured rolls, funding rates, marks, open interest, option
+   * chains, trade tape, liquidations, depth, or one contract's bars. Like every fetch it is the one place the network is used,
+   * and only because the user started it. `qkt fetch` writes under the data root; a folder that is a link into a read-only
+   * archive first becomes a folder of links (runWritable), so the archive is never written.
+   */
+  fetchDerivatives(req: DerivativesFetch): Job {
+    need(req && typeof req === "object", "request body is required");
+    need(typeof req.target === "string" && TARGET.test(req.target), "target must look like VENUE:NAME, e.g. CME:ES or BINANCE_UM:BTCUSDT");
+    const kind = req.kind;
+    need(DERIV_KINDS.includes(kind), `kind must be one of ${DERIV_KINDS.join(", ")}`);
+    const [venue, ...rest] = req.target.split(":"), name = rest.join(":");
+    const range = () => {
+      need(req.from && DATE.test(req.from) && req.to && DATE.test(req.to) && Date.parse(req.from) <= Date.parse(req.to), "from/to must be YYYY-MM-DD with from not after to");
+      return ["--from", req.from!, "--to", req.to!];
+    };
+    const tf = () => { need(req.tf && TF.test(req.tf), "tf must look like 15m, 1h, 1d"); return ["--tf", req.tf!]; };
+    const root = this.cfg.dataRoot;
+    let dir: string, flags: string[], pattern: RegExp | null = null, validate = validGzip;
+    switch (kind) {
+      case "catalog": dir = path.join(root, "contracts", venue!); flags = ["--catalog"]; break;
+      case "rolls": dir = path.join(root, "contracts", venue!); flags = ["--rolls", ...(req.tf ? tf() : [])]; break;
+      case "funding": dir = path.join(root, "funding", venue!); flags = ["--funding", ...range()]; break;
+      case "open-interest": dir = path.join(root, "open_interest", venue!); flags = ["--open-interest", ...range()]; break;
+      case "marks": dir = path.join(root, "marks", venue!, name, req.tf ?? ""); flags = ["--marks", ...tf(), ...range()]; break;
+      case "chains": dir = path.join(root, "chains", venue!, name, req.series ?? "trade"); flags = ["--chains", ...(req.live ? ["--live"] : range())]; pattern = /\.csv\.gz$/; break;
+      case "tape": case "liquidations": case "depth": dir = path.join(root, kind, venue!, name); flags = [`--${kind}`, ...range()]; pattern = /\.csv\.gz$/; break;
+      case "bars": dir = path.join(root, "bars", venue!, name, req.tf ?? ""); flags = [...tf(), ...range()]; pattern = /\.(csv|bin)$/; validate = (b) => b.length > 0; break;
+    }
+    need(!(kind === "marks" || kind === "bars") || (req.tf && TF.test(req.tf)), "tf is required");
+    const job = this.create("fetch");
+    if (pattern) this.meta.set(job.id, { sinceMs: Date.now(), dir, pattern, validate });
+    this.runWritable(job, dir, ["fetch", req.target, ...flags, "--data-root", root]);
+    return job;
+  }
+
   // ---- parameter grid: one full run per point (qkt sweep produces no per-scenario bundles) --------------------
 
   async grid(req: { strategy: string; from: string; to: string; tier: Tier; params: Record<string, string[]>; rank?: (typeof RANKS)[number]; allowIncomplete?: boolean; source?: "user" | "tool" }): Promise<Job> {
@@ -271,6 +320,7 @@ export function registerJobRoutes(app: FastifyInstance, jobs: Jobs): void {
   const accepted = (job: Job) => ({ jobId: job.id });
   app.post<{ Body: Parameters<Jobs["buildBars"]>[0] }>("/api/data/build-bars", async (req, reply) => reply.code(202).send(accepted(jobs.buildBars(req.body))));
   app.post<{ Body: Parameters<Jobs["fetch"]>[0] }>("/api/data/fetch", async (req, reply) => reply.code(202).send(accepted(jobs.fetch(req.body))));
+  app.post<{ Body: DerivativesFetch }>("/api/data/fetch-derivatives", async (req, reply) => reply.code(202).send(accepted(jobs.fetchDerivatives(req.body))));
   app.post<{ Body: Parameters<Jobs["grid"]>[0] }>("/api/jobs/grid", async (req, reply) => reply.code(202).send(accepted(await jobs.grid({ ...req.body, source: "user" }))));
   app.post<{ Body: Parameters<Jobs["walkForward"]>[0] }>("/api/jobs/walkforward", async (req, reply) => reply.code(202).send(accepted(await jobs.walkForward(req.body))));
   app.get("/api/jobs", async () => ({ jobs: jobs.list().map(({ log: _l, result: _r, ...j }) => j) }));

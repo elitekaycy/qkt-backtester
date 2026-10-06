@@ -21,7 +21,7 @@ export interface StrategyInfo {
   imports: ImportDecl[];
 }
 
-const STREAM = /^\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z0-9_]+):([A-Za-z0-9_.\-]+)\s+EVERY\s+(\d+[smhd])(?:\s+WARMUP\s+(\d+)\s+BARS)?/;
+const STREAM = /^\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z0-9_]+):([A-Za-z0-9_.@\-]+)\s+EVERY\s+(\d+[smhd])(?:\s+WARMUP\s+(\d+)\s+BARS)?/;
 
 const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 /**

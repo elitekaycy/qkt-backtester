@@ -42,7 +42,7 @@ input[type="date"].input { min-width: 128px; }
 .seg button { height: 26px; padding: 0 var(--s3); border: 0; background: transparent; color: var(--ink-2); border-radius: 6px; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; transition: background var(--t-fast), color var(--t-fast); display: inline-flex; align-items: center; gap: 6px; }
 .seg button:hover:not([aria-pressed="true"]):not(:disabled) { background: var(--hover); color: var(--ink); }
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--card-3); color: var(--ink); box-shadow: var(--shadow-1); }
-.seg button:disabled { opacity: 0.4; cursor: not-allowed; }
+.seg button:disabled, .seg button[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
 .seg.sm button { height: 22px; padding: 0 var(--s2); font-size: var(--fs-xs); }
 
 /* ---------- switch ---------- */
