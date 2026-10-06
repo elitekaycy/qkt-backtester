@@ -1,0 +1,6 @@
+timestamp,reason,strategy,symbol
+1582761600000,initial margin 25713.00000000 after this order exceeds account equity 22333.04000000,es_hold,CME:ESH20
+1582848000000,initial margin 25713.00000000 after this order exceeds account equity 22333.04000000,es_hold,CME:ESH20
+1583107200000,initial margin 25713.00000000 after this order exceeds account equity 22333.04000000,es_hold,CME:ESH20
+1583193600000,initial margin 25713.00000000 after this order exceeds account equity 22333.04000000,es_hold,CME:ESH20
+1583280000000,initial margin 25713.00000000 after this order exceeds account equity 22333.04000000,es_hold,CME:ESH20

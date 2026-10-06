@@ -48,7 +48,7 @@ export function registerAnalysisTools(s: McpServer, ctx: ToolCtx): void {
       return ok({ id, hour: a.hour, weekday: weekdayByName(a.weekday), side: a.side, exit: a.exit, note: "hours are UTC entry hours" });
     }));
   s.registerTool("trades", { description: "A run's trades, filtered and sorted: side, outcome (win/loss), exit (stop/target/signal), weekday, date range; compact rows.", inputSchema: {
-      ...runArg, side: z.enum(["long", "short"]).optional(), outcome: z.enum(["win", "loss", "breakeven", "open", "closed"]).optional(), exit: z.enum(["stop", "target", "signal", "open"]).optional(),
+      ...runArg, side: z.enum(["long", "short"]).optional(), outcome: z.enum(["win", "loss", "breakeven", "open", "closed"]).optional(), exit: z.enum(["stop", "target", "signal", "open", "expiry", "liquidation", "roll_failed"]).optional(),
       weekday: z.union([z.string(), z.number().int().min(0).max(6)]).optional().describe("mon..sun / monday..sunday (case-insensitive), or 0-6 (0 = Monday)"),
       from: z.string().optional(), to: z.string().optional(),
       sort: z.enum(["entryTs", "pnl", "r", "holdMs"]).optional(), dir: z.enum(["asc", "desc"]).optional(), limit: z.number().int().max(50).optional(), offset: z.number().int().optional() } },

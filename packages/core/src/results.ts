@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { BarCols } from "./bars.js";
 import { PNL_TOL, reconcile, type Fill, type RoundTrip } from "./roundtrips.js";
+import { costBridge, type CostBridge } from "./derivatives.js";
 
 export class UnsupportedResultError extends Error {}
 
@@ -36,6 +37,8 @@ export interface PerfReport {
   tradeCount: number; winRate: string; maxDrawdown: string; profitFactor: string; avgWin: string; avgLoss: string;
   largestWin: string; largestLoss: string; maxConsecutiveLosses: number; sharpeRatio: string; calmarRatio: string;
   sortinoRatio: string; turnover?: string; maxDailyDrawdown?: string;
+  /** Futures and options only (qkt writes the keys only when the run has them): roll slippage+fees, and perpetual funding. */
+  rollCostsPaid?: string; fundingPaid?: string;
   dailyPnL?: Record<string, string>;
   drawdownPeriods?: Array<Record<string, unknown>>;
   monteCarlo?: Record<string, string | number | number[]> | null;
@@ -79,6 +82,8 @@ export interface Summary {
   blown: boolean;
   engineRatios: { sharpe: number; sortino: number; calmar: number };
   engineWinRate: number; engineProfitFactor: number;
+  /** Futures and options runs only: the gross-to-net bridge with roll costs and funding. Absent on a CFD run, so its summary is unchanged. */
+  costs?: CostBridge;
 }
 
 export function summarize(result: QktResult, trips: RoundTrip[]): Summary {
@@ -107,6 +112,7 @@ export function summarize(result: QktResult, trips: RoundTrip[]): Summary {
     blown: n(g.maxDrawdown) >= 1, engineRatios: { sharpe: n(g.sharpeRatio), sortino: n(g.sortinoRatio), calmar: n(g.calmarRatio) },
     maxDrawdown: n(g.maxDrawdown), maxDailyDrawdown: n(g.maxDailyDrawdown),
     engineWinRate: n(g.winRate), engineProfitFactor: n(g.profitFactor),
+    ...(costBridge(result) ? { costs: costBridge(result)! } : {}),
   };
 }
 
@@ -164,10 +170,15 @@ function barIndex(b: BarCols, t: number): number {
 export function integrity(inp: IntegrityInput): IntegrityReport {
   const checks: IntegrityCheck[] = [];
 
-  const rec = reconcile(inp.trips, n(inp.result.global.realizedTotal));
+  // qkt books roll costs and perpetual funding inside realizedTotal but in no fill's realized (probed on ES@front and a funded
+  // perpetual: realizedTotal = sum of fill realized - rollCostsPaid - fundingPaid), so add them back before comparing.
+  const costs = costBridge(inp.result);
+  const extra = costs ? costs.rollCosts + costs.funding : 0;
+  const engineRealized = n(inp.result.global.realizedTotal) + extra;
+  const rec = reconcile(inp.trips, engineRealized);
   checks.push({
     id: "reconcile", label: "Trades reconcile with engine P&L", ok: rec.ok,
-    detail: `Σ round-trip P&L ${rec.sum.toFixed(4)} vs engine realized ${n(inp.result.global.realizedTotal).toFixed(4)} (diff ${rec.diff.toFixed(6)}, tol ${PNL_TOL})`,
+    detail: `Σ round-trip P&L ${rec.sum.toFixed(4)} vs engine realized ${engineRealized.toFixed(4)}${extra ? ` (realized ${n(inp.result.global.realizedTotal).toFixed(4)} + roll costs and funding ${extra.toFixed(4)}, which no fill carries)` : ""} (diff ${rec.diff.toFixed(6)}, tol ${PNL_TOL})`,
   });
 
   if (inp.barCounts) {

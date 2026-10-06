@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ScanReport } from "@qkt-studio/core";
+import { derivativesSections, discoverDerivatives, futuresConfig, futuresEnv, hasFutures, isDerivativeSymbol, type Derivatives } from "./scaffold-derivatives.js";
 
 /** Files a qkt research workspace is made of. The studio creates the ones that are missing and never overwrites any. */
 export type ScaffoldFile = "qkt.config.yaml" | "instruments.yaml" | ".env" | ".env.example" | ".gitignore" | "strategies";
@@ -234,7 +235,7 @@ const GENERIC: Spec = { contractSize: 1, digits: 2, step: 0.01, min: 0.01, note:
 const num = (n: number) => String(n);
 
 /** An instruments.yaml with an editable entry for every symbol in the data store, plus the fields you would tune. */
-export function instrumentsTemplate(pairs: Array<{ broker: string; symbol: string }>): string {
+export function instrumentsTemplate(pairs: Array<{ broker: string; symbol: string }>, derivatives?: Derivatives | null): string {
   const head = `# instruments.yaml - contract specs the backtest uses for sizing, P&L, costs and swap.
 # The studio passes this file to every run (qkt --instruments). A symbol listed here overrides qkt's built-in table; a symbol
 # not listed falls back to it (FX majors, gold and silver only), and any other symbol makes qkt refuse to run.
@@ -268,7 +269,7 @@ ${spec.max !== undefined ? `    volumeMax: ${num(spec.max)}\n` : ""}    pointSiz
     swapTripleDay: WEDNESDAY
 `;
   });
-  return head + (items.join("\n") || "  []\n");
+  return head + (items.join("\n") || "  []\n") + (derivatives ? derivativesSections(derivatives) : "");
 }
 
 export const pairsOf = (scan: ScanReport | null): Array<{ broker: string; symbol: string }> =>
@@ -343,10 +344,14 @@ export async function scaffoldWorkspace(workspace: string, scan: ScanReport | nu
     await fs.writeFile(abs, text, { flag: "wx" });
     out.created.push(rel);
   };
-  if (want("qkt.config.yaml")) await put("qkt.config.yaml", CONFIG_TEMPLATE);
-  if (want("instruments.yaml")) await put("instruments.yaml", instrumentsTemplate(pairsOf(scan)));
-  if (want(".env")) await put(".env", ENV_TEMPLATE);
-  if (want(".env.example")) await put(".env.example", ENV_EXAMPLE);
+  // futures, perpetuals and options in the data source: their own instruments.yaml sections and a config that does not block them
+  const deriv = await discoverDerivatives(scan?.dataRoot);
+  const futures = hasFutures(deriv);
+  const pairs = pairsOf(scan).filter((p) => !isDerivativeSymbol(deriv, p.broker, p.symbol));
+  if (want("qkt.config.yaml")) await put("qkt.config.yaml", futures ? futuresConfig(CONFIG_TEMPLATE) : CONFIG_TEMPLATE);
+  if (want("instruments.yaml")) await put("instruments.yaml", instrumentsTemplate(pairs, deriv.futures.length || deriv.options.length ? deriv : null));
+  if (want(".env")) await put(".env", futures ? futuresEnv(ENV_TEMPLATE) : ENV_TEMPLATE);
+  if (want(".env.example")) await put(".env.example", futures ? futuresEnv(ENV_EXAMPLE) : ENV_EXAMPLE);
   if (want(".gitignore")) await put(".gitignore", GITIGNORE);
   if (want("strategies")) for (const [rel, text] of Object.entries(sampleStrategies(scan))) await put(rel, text);
   return out;
@@ -365,7 +370,7 @@ export async function missingFiles(workspace: string): Promise<ScaffoldFile[]> {
  * changes. e.g. a file holding only `starting_balance: 25000` becomes the whole reference with that line in place of
  * `starting_balance: ${STARTING_BALANCE:-10000}`. Sections the reference does not know are kept at the end.
  */
-export function completeConfig(user: string): string {
+export function completeConfig(user: string, reference: string = CONFIG_TEMPLATE): string {
   const top = /^([a-z_]+):/;                                  // an active top-level key
   const topAny = /^(?:#\s?)?([a-z_]+):/;                      // active or commented top-level key (reference blocks)
   const blocksOf = (text: string, re: RegExp) => {
@@ -382,7 +387,7 @@ export function completeConfig(user: string): string {
   const mine = blocksOf(user.replace(/\s+$/, ""), topAny);
   const byKey = new Map(mine.filter((b) => b.key && top.test(b.lines[0]!)).map((b) => [b.key!, b.lines.join("\n").replace(/\s+$/, "")]));
   const used = new Set<string>();
-  const refBlocks = blocksOf(CONFIG_TEMPLATE, topAny);
+  const refBlocks = blocksOf(reference, topAny);
   const refHead = refBlocks[0]!.lines.join("\n").trim();
   const ref = refBlocks.map((b) => {
     if (!b.key || !byKey.has(b.key) || used.has(b.key)) return b.lines.join("\n");
@@ -396,4 +401,12 @@ export function completeConfig(user: string): string {
   const head = mine[0]!.lines.join("\n").trim() === refHead ? "" : mine[0]!.lines.join("\n").trim();
   const extra = [...byKey].filter(([k]) => !used.has(k)).map(([, t]) => t);
   return [head ? `${head}\n` : "", ref.join("\n").replace(/\s+$/, ""), extra.length ? `\n\n# Your other settings\n${extra.join("\n\n")}` : ""].join("") + "\n";
+}
+
+/**
+ * The reference the "complete this config" action merges into: the futures variant (risk caps that do not silently block
+ * futures orders) when the data source holds futures, else the plain one. The user's own sections always win either way.
+ */
+export async function configReferenceFor(dataRoot: string | undefined): Promise<string> {
+  return hasFutures(await discoverDerivatives(dataRoot)) ? futuresConfig(CONFIG_TEMPLATE) : CONFIG_TEMPLATE;
 }

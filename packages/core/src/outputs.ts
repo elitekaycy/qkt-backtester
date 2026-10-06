@@ -7,7 +7,7 @@ import type { RunError } from "./runjson.js";
  */
 
 export type LineEvent =
-  | { kind: "coverage"; source: "tick" | "bar"; symbol: string; covered: number; requested: number; tf?: string }
+  | { kind: "coverage"; source: "tick" | "bar" | "chain"; symbol: string; covered: number; requested: number; tf?: string }
   | { kind: "fill"; orderId: string; strategy: string; symbol: string; side: "BUY" | "SELL"; qty: number; price: number }
   | { kind: "order"; symbol: string; side: "BUY" | "SELL" }
   | { kind: "strategyLog"; strategy: string; message: string }
@@ -20,8 +20,8 @@ export type LineEvent =
 const DASH = "[\\u2014\\u2013?\\uFFFD-]+";
 
 export function classifyLine(line: string): LineEvent {
-  let m = /qkt: (tick|bar) coverage (\S+) (\d+)\/(\d+) trading days(?: \((\w+)\))?/.exec(line);
-  if (m) return { kind: "coverage", source: m[1] as "tick" | "bar", symbol: m[2]!, covered: +m[3]!, requested: +m[4]!, tf: m[5] };
+  let m = /qkt: (tick|bar|chain) coverage (\S+) (\d+)\/(\d+) (?:trading )?days(?: \((\w+)(?: chain)?\))?/.exec(line);
+  if (m) return { kind: "coverage", source: m[1] as "tick" | "bar" | "chain", symbol: m[2]!, covered: +m[3]!, requested: +m[4]!, tf: m[5] };
 
   m = /order filled order_id=(\S+) strategy_id=(\S+) symbol=(\S+) side=(BUY|SELL) qty=(\S+) price=(\S+)/.exec(line);
   if (m) return { kind: "fill", orderId: m[1]!, strategy: m[2]!, symbol: m[3]!, side: m[4] as "BUY" | "SELL", qty: +m[5]!, price: +m[6]! };

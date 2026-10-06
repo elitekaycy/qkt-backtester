@@ -1,4 +1,4 @@
-import type { ExitReason, RoundTrip } from "./roundtrips.js";
+import type { ExitReason, RoundTrip, VenueExit } from "./roundtrips.js";
 
 export type TripSort = "entryTs" | "exitTs" | "pnl" | "holdMs" | "qty";
 
@@ -28,6 +28,10 @@ export interface TripQuery {
   maxPnl?: number;
   /** How the trade ended. */
   exit?: ExitReason;
+  /** The venue ended the trade: `expiry`, `liquidation` or `roll_failed` (the API reads `exit=expiry` etc. into this). Separate from `exit`, which stays the 4 values a rule or order produces. */
+  venueExit?: VenueExit;
+  /** Continuous futures: a contract the trade entered or exited on (`ESH19`, with or without the venue prefix). */
+  contract?: string;
   /** R-multiple bounds (pnl / entry risk); trades without recorded risk never match when set. */
   minR?: number;
   maxR?: number;
@@ -65,6 +69,12 @@ export function matches(t: RoundTrip, q: TripQuery): boolean {
   if (q.minHoldMs !== undefined && (t.holdMs === null || t.holdMs < q.minHoldMs)) return false;
   if (q.maxHoldMs !== undefined && (t.holdMs === null || t.holdMs >= q.maxHoldMs)) return false;
   if (q.exit && t.exit !== q.exit) return false;
+  if (q.venueExit && t.venueExit !== q.venueExit) return false;
+  if (q.contract) {
+    const bare = (c?: string) => (c ? c.slice(c.lastIndexOf(":") + 1).toUpperCase() : "");
+    const want = bare(q.contract);
+    if (bare(t.contract) !== want && bare(t.exitContract) !== want && bare(t.symbol) !== want) return false;
+  }
   if (q.minR !== undefined && (t.r === undefined || t.r < q.minR)) return false;
   if (q.maxR !== undefined && (t.r === undefined || t.r > q.maxR)) return false;
   if (q.weekday !== undefined && new Date(t.entryTs).getUTCDay() !== q.weekday) return false;

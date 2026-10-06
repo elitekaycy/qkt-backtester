@@ -1,0 +1,216 @@
+{
+ "schema": "qkt-backtest-result-v1",
+ "schemaVersion": 1,
+ "cadence": "CANDLE_CLOSE",
+ "inputSummary": {
+  "attemptedFeedTicks": 26,
+  "liveTicks": 26,
+  "warmupTicks": 0,
+  "warmupCandles": 0,
+  "liveCandles": 26,
+  "malformedTicks": 0,
+  "droppedLateTicks": 0,
+  "streamCandles": {
+   "DERIBIT:BTC_USDC_26SEP26_84500_P:1h": 26
+  },
+  "strategyCandleEvaluations": {
+   "opt:p:DERIBIT:BTC_USDC_26SEP26_84500_P:1h": 26
+  }
+ },
+ "evidence": {
+  "qktVersion": "0.55.0",
+  "gitSha": "24577a03",
+  "buildTimestamp": "2026-10-06T07:04:08.267662607Z",
+  "dslPercentConvention": "whole-percentage-points",
+  "command": [
+   "backtest",
+   "put.qkt",
+   "--from",
+   "2026-09-25",
+   "--to",
+   "2026-09-27",
+   "--data-root",
+   "/home/elitekaycy/Desktop/qkt/qkt/src/test/resources/options/btc-usdc-trade-25sep26",
+   "--no-fetch",
+   "--report-dir",
+   "oput"
+  ],
+  "strategyHash": "sha256:6c44e7ec82f9202fb6d325f95d1960f2d7d561f4e1b11755fa79d3c4bc91c6fc",
+  "importedFileHashes": {},
+  "configHash": null,
+  "dataset": {
+   "id": null,
+   "hash": null,
+   "qualityPolicy": "default-completeness-check",
+   "mutableStore": true,
+   "warning": "Dataset is a mutable local store, not an immutable snapshot."
+  },
+  "execution": {
+   "preset": "paper-fast",
+   "broker": "paper",
+   "seed": null,
+   "realistic": false,
+   "fillPriceSource": "latest tracked price / trigger level for bars",
+   "latencyModel": "zero",
+   "stopLatencyModel": "on-trigger",
+   "takeProfitFillModel": "print",
+   "candleCloseModel": "heartbeat:1000ms grace:2000ms",
+   "slippageModel": "zero",
+   "rejectionModel": "none",
+   "partialFillModel": "none",
+   "venueRules": "none",
+   "commissionModel": "per-lot instruments.yaml commissionPerLot",
+   "financingModel": "signed swap points at configured UTC rollover; triple configured weekday",
+   "ocoMode": "engine-managed deterministic siblings",
+   "warning": "Optimistic fills: no spread, slippage, latency, rejection, queue, or partial-fill model."
+  },
+  "experiment": null,
+  "accounting": {
+   "accountCurrency": "USD",
+   "missingPolicy": "fail",
+   "source": "market",
+   "configuredFxSymbols": {},
+   "conversions": {},
+   "costKinds": [
+    "COMMISSION",
+    "SWAP",
+    "FUNDING",
+    "BORROW",
+    "EXCHANGE_FEE",
+    "SPREAD_COST",
+    "TAX"
+   ],
+   "warnings": [],
+   "warning": null
+  },
+  "promotion": null,
+  "warnings": []
+ },
+ "accounting": {
+  "accountCurrency": "USD",
+  "missingPolicy": "fail",
+  "source": "market",
+  "configuredSymbols": {},
+  "conversions": [],
+  "warnings": [],
+  "costKinds": [
+   "COMMISSION",
+   "SWAP",
+   "FUNDING",
+   "BORROW",
+   "EXCHANGE_FEE",
+   "SPREAD_COST",
+   "TAX"
+  ]
+ },
+ "artifacts": {
+  "resultJson": "result.json",
+  "tradesCsv": "trades.csv",
+  "rejectionsCsv": "rejections.csv",
+  "ordersJsonl": "orders.jsonl",
+  "pnlComponentsCsv": "pnl_components.csv",
+  "equityDailyCsv": "equity_daily.csv",
+  "monthlyReturnsCsv": "monthly_returns.csv",
+  "manifestJson": "manifest.json",
+  "equityGlobalCsv": "equity_global.csv",
+  "equityStrategyCsv": {
+   "opt": "equity_opt.csv"
+  },
+  "settlementsCsv": "settlements.csv",
+  "marginDailyCsv": "margin_daily.csv",
+  "html": "report.html"
+ },
+ "tradeSummary": {
+  "fills": 2,
+  "buyFills": 1,
+  "sellFills": 1,
+  "sideAttribution": "fill_side",
+  "longEntryFills": 1,
+  "shortEntryFills": 0,
+  "longExitFills": 1,
+  "shortExitFills": 0,
+  "unknownPositionFills": 0,
+  "positionAttribution": "strategy_position_transition",
+  "buyRealized": "0.00000000",
+  "sellRealized": "-23.28300000",
+  "grossProfit": "0.00000000",
+  "grossLoss": "-23.28300000",
+  "rejections": 0,
+  "rejectionRate": "0.00000000",
+  "riskAuditedFills": 0,
+  "minRiskUsd": null,
+  "avgRiskUsd": null,
+  "maxRiskUsd": null,
+  "tradedNotional": "114.71700000",
+  "maxFillNotional": "69.00000000"
+ },
+ "global": {
+  "realizedTotal": "-23.28300000",
+  "unrealizedTotal": "0.00000000",
+  "totalPnL": "-23.28300000",
+  "commissionPaid": "0.00000000",
+  "swapPaid": "0.00000000",
+  "tradeCount": 2,
+  "winRate": "0.00000000",
+  "maxDrawdown": "0.00260000",
+  "profitFactor": "0.00000000",
+  "avgWin": "0.00000000",
+  "avgLoss": "-23.28300000",
+  "largestWin": "0.00000000",
+  "largestLoss": "-23.28300000",
+  "maxConsecutiveLosses": 1,
+  "sharpeRatio": "-21.46497606",
+  "calmarRatio": "-0.89550000",
+  "sortinoRatio": "-21.52415119",
+  "turnover": "0.01147170",
+  "maxDailyDrawdown": "0.00260000",
+  "annualizationFactor": "8766",
+  "dailyPnL": {
+   "2026-09-25": "0.00000000",
+   "2026-09-26": "-23.28300000"
+  },
+  "drawdownPeriods": [],
+  "monteCarlo": null
+ },
+ "perStrategy": {
+  "opt": {
+   "realizedTotal": "-23.28300000",
+   "unrealizedTotal": "0.00000000",
+   "totalPnL": "-23.28300000",
+   "commissionPaid": "0.00000000",
+   "swapPaid": "0.00000000",
+   "tradeCount": 2,
+   "winRate": "0.00000000",
+   "maxDrawdown": "0.00260000",
+   "profitFactor": "0.00000000",
+   "avgWin": "0.00000000",
+   "avgLoss": "-23.28300000",
+   "largestWin": "0.00000000",
+   "largestLoss": "-23.28300000",
+   "maxConsecutiveLosses": 1,
+   "sharpeRatio": "-21.46497606",
+   "calmarRatio": "-0.89550000",
+   "sortinoRatio": "-21.52415119",
+   "turnover": "0.01147170",
+   "maxDailyDrawdown": "0.00260000",
+   "annualizationFactor": "8766",
+   "dailyPnL": {
+    "2026-09-25": "0.00000000",
+    "2026-09-26": "-23.28300000"
+   },
+   "drawdownPeriods": [],
+   "monteCarlo": null
+  }
+ },
+ "windows": {},
+ "bookAnalytics": null,
+ "bookRisk": null,
+ "runawayBreaker": {
+  "enforceLiveBreakers": false,
+  "maxRoundTrips": 10,
+  "roundTripWindowMs": 600000,
+  "maxRejections": 5,
+  "rejectionWindowMs": 60000,
+  "trips": []
+ }
+}

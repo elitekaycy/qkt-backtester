@@ -1,0 +1,251 @@
+{
+ "schema": "qkt-backtest-result-v1",
+ "schemaVersion": 1,
+ "cadence": "CANDLE_CLOSE",
+ "inputSummary": {
+  "attemptedFeedTicks": 2020,
+  "liveTicks": 2020,
+  "warmupTicks": 120,
+  "warmupCandles": 30,
+  "liveCandles": 505,
+  "malformedTicks": 0,
+  "droppedLateTicks": 0,
+  "streamCandles": {
+   "CME:ES@front:1d": 505
+  },
+  "strategyCandleEvaluations": {
+   "es_front:es:CME:ES@front:1d": 505
+  }
+ },
+ "evidence": {
+  "qktVersion": "0.55.0",
+  "gitSha": "24577a03",
+  "buildTimestamp": "2026-10-06T07:04:08.267662607Z",
+  "dslPercentConvention": "whole-percentage-points",
+  "command": [
+   "backtest",
+   "esf.qkt",
+   "--config",
+   "/home/elitekaycy/.qkt/qkt-futures.config.yaml",
+   "--bars",
+   "--no-fetch",
+   "--allow-incomplete",
+   "--from",
+   "2019-01-01",
+   "--to",
+   "2021-01-01",
+   "--report-dir",
+   "outf"
+  ],
+  "strategyHash": "sha256:c94208480013b1180d3a03e43dbbff691056309f69142a710b20dbb372529ff8",
+  "importedFileHashes": {},
+  "configHash": "sha256:ccb0a986225d731f3223d25188435a0c454492aa21ebcbc63d827ce5dc764875",
+  "dataset": {
+   "id": null,
+   "hash": null,
+   "qualityPolicy": "allow-incomplete",
+   "mutableStore": true,
+   "warning": "Dataset is a mutable local store, not an immutable snapshot."
+  },
+  "execution": {
+   "preset": "paper-fast",
+   "broker": "paper",
+   "seed": null,
+   "realistic": false,
+   "fillPriceSource": "latest tracked price / trigger level for bars",
+   "latencyModel": "zero",
+   "stopLatencyModel": "on-trigger",
+   "takeProfitFillModel": "print",
+   "candleCloseModel": "heartbeat:1000ms grace:2000ms",
+   "slippageModel": "zero",
+   "rejectionModel": "none",
+   "partialFillModel": "none",
+   "venueRules": "none",
+   "commissionModel": "per-lot instruments.yaml commissionPerLot",
+   "financingModel": "signed swap points at configured UTC rollover; triple configured weekday",
+   "ocoMode": "engine-managed deterministic siblings",
+   "warning": "Optimistic fills: no spread, slippage, latency, rejection, queue, or partial-fill model."
+  },
+  "experiment": null,
+  "accounting": {
+   "accountCurrency": "USD",
+   "missingPolicy": "fail",
+   "source": "market",
+   "configuredFxSymbols": {},
+   "conversions": {},
+   "costKinds": [
+    "COMMISSION",
+    "SWAP",
+    "FUNDING",
+    "BORROW",
+    "EXCHANGE_FEE",
+    "SPREAD_COST",
+    "TAX"
+   ],
+   "warnings": [],
+   "warning": null
+  },
+  "promotion": null,
+  "warnings": []
+ },
+ "accounting": {
+  "accountCurrency": "USD",
+  "missingPolicy": "fail",
+  "source": "market",
+  "configuredSymbols": {},
+  "conversions": [],
+  "warnings": [],
+  "costKinds": [
+   "COMMISSION",
+   "SWAP",
+   "FUNDING",
+   "BORROW",
+   "EXCHANGE_FEE",
+   "SPREAD_COST",
+   "TAX"
+  ]
+ },
+ "artifacts": {
+  "resultJson": "result.json",
+  "tradesCsv": "trades.csv",
+  "rejectionsCsv": "rejections.csv",
+  "ordersJsonl": "orders.jsonl",
+  "pnlComponentsCsv": "pnl_components.csv",
+  "equityDailyCsv": "equity_daily.csv",
+  "monthlyReturnsCsv": "monthly_returns.csv",
+  "manifestJson": "manifest.json",
+  "equityGlobalCsv": "equity_global.csv",
+  "equityStrategyCsv": {
+   "es_front": "equity_es_front.csv"
+  },
+  "rollsCsv": "rolls.csv",
+  "contractsCsv": "contracts.csv",
+  "marginDailyCsv": "margin_daily.csv",
+  "html": "report.html"
+ },
+ "tradeSummary": {
+  "fills": 13,
+  "buyFills": 7,
+  "sellFills": 6,
+  "sideAttribution": "fill_side",
+  "longEntryFills": 7,
+  "shortEntryFills": 0,
+  "longExitFills": 6,
+  "shortExitFills": 0,
+  "unknownPositionFills": 0,
+  "positionAttribution": "strategy_position_transition",
+  "buyRealized": "-31.22000000",
+  "sellRealized": "48173.24000000",
+  "grossProfit": "69986.62000000",
+  "grossLoss": "-21844.60000000",
+  "rejections": 0,
+  "rejectionRate": "0.00000000",
+  "riskAuditedFills": 0,
+  "minRiskUsd": null,
+  "avgRiskUsd": null,
+  "maxRiskUsd": null,
+  "tradedNotional": "3806575.00000000",
+  "maxFillNotional": "342275.00000000"
+ },
+ "global": {
+  "realizedTotal": "48079.58000000",
+  "unrealizedTotal": "24775.00000000",
+  "totalPnL": "72854.58000000",
+  "commissionPaid": "57.98000000",
+  "swapPaid": "0.00000000",
+  "rollCostsPaid": "62.44000000",
+  "tradeCount": 13,
+  "winRate": "0.50000000",
+  "maxDrawdown": "0.07076500",
+  "profitFactor": "3.20842620",
+  "avgWin": "23328.87333333",
+  "avgLoss": "-7271.12666667",
+  "largestWin": "42995.54000000",
+  "largestLoss": "-8904.46000000",
+  "maxConsecutiveLosses": 2,
+  "sharpeRatio": "0.87001484",
+  "calmarRatio": "2.05905688",
+  "sortinoRatio": "1.17020704",
+  "turnover": "7.61315000",
+  "maxDailyDrawdown": "0.00000000",
+  "annualizationFactor": "250.0223214285715",
+  "dailyPnL": {
+   "2019-01-22": "-4.46000000",
+   "2019-05-14": "13170.54000000",
+   "2019-06-13": "-4.46000000",
+   "2019-08-06": "-7004.46000000",
+   "2019-09-06": "-4.46000000"
+  },
+  "drawdownPeriods": [
+   {
+    "peakTimestamp": 1582156800000,
+    "peakIso": "2020-02-20T00:00:00Z",
+    "troughTimestamp": 1587513600000,
+    "troughIso": "2020-04-22T00:00:00Z",
+    "recoveryTimestamp": 1591228800000,
+    "recoveryIso": "2020-06-04T00:00:00Z",
+    "depthPct": "-0.07076500149792667",
+    "durationMs": 9072000000,
+    "ongoing": false
+   }
+  ],
+  "monteCarlo": null
+ },
+ "perStrategy": {
+  "es_front": {
+   "realizedTotal": "48079.58000000",
+   "unrealizedTotal": "24775.00000000",
+   "totalPnL": "72854.58000000",
+   "commissionPaid": "57.98000000",
+   "swapPaid": "0.00000000",
+   "rollCostsPaid": "62.44000000",
+   "tradeCount": 13,
+   "winRate": "0.50000000",
+   "maxDrawdown": "0.07076500",
+   "profitFactor": "3.20842620",
+   "avgWin": "23328.87333333",
+   "avgLoss": "-7271.12666667",
+   "largestWin": "42995.54000000",
+   "largestLoss": "-8904.46000000",
+   "maxConsecutiveLosses": 2,
+   "sharpeRatio": "0.87001484",
+   "calmarRatio": "2.05905688",
+   "sortinoRatio": "1.17020704",
+   "turnover": "7.61315000",
+   "maxDailyDrawdown": "0.00000000",
+   "annualizationFactor": "250.0223214285715",
+   "dailyPnL": {
+    "2019-01-22": "-4.46000000",
+    "2019-05-14": "13170.54000000",
+    "2019-06-13": "-4.46000000",
+    "2019-08-06": "-7004.46000000",
+    "2019-09-06": "-4.46000000"
+   },
+   "drawdownPeriods": [
+    {
+     "peakTimestamp": 1582156800000,
+     "peakIso": "2020-02-20T00:00:00Z",
+     "troughTimestamp": 1587513600000,
+     "troughIso": "2020-04-22T00:00:00Z",
+     "recoveryTimestamp": 1591228800000,
+     "recoveryIso": "2020-06-04T00:00:00Z",
+     "depthPct": "-0.07076500149792667",
+     "durationMs": 9072000000,
+     "ongoing": false
+    }
+   ],
+   "monteCarlo": null
+  }
+ },
+ "windows": {},
+ "bookAnalytics": null,
+ "bookRisk": null,
+ "runawayBreaker": {
+  "enforceLiveBreakers": false,
+  "maxRoundTrips": 10,
+  "roundTripWindowMs": 600000,
+  "maxRejections": 5,
+  "rejectionWindowMs": 60000,
+  "trips": []
+ }
+}

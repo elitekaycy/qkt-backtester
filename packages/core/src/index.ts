@@ -23,3 +23,4 @@ export * from "./split.js";
 export * from "./texthash.js";
 export * from "./chat.js";
 export * from "./vocabulary.js";
+export * from "./derivatives.js";

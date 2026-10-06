@@ -22,6 +22,9 @@ export function parseTripQuery(q: Record<string, string | undefined>): TripQuery
     symbol: q.symbol || undefined, strategy: q.strategy || undefined, strategies: q.strategies !== undefined ? q.strategies.split(",").filter(Boolean) : undefined,
     fromTs: time(q.from), toTs: time(q.to), minHoldMs: num(q.minHold), maxHoldMs: num(q.maxHold), minPnl: num(q.minPnl), maxPnl: num(q.maxPnl),
     exit: (["stop", "target", "signal", "open"] as const).find((x) => x === q.exit),
+    // `exit=expiry|liquidation|roll_failed`: the venue ended the position (futures and options)
+    venueExit: (["expiry", "liquidation", "roll_failed"] as const).find((x) => x === q.exit),
+    contract: q.contract || undefined,
     exitFromTs: time(q.exitFrom), exitToTs: time(q.exitTo), minQty: num(q.minQty), maxQty: num(q.maxQty), id: num(q.id), minR: num(q.minR), maxR: num(q.maxR), weekday: num(q.weekday), hour: num(q.hour), day: /^\d{4}-\d{2}-\d{2}$/.test(q.day ?? "") ? q.day : undefined,
     sort: sorts.find((s) => s === q.sort), dir: q.dir === "desc" ? "desc" : "asc", offset: num(q.offset), limit: num(q.limit),
   };

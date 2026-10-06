@@ -23,6 +23,20 @@ export interface Fill {
   risk?: number;
   /** Class of the order that filled (`Market`, `Limit`, `Stop`, `TrailingStop`, ...), as qkt writes it. Absent on older engines. */
   orderType?: string;
+  /** Set when the venue, not a strategy order, produced this fill: a contract's expiry settlement, a liquidation, a failed roll. */
+  venue?: VenueExit;
+}
+
+/** Why the venue closed a position on its own. qkt writes the reason into the closing fill's order id (`expiry:CONTRACT:strategy`). */
+export type VenueExit = "expiry" | "liquidation" | "roll_failed";
+export const VENUE_EXITS: readonly VenueExit[] = ["expiry", "liquidation", "roll_failed"];
+
+/** The venue exit a fill's broker order id names, or undefined for an ordinary order. */
+export function venueExitOf(orderId: string): VenueExit | undefined {
+  if (orderId.startsWith("expiry:")) return "expiry";
+  if (orderId.startsWith("liquidation:")) return "liquidation";
+  if (/^roll[-_:]?failed:/i.test(orderId)) return "roll_failed";
+  return undefined;
 }
 
 export interface TripEntry { ts: number; px: number; qty: number; sl?: number; tp?: number; risk?: number }
@@ -53,6 +67,12 @@ export interface RoundTrip {
   exit: ExitReason;
   /** pnl / risk, present for closed trades whose entry carried a stop. */
   r?: number;
+  /** Futures and options only: the venue ended this trade (expiry settlement, liquidation, failed roll). `exit` stays `signal`: qkt runs ON_CLOSE for these. */
+  venueExit?: VenueExit;
+  /** Continuous futures only: the contract the entry and the exit actually traded, and the rolls carried across (see attachContracts). */
+  contract?: string;
+  exitContract?: string;
+  rolls?: number;
 }
 
 /** Order classes qkt fills a protective stop with (every trailing / stepped / tightening variant is still a stop). */
@@ -125,6 +145,7 @@ function makeParser(headerLine: string): (line: string) => Fill {
       posBefore: num(f[ix.before]), posAfter: num(f[ix.after]), legId: f[ix.leg] ?? "", orderId: f[ix.order] ?? "",
       sl: optNum(f[ix.sl]), tp: optNum(f[ix.tp]), risk: ix.risk >= 0 ? optNum(f[ix.risk]) : undefined,
       orderType: ix.orderType >= 0 && f[ix.orderType] ? f[ix.orderType] : undefined,
+      ...(venueExitOf(f[ix.order] ?? "") ? { venue: venueExitOf(f[ix.order] ?? "") } : {}),
     };
   };
 }
@@ -181,6 +202,7 @@ export function pairRoundTrips(fills: Fill[]): RoundTrip[] {
     a.trip.open = false;
     if (a.entries.length > 1) a.trip.entries = a.entries;
     a.trip.exit = classifyExit(a.trip, a.trip.exitPx, f.orderType);
+    if (f.venue) a.trip.venueExit = f.venue;
     if (a.trip.risk && a.trip.risk > 0) a.trip.r = a.trip.pnl / a.trip.risk;
   };
 

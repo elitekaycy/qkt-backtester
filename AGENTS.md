@@ -69,6 +69,33 @@ pnpm docker:build
   link `contracts/ funding/ marks/ open_interest/ tape/ liquidations/ depth/ chains/` as well as bars, or a run on a
   per-symbol source cannot see its catalog.
 
+## Futures and options (all probed on qkt 0.55.0; the spec is `docs/specs/2026-10-06-futures-options-design.md`)
+
+- **Continuous streams** (`CME:ES@front`): qkt's `--bars` coverage check looks for a folder named `ES@front` and reports `0/N days`,
+  so every such run needs `--allow-incomplete`; the runner adds it itself (`derivatives-run.ts`) and the run's coverage record is
+  flagged `continuous: true` so nothing reports it as short. Contract bars are what Data readiness verifies. Continuous runs are
+  **Draft only** (Full says `no market data for CME:ES@front`); option contracts, `OPTIONS:` chains and `CHAIN:` analytics are
+  **Full only** (`--bars` asks for bars that cannot exist). The runner refuses the wrong tier before queueing.
+- `qkt` prints `qkt: chain coverage <SYM> 2/2 days (trade chain)` for options (not `bar coverage ... trading days`); `classifyLine`
+  reads it as `source: "chain"`, `tf: "trade" | "book"`.
+- **Cost accounting**: `result.json` `global`/`perStrategy` carry `rollCostsPaid` and `fundingPaid` **only on runs that have them**.
+  `realizedTotal` = sum of the fills' `realized` **minus** roll costs and funding, so the reconcile check adds them back; the bridge
+  is `preCostPnL = totalPnL + commissionPaid + swapPaid + rollCostsPaid + fundingPaid` (verified: it returns the zero-cost P&L).
+- **Venue closes** are fills in `trades.csv` whose `brokerOrderId` is `expiry:<contract>:<strategy>` or
+  `liquidation:<contract>:<strategy>:<ms>` (empty `orderType`); `venueExitOf` reads them into `RoundTrip.venueExit`, and `exit` stays
+  `signal`. A `ROLL_FAILED` close is matched on a `roll_failed:` prefix that has **not** been observed. `contractSize` in
+  `trades.csv` is the root multiplier, and `realized` already includes it: never recompute P&L.
+- **Rolls are not fills.** A roll closes and reopens inside qkt with no `trades.csv` row, so the signed strategy position, and
+  therefore the trip, spans the roll; `rolls.csv` and `contracts.csv` say which contracts (`attachContracts`).
+- **A root entry without `perpetual:`** is read as a plain symbol: no funding, no root fees. Margin is optional: without it no order
+  is refused for margin and nothing is liquidated; with it qkt refuses and liquidates (`liquidations.csv`).
+- qkt's defaults silently block futures orders (`max_order_notional` 250000, `max_order_qty`, `max_daily_loss` 1000); the seeded
+  config for a store that holds futures raises them. The workspace `instruments.yaml` **wins entirely** over the data root's, so the
+  scaffold copies the data root's `futures:`/`options:` entries verbatim (quotes matter: unquoted `atUtc: 00:00` is a number in YAML 1.1).
+- Per-symbol data views (`data-view.ts`) link `contracts/`, `funding/`, `chains/`... from the default source: qkt reads one root.
+- Derived outputs for these runs: `derived/derivatives.json` (sections present only when their file had rows; `meta.derivatives`
+  lists them), `summary.costs`, `meta.streams[].kind`, `trip.venueExit/contract/exitContract/rolls`; a CFD run gets none of them.
+
 ## Conventions and traps
 
 - Comments are sparse and explain **why**; keep that. TypeScript strict, ESM. Windows are `[from, to)`, times UTC.
