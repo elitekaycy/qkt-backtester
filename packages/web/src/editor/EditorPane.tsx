@@ -21,6 +21,8 @@ const configKeyCount = (text: string) => new Set([...text.matchAll(/^(?:#\s?)?([
 let userActed = false;
 for (const ev of ["keydown", "pointerdown"] as const) window.addEventListener(ev, () => { userActed = true; }, { capture: true, once: true });
 import { newStrategy } from "../sections/FilesSection.js";
+import { kindContextFrom, kindMarks, kindShort, showKind } from "../util/derivatives.js";
+import "./kindChip.css";
 import { FileCode2, FileCog, FileText, Info, Plus, X } from "../ui/icons.js";
 
 export const REVEAL_EVENT = "qkt:reveal";
@@ -167,6 +169,23 @@ export function EditorPane() {
     if (!s) return;
     for (const [path, model] of s.models) s.m.editor.setModelMarkers(model, "qkt", toMarkers(s.m, fileProblems(problems[path] ?? {})));
   }, [problems, booted, activePath]);
+
+  // what each declared stream is, after its line: only a stream that is not a CFD is called out
+  const instruments = useStore((st) => st.instruments);
+  const decos = useRef(new Map<string, string[]>());
+  useEffect(() => {
+    const s = S.current;
+    if (!s) return;
+    const ctx = kindContextFrom(instruments);
+    for (const [path, model] of s.models) {
+      if (!path.endsWith(".qkt")) continue;
+      const next = kindMarks(model.getValue(), ctx).filter((k) => showKind(k.kind)).map((k) => ({
+        range: new s.m.Range(k.line, model.getLineMaxColumn(k.line), k.line, model.getLineMaxColumn(k.line)),
+        options: { after: { content: kindShort(k.kind), inlineClassName: "kind-chip" }, stickiness: s.m.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges },
+      }));
+      decos.current.set(path, model.deltaDecorations(decos.current.get(path) ?? [], next));
+    }
+  }, [instruments, openFiles, booted]);
 
   const shown = useRef<string | null>(null);
 
