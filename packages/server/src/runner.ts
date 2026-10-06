@@ -8,6 +8,7 @@ import { seriesDays } from "./data-scan.js";
 import { canonicalTf } from "@qkt-studio/core";
 import { knownParsed, rememberParsed } from "./parse-cache.js";
 import { fieldKindErrors, kindContextFor } from "./kind-gate.js";
+import { derivativesDataPaths } from "./derivatives-files.js";
 import { qktLanguage } from "./qkt-lang.js";
 import { promises as fs, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -259,6 +260,9 @@ export class Runner {
       for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "bars", s.broker, s.symbol, bases.get(`${s.broker}:${s.symbol}`) ?? s.tf, `${d}.bin`));
     }
     else for (const s of streams) for (const d of daysFor(s)) paths.add(path.join(rootFor(this.cfg, s.symbol), "symbols", s.symbol, `${d}.csv.gz`));
+    // futures and options also read catalogs, rolls, funding, chains...: a CFD stream adds nothing, so its fingerprint is unchanged
+    const fromMs = Math.min(...streams.map((s) => Date.parse(from) - Math.min(1100, Math.max(14, Math.ceil((Math.max(warmBars, s.warmupBars ?? 0) * (tfMs(s.tf) ?? DAY_MS) * 1.5) / DAY_MS) + 7)) * DAY_MS), end);
+    for (const p of await derivativesDataPaths({ rootOf: (sym) => rootFor(this.cfg, sym), streams, ctx: await kindContextFor(this.cfg.dataRoot), fromMs, toMs: end })) paths.add(p);
     const list = [...paths];
     const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
     for (let i = 0; i < list.length; i += 256) {
