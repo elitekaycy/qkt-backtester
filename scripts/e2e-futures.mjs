@@ -1,7 +1,7 @@
 // Futures and options flow of the studio, driven in a real browser. The CFD flow is scripts/e2e.mjs; this one proves the same
 // screens carry futures and options, and that a CFD-only workspace shows none of it.
 //
-//   FUT=http://127.0.0.1:8097/  OPT=http://127.0.0.1:8095/  CFD=http://127.0.0.1:8096/  SHOTS=docs/assets-new  node scripts/e2e-futures.mjs
+//   FUT=http://127.0.0.1:8097/  OPT=http://127.0.0.1:8095/  CFD=http://127.0.0.1:8096/  SHOTS=/tmp/shots  node scripts/e2e-futures.mjs
 //
 // FUT: a studio over a store with CME ES contracts (catalog, rolls, 1d bars), a Binance perpetual with hourly bars and stored funding,
 //      and a workspace holding strategies/{es_trend,btc_perp,cfd_leak,nq_trend}.qkt.
@@ -11,7 +11,7 @@ import fs from "node:fs";
 const require = createRequire(new URL("../packages/web/package.json", import.meta.url));
 const puppeteer = require("puppeteer-core");
 const FUT = process.env.FUT ?? "http://127.0.0.1:8097/", CFD = process.env.CFD ?? "http://127.0.0.1:8096/", OPT = process.env.OPT ?? "http://127.0.0.1:8095/";
-const SHOTS = process.env.SHOTS ?? "docs/assets-new";
+const SHOTS = process.env.SHOTS ?? "/tmp/qkt-studio-e2e-shots";
 fs.mkdirSync(SHOTS, { recursive: true });
 const browser = await puppeteer.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true, args: ["--no-sandbox", "--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
