@@ -2,8 +2,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
-  availableTimeframes, barBases, barBaseTf, bookInfo, canonicalTf, integrity, loadResult, monthlyPnl, pairRoundTrips, parseTradesFile, readBarsVia, strategyBreakdown, summarize, summarizeRejections, tfToMs, verifyManifest,
-  type BarCols, type IntegrityReport, type RunJson, type Summary,
+  attachContracts, availableTimeframes, barBases, barBaseTf, bookInfo, buildDerivatives, canonicalTf, contextFromCatalog, integrity, kindOf, loadResult, monthlyPnl, pairRoundTrips, parseContracts, parseInstruments,
+  parseRolls, parseTradesFile, readBarsVia, strategyBreakdown, summarize, summarizeRejections, tfToMs, verifyManifest,
+  type BarCols, type DerivativesSection, type InstrumentKind, type IntegrityReport, type RunJson, type Summary,
 } from "@qkt-studio/core";
 
 /** The studio's version: packages/server/package.json (one source; the release workflow checks the tag against it). */
@@ -15,9 +16,10 @@ export const STUDIO_VERSION: string = (createRequire(import.meta.url)("../packag
  * 3: each stream's bar base, so charts and checks read the bars qkt read; 4: the account currency money is reported in;
  * 5: the orders qkt rejected, summarised by reason; 6: no Sharpe/Sortino/Calmar for a blown account;
  * 7: a tick run's charts read the dividing bar folder that covers the window best; 8: an aggregated chart drops the
- * final candle qkt never closed).
+ * final candle qkt never closed; 9: futures and options runs: derivatives.json, venue exits and contracts on trips,
+ * roll costs and funding in the reconcile check).
  */
-export const DERIVED_VERSION = 8;
+export const DERIVED_VERSION = 9;
 /** Above this many fills the round-trip file is too large to page from memory. */
 export const MAX_FILLS = 2_000_000;
 
@@ -25,6 +27,8 @@ export class PostprocessError extends Error {}
 
 export interface StreamRef {
   key: string; broker: string; symbol: string; tf: string;
+  /** Only set for futures and options streams (`continuous`, `future`, ...): a CFD stream carries no kind, so its meta is unchanged. */
+  kind?: InstrumentKind;
   /** The bar folder the chart reads for this stream: in a bars run, the one qkt itself read (it aggregates coarser streams from it). */
   base?: string | null;
 }
@@ -80,7 +84,32 @@ async function daysWithFiles(dataRoot: string, broker: string, symbol: string, t
   return names.filter((n) => n.endsWith(".bin") && n.slice(0, 10) >= from && n.slice(0, 10) < to).length;
 }
 
-export async function postprocess(args: { runDir: string; run: RunJson; dataRoot: string }): Promise<PostprocessResult> {
+/** `VENUE:ROOT` of every futures catalog in the data root (`contracts/<VENUE>/<ROOT>.json`; `.rolls.json` and `.options.json` are other files). */
+async function storeRoots(dataRoot: string): Promise<string[]> {
+  const out: string[] = [];
+  const dir = path.join(dataRoot, "contracts");
+  for (const venue of await fs.readdir(dir).catch(() => [] as string[])) {
+    for (const f of await fs.readdir(path.join(dir, venue)).catch(() => [] as string[])) {
+      if (f.endsWith(".json") && !f.endsWith(".rolls.json") && !f.endsWith(".options.json")) out.push(`${venue}:${f.slice(0, -5)}`);
+    }
+  }
+  return out;
+}
+
+/** The instruments.yaml a run used: the workspace's own wins over the data source's (the same rule as `--instruments`). */
+export async function readInstrumentsText(workspace: string | null, dataRoot: string): Promise<string> {
+  if (workspace) { const t = await fs.readFile(path.join(workspace, "instruments.yaml"), "utf8").catch(() => ""); if (t) return t; }
+  return fs.readFile(path.join(dataRoot, "instruments.yaml"), "utf8").catch(() => "");
+}
+
+const NO_BARS_BY_KIND: Partial<Record<InstrumentKind, string>> = {
+  continuous: "a continuous futures stream is built from each contract's bars, so there is no bar folder of its own",
+  chain: "an options chain is read from stored snapshots, not bars",
+  analytic: "a CHAIN: analytic is read from stored snapshots, not bars",
+  hub: "a HUB: record is not a bar series",
+};
+
+export async function postprocess(args: { runDir: string; run: RunJson; dataRoot: string; instrumentsText?: string }): Promise<PostprocessResult> {
   const { runDir, run, dataRoot } = args;
   const engineDir = path.join(runDir, "engine"), derivedDir = path.join(runDir, "derived");
   await fs.mkdir(derivedDir, { recursive: true });
@@ -93,6 +122,18 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   const fills = await parseTradesFile(path.join(engineDir, "trades.csv"));
   if (fills.length > MAX_FILLS) throw new PostprocessError(`${fills.length.toLocaleString()} fills exceeds the studio limit of ${MAX_FILLS.toLocaleString()}`);
   const trips = pairRoundTrips(fills);
+  // Futures and options: the files qkt writes beside the CFD ones, each only when it has rows. Read here so the contracts
+  // behind a continuous stream's fills land on the trips before roundtrips.json is written.
+  const readEngine = (name: string) => fs.readFile(path.join(engineDir, name), "utf8").catch(() => undefined);
+  const dfiles = {
+    rolls: await readEngine("rolls.csv"), contracts: await readEngine("contracts.csv"), settlements: await readEngine("settlements.csv"),
+    margin: await readEngine("margin_daily.csv"), liquidations: await readEngine("liquidations.csv"), structures: await readEngine("structures.csv"),
+    financing: await readEngine("financing.csv"),
+  };
+  const derivatives = buildDerivatives(dfiles, result);
+  if (derivatives?.liquidations?.length) warnings.push(`The venue liquidated ${derivatives.liquidations.length} position${derivatives.liquidations.length === 1 ? "" : "s"}: account equity fell below the maintenance margin (see Derivatives, Liquidations). Orders that add risk were refused while it stayed below.`);
+  if (derivatives?.margin?.some((d) => d.marginCall)) warnings.push("The account was on a margin call on at least one day (see Derivatives, Margin).");
+  if (dfiles.contracts !== undefined || dfiles.rolls !== undefined) attachContracts(trips, dfiles.contracts ? parseContracts(dfiles.contracts) : [], dfiles.rolls ? parseRolls(dfiles.rolls) : []);
   // orders qkt refused (risk caps, halts): without these a run that rejected every order reads as "no trades"
   const rejections = summarizeRejections(await fs.readFile(path.join(engineDir, "rejections.csv"), "utf8").catch(() => ""));
   if (rejections.count) {
@@ -104,6 +145,8 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   // Chart-side evidence: bars for every stream the engine evaluated.
   const fromMs = Date.parse(run.from + "T00:00:00Z"), toMs = Date.parse(run.to + "T00:00:00Z");
   const streams = Object.keys(result.inputSummary.streamCandles ?? {}).map(parseStreamKey).filter((s): s is StreamRef => s !== null);
+  const kctx = contextFromCatalog(parseInstruments(args.instrumentsText ?? ""), { futureRoots: await storeRoots(dataRoot) });
+  for (const s of streams) { const k = kindOf(s, kctx); if (k !== "cfd") s.kind = k; }
   // which bar folder each stream's candles come from: in a bars run exactly qkt's choice; in a tick run the stream's own folder
   // when it is built, else the coarsest built one that divides it (for display: qkt built those candles from ticks)
   const built = new Map<string, string[]>();
@@ -128,6 +171,7 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
   const bars: Record<string, BarCols> = {};
   const streamNotes: string[] = [];
   for (const s of streams) {
+    if (s.kind && NO_BARS_BY_KIND[s.kind]) { streamNotes.push(`${s.key}: ${NO_BARS_BY_KIND[s.kind]}, chart checks skipped`); s.base = null; continue; }
     if (!s.base) { streamNotes.push(`${s.key}: no bar folder qkt can read for it, chart checks skipped`); continue; }
     const r = await readBarsVia(dataRoot, s.broker, s.symbol, s.tf, s.base, fromMs, toMs);
     if (r.days.length === 0) { streamNotes.push(`${s.key}: no bar files in the store, chart checks skipped`); continue; }
@@ -168,6 +212,10 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
     }
     portfolioFiles.push(write("equity-by-strategy.json", { ids: strategyIds, series }));
   }
+  // Futures/options runs only (like the portfolio files): the UI branches on `meta.derivatives` or a 404, never on the stream kinds alone.
+  const sections: DerivativesSection[] = derivatives?.sections ?? [];
+  if (derivatives) portfolioFiles.push(write("derivatives.json", derivatives));
+  else await fs.rm(path.join(derivedDir, "derivatives.json"), { force: true });
   await Promise.all([
     ...portfolioFiles,
     write("roundtrips.json", trips),
@@ -181,6 +229,7 @@ export async function postprocess(args: { runDir: string; run: RunJson; dataRoot
       currency: result.accounting?.accountCurrency ?? null,
       rejections,
       monteCarloEngine: result.global.monteCarlo ?? null, derivedVersion: DERIVED_VERSION,
+      ...(sections.length ? { derivatives: sections } : {}),
     }),
   ]);
   return { summary, integrity: rep, fills: fills.length, trips: trips.length, warnings };

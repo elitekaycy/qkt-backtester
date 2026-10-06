@@ -13,7 +13,7 @@ const MIME: Record<string, string> = {
   ".json": "application/json", ".html": "text/html; charset=utf-8", ".csv": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
   ".txt": "text/plain; charset=utf-8", ".qkt": "text/plain; charset=utf-8", ".yaml": "text/plain; charset=utf-8", ".jsonl": "text/plain; charset=utf-8", ".ndjson": "text/plain; charset=utf-8",
 };
-const DERIVED = new Set(["summary", "monthly", "integrity", "equity", "meta", "strategies", "book", "equity-by-strategy"]);
+const DERIVED = new Set(["summary", "monthly", "integrity", "equity", "meta", "strategies", "book", "equity-by-strategy", "derivatives"]);
 
 const num = (v: unknown): number | undefined => (v === undefined || v === "" ? undefined : Number.isFinite(Number(v)) ? Number(v) : undefined);
 const time = (v: unknown): number | undefined => {

@@ -31,7 +31,7 @@ export interface CostBridge {
   totalPnl: number; commission: number; swap: number; rollCosts: number; funding: number; preCostPnl: number;
 }
 
-export interface DerivativesReport {
+export interface RunDerivatives {
   /** Which sections carry rows, in display order. Mirrors `meta.derivatives`. */
   sections: DerivativesSection[];
   rolls?: RollRow[];
@@ -114,9 +114,9 @@ export function costBridge(result: QktResult): CostBridge | null {
 }
 
 /** The derivatives sections of a run from the text of each file qkt wrote (undefined = the file is absent). */
-export function buildDerivatives(files: Partial<Record<"rolls" | "contracts" | "settlements" | "margin" | "liquidations" | "structures" | "financing", string>>, result: QktResult): DerivativesReport | null {
-  const rep: DerivativesReport = { sections: [] };
-  const put = <K extends Exclude<DerivativesSection, "costs">>(key: K, rows: NonNullable<DerivativesReport[K]>) => { if (rows.length) { (rep as unknown as Record<string, unknown>)[key] = rows; rep.sections.push(key); } };
+export function buildDerivatives(files: Partial<Record<"rolls" | "contracts" | "settlements" | "margin" | "liquidations" | "structures" | "financing", string>>, result: QktResult): RunDerivatives | null {
+  const rep: RunDerivatives = { sections: [] };
+  const put = <K extends Exclude<DerivativesSection, "costs">>(key: K, rows: NonNullable<RunDerivatives[K]>) => { if (rows.length) { (rep as unknown as Record<string, unknown>)[key] = rows; rep.sections.push(key); } };
   if (files.rolls !== undefined) put("rolls", parseRolls(files.rolls));
   if (files.contracts !== undefined) put("contracts", parseContracts(files.contracts));
   if (files.settlements !== undefined) put("settlements", parseSettlements(files.settlements));

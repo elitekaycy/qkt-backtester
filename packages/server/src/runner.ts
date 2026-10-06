@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prepareDataView, allowedWindow } from "./data-view.js";
 import { configStartingBalance } from "@qkt-studio/core";
+import { EXCHANGE_SIM_NOTE, hasContinuous, isOptionStream, tierProblem } from "./derivatives-run.js";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
 import { seriesDays } from "./data-scan.js";
@@ -16,7 +17,7 @@ import {
 import type { ServerConfig } from "./config.js";
 import { RunIndex, STARTUP_MS, type IndexRow } from "./index-db.js";
 import { JailError, resolveInJail, toRel } from "./jail.js";
-import { DERIVED_VERSION, postprocess, PostprocessError, STUDIO_VERSION } from "./postprocess.js";
+import { DERIVED_VERSION, postprocess, PostprocessError, readInstrumentsText, STUDIO_VERSION } from "./postprocess.js";
 import { execQkt, spawnGroup, type ProcHandle } from "./proc.js";
 import { optionArgs, OptionsError, validateOptions, type RunOptions } from "./run-options.js";
 
@@ -293,12 +294,14 @@ export class Runner {
     if (win.from && req.from < win.from) throw new RunRequestError(`The window starts ${req.from}, before ${win.from}, the start you set for ${win.by.from} in Data. Move the start date or change that symbol's range.`, 400);
     if (win.to && req.to > win.to) throw new RunRequestError(`The window ends ${req.to}, after ${win.to}, the end you set for ${win.by.to} in Data. Move the end date or change that symbol's range.`, 400);
     const params = Object.fromEntries(Object.entries(req.params ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+    const tierIssue = tierProblem(streams, req.tier);
+    if (tierIssue) throw new RunRequestError(tierIssue, 400);
     const options = validateOptions(req.tier, req.options);
     if (options.startingBalance === undefined) { const sb = configStartingBalance(configText, childEnv(this.cfg, wsEnv)); if (sb !== undefined) options.startingBalance = sb; }
     const hashInput: RunHashInput = {
       strategySources: sources, config: configText, params, from: req.from, to: req.to, tier: req.tier, engine,
       // "window-check:1": runs made before the studio refused windows with missing days are not reused (see checkWindowData)
-      flags: ["window-check:1", ...(req.allowIncomplete ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
+      flags: ["window-check:1", ...(req.allowIncomplete || hasContinuous(streams) ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
     };
     const hash = runHash(hashInput);
 
@@ -421,7 +424,7 @@ export class Runner {
       const run = await this.getRun(id);
       if (!run || run.status !== "done") return;
       const { root } = await prepareDataView(this.cfg, uniqueStreams(Object.values(await this.sourcesOf(dir, run.strategy)).flatMap((t) => parseStrategyInfo(t).streams)).map((s) => s.symbol));
-      await postprocess({ runDir: dir, run, dataRoot: root });
+      await postprocess({ runDir: dir, run, dataRoot: root, instrumentsText: await readInstrumentsText(this.cfg.workspace, root) });
     })().finally(() => this.rederiving.delete(id));
     this.rederiving.set(id, job);
     return job;
@@ -609,7 +612,9 @@ export class Runner {
     await this.startStep(a, "project");
     const cwd = this.cfg.workspace;
     await fs.access(a.stratAbs).catch(() => { throw new StepFailure("project", { kind: "file_not_found", message: `Strategy not found: ${a.run.strategy}`, file: a.run.strategy }); });
-    await this.endStep(a, "project", "ok", `workspace ${cwd}; strategy ${a.run.strategy}; ${a.run.tier === "draft" ? "Draft (--bars)" : "Full (ticks)"}`);
+    const deriv = a.info.streams.some((s) => hasContinuous([s]) || isOptionStream(s));
+    const feed = a.run.tier === "draft" ? "Draft (--bars)" : "Full (ticks)";
+    await this.endStep(a, "project", "ok", `workspace ${cwd}; strategy ${a.run.strategy}; ${feed}${hasContinuous(a.info.streams) ? "; continuous futures stream" : ""}${a.info.streams.some(isOptionStream) ? "; options read from stored chains" : ""}${deriv ? `; ${EXCHANGE_SIM_NOTE}` : ""}`);
   }
 
   private async stepConfig(a: Active): Promise<void> {
@@ -647,7 +652,10 @@ export class Runner {
     const engineDir = path.join(a.dir, "engine");
     const args = [
       "backtest", a.stratAbs, "--config", a.cfgAbs, "--from", r.from, "--to", r.to, "--no-fetch",
-      ...(r.tier === "draft" ? ["--bars"] : []), ...(req.allowIncomplete ? ["--allow-incomplete"] : []),
+      // A continuous futures stream (@front/@next) is built from each contract's bars, but qkt's bar coverage check looks for
+      // a folder named ROOT@front and reports 0 days [probed], so qkt refuses every such run without this flag. The studio
+      // waives only that check; the contracts' own bars are what Data readiness verifies.
+      ...(r.tier === "draft" ? ["--bars"] : []), ...(req.allowIncomplete || hasContinuous(a.info.streams) ? ["--allow-incomplete"] : []),
       ...instrumentsArgs(a.wsEnv), ...Object.entries(r.params).flatMap(([k, v]) => ["--param", `${k}=${v}`]), ...optionArgs((r.options ?? {}) as RunOptions), "--report-dir", engineDir,
     ];
     r.coverage = []; r.counts = { fills: 0, orders: 0 };
@@ -656,13 +664,17 @@ export class Runner {
     const onLine = (line: string) => {
       const ev = classifyLine(line);
       if (ev.kind === "coverage") {
-        r.coverage!.push({ source: ev.source, symbol: ev.symbol, covered: ev.covered, requested: ev.requested, tf: ev.tf });
+        const continuous = ev.source === "bar" && ev.symbol.includes("@");
+        r.coverage!.push({ source: ev.source, symbol: ev.symbol, covered: ev.covered, requested: ev.requested, tf: ev.tf, ...(continuous ? { continuous: true } : {}) });
         if (!covDone) {
           covDone = true;
           const total = r.coverage!;
           void (async () => {
-            const short = total.some((c) => c.covered < c.requested);
-            await this.endStep(a, "coverage", short ? "warn" : "ok", total.map((c) => `${c.symbol}${c.tf ? " " + c.tf : ""} ${c.covered}/${c.requested} trading days`).join("; "));
+            const short = total.some((c) => !c.continuous && c.covered < c.requested);
+            // chain coverage counts days of a stored chain series, the others trading days; a continuous stream is not judged by qkt
+            const part = (c: (typeof total)[number]) => c.continuous ? `${c.symbol}${c.tf ? " " + c.tf : ""} follows each contract's own bars (qkt's day count does not apply)`
+              : c.source === "chain" ? `${c.symbol} ${c.covered}/${c.requested} days (${c.tf ?? ""} chain)` : `${c.symbol}${c.tf ? " " + c.tf : ""} ${c.covered}/${c.requested} trading days`;
+            await this.endStep(a, "coverage", short ? "warn" : "ok", total.map(part).join("; "));
             await this.startStep(a, "backtest");
             if (r.status === "checking") await this.setStatus(a, "running");
           })().catch(() => {});
@@ -767,7 +779,7 @@ export class Runner {
   private async stepPostprocess(a: Active): Promise<void> {
     await this.setStatus(a, "postprocessing");
     await this.startStep(a, "postprocess");
-    const res = await postprocess({ runDir: a.dir, run: a.run, dataRoot: a.dataRoot });
+    const res = await postprocess({ runDir: a.dir, run: a.run, dataRoot: a.dataRoot, instrumentsText: a.wsEnv.instrumentsText || await readInstrumentsText(null, a.dataRoot) });
     a.run.warnings.push(...res.warnings);
     const bad = res.integrity.checks.filter((c) => c.ok === false);
     if (bad.length) a.run.warnings.push(`Integrity check failed: ${bad.map((c) => c.label).join("; ")}`);

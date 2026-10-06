@@ -5,6 +5,7 @@ export * from "./runid.js";
 export * from "./runjson.js";
 export * from "./outputs.js";
 export * from "./lint.js";
+export * from "./instruments.js";
 export * from "./montecarlo.js";
 export * from "./strategy.js";
 export * from "./tripquery.js";
