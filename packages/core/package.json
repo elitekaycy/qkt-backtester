@@ -46,6 +46,10 @@
     "./vocabulary": {
       "types": "./dist/vocabulary.d.ts",
       "default": "./dist/vocabulary.js"
+    },
+    "./instruments": {
+      "types": "./dist/instruments.d.ts",
+      "default": "./dist/instruments.js"
     }
   },
   "scripts": {

@@ -1,5 +1,6 @@
 import type { Completeness, DayRange, YearRow } from "./ranges.js";
 import type { StreamDecl } from "./strategy.js";
+import type { FutureTerms, InstrumentKind, OptionTerms } from "./instruments.js";
 
 /** Shapes of the data-source scan, shared by the server (which computes them) and the browser (which shows them). */
 export type DayStatus = "ok" | "closed" | "thin" | "missing";
@@ -38,20 +39,75 @@ export interface SymbolReport {
   completeYears: number; spanYears: number; notes: string[];
 }
 
+/** A stored per-day or single-file series (funding rates, open interest, marks, option chains): what is on disk, not a verdict. */
+export interface SeriesReport { files: number; first: string | null; last: string | null; rows?: number }
+
+/** One built timeframe of one contract's bars. */
+export interface ContractBars { tf: string; files: number; first: string | null; last: string | null }
+
+export interface ContractReport {
+  /** The qkt symbol: `ESZ24`, `BTCUSDT_241227`. */
+  symbol: string; expiry: string | null; deliveryPrice: string | null; bars: ContractBars[];
+}
+
+export interface PerpetualReport {
+  /** The venue's name for it (`BTCUSDT`), the key funding/marks/open interest are stored under. */
+  name: string; bars: ContractBars[]; funding: SeriesReport | null; openInterest: SeriesReport | null; marks: Array<{ tf: string } & SeriesReport>;
+}
+
+/** A futures root (`CME:ES`): its catalog, measured rolls, contracts with bars, and the terms instruments.yaml gives it. */
+export interface FutureRootReport {
+  key: string; venue: string; root: string;
+  terms: FutureTerms | null;
+  catalog: { contracts: number; first: string | null; last: string | null; delivered: number } | null;
+  rolls: { count: number; first: string | null; last: string | null; policy: string | null } | null;
+  contracts: ContractReport[];
+  perpetual: PerpetualReport | null;
+  notes: string[];
+}
+
+export interface OptionRootReport {
+  key: string; venue: string; root: string;
+  terms: OptionTerms | null;
+  catalog: { contracts: number; first: string | null; last: string | null } | null;
+  chains: { trade: SeriesReport | null; book: SeriesReport | null };
+  notes: string[];
+}
+
+export interface DerivativesReport {
+  futures: FutureRootReport[]; options: OptionRootReport[];
+  /** instruments.yaml in the data root: where futures/options terms live. */
+  instruments: { path: string; exists: boolean; errors: string[] };
+}
+
 export interface ScanReport {
   dataRoot: string; scannedAt: string; looksLikeStore: boolean; ms: number;
   symbols: SymbolReport[];
+  /** Futures and options roots found in the store or declared in instruments.yaml. Absent on a CFD-only source. */
+  derivatives?: DerivativesReport;
   totals: { symbols: number; complete: number; mostly: number; incomplete: number; ticksOnly: number; empty: number; barFiles: number; tickFiles: number };
 }
+
+/** What closes a block: the CFD fixes, plus one per derivatives dataset the engine refuses to run without. */
+export type BlockFix = "build-bars" | "fetch" | "catalog" | "rolls" | "terms" | "funding" | "marks" | "open-interest" | "chains" | "tape" | "depth";
 
 export interface ModeReadiness {
   runnable: boolean;
   /** Windows (exclusive end) where every stream the strategy reads is complete. */
   ranges: DayRange[];
   longest: DayRange | null;
-  blocked: Array<{ stream: string; reason: string; fix?: "build-bars" | "fetch"; /** Portfolio children that read this stream. */ members?: string[] }>;
+  blocked: Array<{
+    stream: string; reason: string; fix?: BlockFix;
+    /** The `qkt fetch ...` (or build) command that fills it, when there is one. */
+    command?: string;
+    /** Portfolio children that read this stream. */ members?: string[];
+  }>;
 }
 
 /** One child of a portfolio and whether it could run on its own data. */
 export interface MemberReadiness { alias: string; rel: string | null; exists: boolean; hold: boolean; bars: boolean; ticks: boolean; streams: StreamDecl[] }
-export interface Readiness { strategy: string; kind: string; streams: StreamDecl[]; bars: ModeReadiness; ticks: ModeReadiness; members?: MemberReadiness[] }
+export interface Readiness {
+  strategy: string; kind: string; streams: StreamDecl[]; bars: ModeReadiness; ticks: ModeReadiness; members?: MemberReadiness[];
+  /** What each declared stream is (by alias), so the UI says "continuous future" without parsing symbols itself. */
+  kinds?: Record<string, InstrumentKind>;
+}
