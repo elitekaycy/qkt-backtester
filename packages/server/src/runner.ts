@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { prepareDataView, allowedWindow } from "./data-view.js";
 import { configStartingBalance } from "@qkt-studio/core";
-import { EXCHANGE_SIM_NOTE, hasContinuous, isOptionStream, tierProblem } from "./derivatives-run.js";
+import { EXCHANGE_SIM_NOTE, hasContinuous, isOptionStream, tierProblem, waivesEngineCoverage, windowGaps } from "./derivatives-run.js";
+import { derivativesCached } from "./derivatives-scan.js";
+import { fieldUses, planFor } from "./derivatives-readiness.js";
 import { childEnv, instrumentsArgs, loadWorkspaceEnv, type WorkspaceEnv } from "./workspace-env.js";
 import { rootFor } from "./settings.js";
 import { seriesDays } from "./data-scan.js";
@@ -300,6 +302,7 @@ export class Runner {
     if (win.from && req.from < win.from) throw new RunRequestError(`The window starts ${req.from}, before ${win.from}, the start you set for ${win.by.from} in Data. Move the start date or change that symbol's range.`, 400);
     if (win.to && req.to > win.to) throw new RunRequestError(`The window ends ${req.to}, after ${win.to}, the end you set for ${win.by.to} in Data. Move the end date or change that symbol's range.`, 400);
     const params = Object.fromEntries(Object.entries(req.params ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+    const waived = waivesEngineCoverage(streams, await derivativesCached(this.cfg.dataRoot).catch(() => undefined));
     const tierIssue = tierProblem(streams, req.tier);
     if (tierIssue) throw new RunRequestError(tierIssue, 400);
     const options = validateOptions(req.tier, req.options);
@@ -307,7 +310,7 @@ export class Runner {
     const hashInput: RunHashInput = {
       strategySources: sources, config: configText, params, from: req.from, to: req.to, tier: req.tier, engine,
       // "window-check:1": runs made before the studio refused windows with missing days are not reused (see checkWindowData)
-      flags: ["window-check:1", ...(req.allowIncomplete || hasContinuous(streams) ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
+      flags: ["window-check:1", ...(req.allowIncomplete || waived ? ["--allow-incomplete"] : []), ...optionArgs(options), `env:${wsEnv.fingerprint}`, ...(wsEnv.instrumentsText ? [`instruments:${runHashText(wsEnv.instrumentsText)}`] : []), ...Object.entries(this.cfg.symbolPrefs ?? {}).filter(([k, v]) => v.source && streams.some((s) => s.symbol === k)).map(([k, v]) => `src:${k}=${v.source}`)], dataFingerprint: dataFingerprint(files),
     };
     const hash = runHash(hashInput);
 
@@ -659,12 +662,15 @@ export class Runner {
   private async stepEngine(a: Active): Promise<void> {
     const r = a.run, req = a.request;
     const engineDir = path.join(a.dir, "engine");
+    const dreport = await derivativesCached(this.cfg.dataRoot).catch(() => undefined);
+    const waived = waivesEngineCoverage(a.info.streams, dreport);
+    const judgedByCalendar = new Set(a.info.streams.filter((s) => waivesEngineCoverage([s], dreport) && !s.symbol.includes("@")).map((s) => `${s.broker}:${s.symbol}`));
     const args = [
       "backtest", a.stratAbs, "--config", a.cfgAbs, "--from", r.from, "--to", r.to, "--no-fetch",
       // A continuous futures stream (@front/@next) is built from each contract's bars, but qkt's bar coverage check looks for
       // a folder named ROOT@front and reports 0 days [probed], so qkt refuses every such run without this flag. The studio
       // waives only that check; the contracts' own bars are what Data readiness verifies.
-      ...(r.tier === "draft" ? ["--bars"] : []), ...(req.allowIncomplete || hasContinuous(a.info.streams) ? ["--allow-incomplete"] : []),
+      ...(r.tier === "draft" ? ["--bars"] : []), ...(req.allowIncomplete || waived ? ["--allow-incomplete"] : []),
       ...instrumentsArgs(a.wsEnv), ...Object.entries(r.params).flatMap(([k, v]) => ["--param", `${k}=${v}`]), ...optionArgs((r.options ?? {}) as RunOptions), "--report-dir", engineDir,
     ];
     r.coverage = []; r.counts = { fills: 0, orders: 0 };
@@ -673,7 +679,7 @@ export class Runner {
     const onLine = (line: string) => {
       const ev = classifyLine(line);
       if (ev.kind === "coverage") {
-        const continuous = ev.source === "bar" && ev.symbol.includes("@");
+        const continuous = ev.source === "bar" && (ev.symbol.includes("@") || judgedByCalendar.has(ev.symbol));
         r.coverage!.push({ source: ev.source, symbol: ev.symbol, covered: ev.covered, requested: ev.requested, tf: ev.tf, ...(continuous ? { continuous: true } : {}) });
         if (!covDone) {
           covDone = true;
@@ -681,7 +687,7 @@ export class Runner {
           void (async () => {
             const short = total.some((c) => !c.continuous && c.covered < c.requested);
             // chain coverage counts days of a stored chain series, the others trading days; a continuous stream is not judged by qkt
-            const part = (c: (typeof total)[number]) => c.continuous ? `${c.symbol}${c.tf ? " " + c.tf : ""} follows each contract's own bars (qkt's day count does not apply)`
+            const part = (c: (typeof total)[number]) => c.continuous ? `${c.symbol}${c.tf ? " " + c.tf : ""} ${c.symbol.includes("@") ? "follows each contract's own bars" : "is judged by its root's exchange calendar, which Data checked (qkt's day count calls closures holes)"}`
               : c.source === "chain" ? `${c.symbol} ${c.covered}/${c.requested} days (${c.tf ?? ""} chain)` : `${c.symbol}${c.tf ? " " + c.tf : ""} ${c.covered}/${c.requested} trading days`;
             await this.endStep(a, "coverage", short ? "warn" : "ok", total.map(part).join("; "));
             await this.startStep(a, "backtest");
@@ -753,6 +759,21 @@ export class Runner {
     }
     const found: Array<{ what: string; days: string[] }> = [];
     const seen = new Set<string>();
+    // A futures or options stream is judged by its own kind's rule (the root's calendar, the roll schedule, the chain days),
+    // the same verdict Data readiness shows: the CFD scan below applies the FX week, which calls every Sunday and exchange
+    // holiday of a CME contract a hole [probed: ESH19 Oct 2018 - Mar 2019, 26 "missing" days, all closures].
+    const dreport = await derivativesCached(this.cfg.dataRoot).catch(() => undefined);
+    const dctx = await kindContextFor(this.cfg.dataRoot), uses = fieldUses(a.stratSource);
+    const finest = new Map<string, string>();
+    for (const s of a.info.streams) { const k = `${s.broker}:${s.symbol}`, cur = finest.get(k); if (!cur || (tfMs(s.tf) ?? Infinity) < (tfMs(cur) ?? Infinity)) finest.set(k, s.tf); }
+    for (const s of a.info.streams) {
+      const plan = planFor(dreport, s, r.tier === "draft" ? "bars" : "ticks", dctx, finest.get(`${s.broker}:${s.symbol}`) ?? s.tf, a.stratSource, uses);
+      if (!plan?.replace) continue;
+      if ("blocked" in plan.replace) throw new StepFailure("coverage", { kind: "incomplete_data", message: `${s.broker}:${s.symbol} cannot run: ${plan.replace.blocked}${plan.replace.command ? ` Fix: ${plan.replace.command}` : ""}` });
+      const gaps = windowGaps(plan.replace, r.from, r.to);
+      if (gaps.length) found.push({ what: `${s.symbol} ${r.tier === "draft" ? s.tf + " bars" : "data"}`, days: gaps });
+      seen.add(r.tier === "draft" ? `${s.broker}:${s.symbol}` : s.symbol);
+    }
     for (const s of a.info.streams) {
       const key = r.tier === "draft" ? `${s.broker}:${s.symbol}` : s.symbol;
       if (seen.has(key)) continue;

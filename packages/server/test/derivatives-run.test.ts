@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { newRunJson } from "@qkt-studio/core";
 import { postprocess } from "../src/postprocess.js";
-import { hasContinuous, isOptionStream, tierProblem } from "../src/derivatives-run.js";
+import { hasContinuous, isOptionStream, tierProblem, waivesEngineCoverage, windowGaps } from "../src/derivatives-run.js";
 import { optionArgs, validateOptions } from "../src/run-options.js";
 
 const fixture = (n: string) => new URL(`../../core/test/fixtures/futures/${n}/`, import.meta.url).pathname;
@@ -123,3 +123,31 @@ describe("tiers and flags", () => {
   });
 });
 
+
+describe("waivesEngineCoverage", () => {
+  const report = (calendar?: string) => ({ futures: [{ key: "CME:ES", terms: calendar ? { root: "CME:ES", calendar } : { root: "CME:ES" } }], options: [], instruments: { path: "", exists: true, errors: [] } }) as never;
+  it("waives a continuous stream whatever the data", () => {
+    expect(waivesEngineCoverage([{ broker: "CME", symbol: "ES@front" }], undefined)).toBe(true);
+  });
+  it("waives a listed contract of a root on an exchange calendar: qkt calls its Sundays and holidays holes", () => {
+    expect(waivesEngineCoverage([{ broker: "CME", symbol: "ESH19" }], report("cme_globex"))).toBe(true);
+  });
+  it("keeps qkt's own check for CFDs, shared calendars and roots without one", () => {
+    expect(waivesEngineCoverage([{ broker: "BACKTEST", symbol: "XAUUSD" }], report("cme_globex"))).toBe(false);
+    expect(waivesEngineCoverage([{ broker: "CME", symbol: "ESH19" }], report("crypto"))).toBe(false);
+    expect(waivesEngineCoverage([{ broker: "CME", symbol: "ESH19" }], report("fx"))).toBe(false);
+    expect(waivesEngineCoverage([{ broker: "CME", symbol: "ESH19" }], report())).toBe(false);
+    expect(waivesEngineCoverage([{ broker: "CME", symbol: "ESH19" }], undefined)).toBe(false);
+  });
+});
+
+describe("windowGaps", () => {
+  it("lists the days of the window that no usable range covers, end exclusive", () => {
+    const pick = { ranges: [{ from: "2019-01-01", to: "2019-01-04" }] };
+    expect(windowGaps(pick, "2019-01-01", "2019-01-04")).toEqual([]);
+    expect(windowGaps(pick, "2019-01-02", "2019-01-06")).toEqual(["2019-01-04", "2019-01-05"]);
+  });
+  it("calls the whole window a gap when the stream is blocked", () => {
+    expect(windowGaps({ blocked: "no catalog" }, "2019-01-01", "2019-01-03")).toEqual(["2019-01-01", "2019-01-02"]);
+  });
+});
