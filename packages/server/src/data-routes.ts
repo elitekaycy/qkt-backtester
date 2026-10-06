@@ -8,7 +8,7 @@ import type { Runner } from "./runner.js";
 import { applySettings, dataRootAllowed, loadSettings, savePrefs, updateSettings } from "./settings.js";
 import type { SymbolPref } from "./config.js";
 import { listPortfolios, resolveStrategy } from "./portfolio.js";
-import { completeConfig, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
+import { completeConfig, configReferenceFor, missingFiles, scaffoldWorkspace, type ScaffoldFile } from "./scaffold.js";
 import { rangeDays, longest, parseInstruments } from "@qkt-studio/core";
 import { derivativesCached, kindContextOf } from "./derivatives-scan.js";
 import { acceptNoData, readAccepted, undoNoData } from "./no-data.js";
@@ -101,7 +101,7 @@ export function registerDataRoutes(app: FastifyInstance, cfg: ServerConfig, runn
   app.post<{ Body: { content?: string } }>("/api/workspace/config-complete", async (req, reply) => {
     const content = req.body?.content;
     if (typeof content !== "string" || content.length > 1_000_000) return reply.code(400).send({ error: "content must be the config text" });
-    return { content: completeConfig(content) };
+    return { content: completeConfig(content, await configReferenceFor(cfg.dataRoot)) };
   });
   /** Create the standard project files that are missing (never overwrites). `files` limits which. */
   app.post<{ Body: { files?: ScaffoldFile[] } }>("/api/workspace/scaffold", async (req) => {
