@@ -55,7 +55,7 @@ pnpm docker:build
   run never gets them, and every UI branch on `meta.strategies.length > 1` (or a 404 on those routes), never on run
   metadata alone. Readiness for a portfolio file must resolve its `IMPORT`s (`server/src/portfolio.ts`) to get the
   union of streams; the portfolio file's own `SYMBOLS` block is not enough.
-- **Futures and options** (probed on qkt 0.55.0; `server/src/derivatives-{scan,readiness}.ts`). The DSL is one language
+- **Futures and options** (probed on qkt 0.55.0 and re-checked on 0.55.1: 17 symbols identical; `server/src/derivatives-{scan,readiness}.ts`). The DSL is one language
   (`alias = VENUE:SYMBOL EVERY tf`), but **qkt does not enforce which fields a kind has**: `fx.dte` on a CFD parses and runs
   with zero trades, so `kind-gate.ts` refuses it in the editor check and as a failed parse step. A continuous stream
   (`CME:ES@front`)'s own coverage check is meaningless (it looks for `bars/<V>/<ROOT>@front` and reports 0/N days, in bars
@@ -70,7 +70,7 @@ pnpm docker:build
   link `contracts/ funding/ marks/ open_interest/ tape/ liquidations/ depth/ chains/` as well as bars, or a run on a
   per-symbol source cannot see its catalog.
 
-## Futures and options (all probed on qkt 0.55.0; the spec is `docs/specs/2026-10-06-futures-options-design.md`)
+## Futures and options (all probed on qkt 0.55.0, results unchanged on 0.55.1; the spec is `docs/specs/2026-10-06-futures-options-design.md`)
 
 - **Continuous streams** (`CME:ES@front`): qkt's `--bars` coverage check looks for a folder named `ES@front` and reports `0/N days`,
   so every such run needs `--allow-incomplete`; the runner adds it itself (`derivatives-run.ts`) and the run's coverage record is
