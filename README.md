@@ -13,6 +13,8 @@ one editor, one chart, one journal, in a single container.
 
 [**Get started**](#get-started) &nbsp;·&nbsp; [Futures &amp; options](docs/futures-and-options.md) &nbsp;·&nbsp; [Deploy](docs/production.md) &nbsp;·&nbsp; [Design](docs/specs/2026-09-25-qkt-backtester-design.md)
 
+[![Sponsor](https://img.shields.io/badge/sponsor-%E2%9D%A4-ea4aaa?logo=github-sponsors&logoColor=white)](https://github.com/sponsors/elitekaycy)
+
 <br>
 
 <picture>
