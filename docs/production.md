@@ -10,25 +10,25 @@ Versions are published by CI (`.github/workflows/release.yml`) when a tag is pus
 
 ```sh
 # bump the version in package.json and packages/*/package.json (all four must match), merge to main, then:
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.5.0
+git push origin v0.5.0
 ```
 
 The workflow refuses a tag that differs from the package versions. It then:
 
 - builds the image exactly as the `check` workflow builds and tests it;
 - starts it on an empty workspace and runs the smoke test (first run, cache, health);
-- pushes it to `ghcr.io/elitekaycy/qkt-backtester` as `:v0.3.0`, `:v0.3`, `:latest` and `:sha-<commit>`;
+- pushes it to `ghcr.io/elitekaycy/qkt-backtester` as `:v0.5.0`, `:v0.5`, `:latest` and `:sha-<commit>`;
 - creates a GitHub release that names the image digest.
 
 The qkt engine inside is pinned by digest in `docker/Dockerfile` (`QKT_IMAGE`). Each image carries its version, commit
 and engine in its labels:
 
 ```sh
-docker inspect -f '{{json .Config.Labels}}' ghcr.io/elitekaycy/qkt-backtester:v0.3.0
+docker inspect -f '{{json .Config.Labels}}' ghcr.io/elitekaycy/qkt-backtester:v0.5.0
 ```
 
-Pin servers to a version tag (`:v0.3.0`), never `:latest`: an upgrade is then a deliberate change you can roll back.
+Pin servers to a version tag (`:v0.5.0`), never `:latest`: an upgrade is then a deliberate change you can roll back.
 
 The image is `linux/amd64` only, because the qkt engine image is.
 
@@ -40,7 +40,7 @@ mkdir -p /srv/qkt-studio/workspace
 # an empty folder for the chat's sign-in; the container hands it to the workspace owner on start
 mkdir -p /srv/qkt-studio/claude
 
-docker pull ghcr.io/elitekaycy/qkt-backtester:v0.3.0
+docker pull ghcr.io/elitekaycy/qkt-backtester:v0.5.0
 docker run -d --name qkt-backtester --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -v /srv/qkt-studio/workspace:/workspace \
@@ -50,7 +50,7 @@ docker run -d --name qkt-backtester --restart unless-stopped \
   -e STUDIO_TOKEN="$(openssl rand -hex 24)" \
   -e STUDIO_TERMINAL=restricted \
   -e MAX_PARALLEL=4 \
-  ghcr.io/elitekaycy/qkt-backtester:v0.3.0
+  ghcr.io/elitekaycy/qkt-backtester:v0.5.0
 ```
 
 - **Port**: publish on `127.0.0.1` only. The studio runs strategies and has a terminal, so never expose it to the
@@ -82,9 +82,9 @@ docker run -d --name qkt-backtester --restart unless-stopped \
 docker ps --filter name=qkt-backtester          # STATUS shows (healthy) once the API answers
 docker logs --tail 100 qkt-backtester
 # upgrade (runs are kept: they live in the workspace)
-docker pull ghcr.io/elitekaycy/qkt-backtester:v0.3.0
+docker pull ghcr.io/elitekaycy/qkt-backtester:v0.5.0
 docker stop qkt-backtester && docker rm qkt-backtester
-docker run ... ghcr.io/elitekaycy/qkt-backtester:v0.3.0      # same flags as before
+docker run ... ghcr.io/elitekaycy/qkt-backtester:v0.5.0      # same flags as before
 # same flags includes the /home/studio/.claude mount, or the chat is signed out after the upgrade
 # roll back: the same, with the previous tag
 ```
